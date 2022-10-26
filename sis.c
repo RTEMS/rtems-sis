@@ -147,6 +147,11 @@ main (argc, argv)
 	    {
 	      nouartrx = 1;
 	    }
+	  else if (strcmp (argv[stat], "-extirq") == 0)
+	    {
+	      if ((stat + 1) < argc)
+		irqmp_extirq = VAL (argv[++stat]);
+	    }
 	  else if (strcmp (argv[stat], "-r") == 0)
 	    {
 	      run = 1;

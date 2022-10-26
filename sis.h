@@ -305,6 +305,7 @@ extern void sys_halt (void);
 extern int elf_load (char *fname, int load);
 extern double get_time (void);
 extern int nouartrx;
+extern int irqmp_extirq;
 //extern                host_callback *sim_callback;
 extern int dumbio;
 extern int tty_setup;

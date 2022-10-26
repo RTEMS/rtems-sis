@@ -56,8 +56,9 @@ init_sim (void)
 {
   int i;
 
-  /* Use extended interrupt line of GR712RC */
-  irqmp_extirq = 12;
+  /* Use extended interrupt line of GR712RC by default */
+  if (irqmp_extirq < 0)
+    irqmp_extirq = 12;
 
   for (i = 0; i < ncpu; i++)
     grlib_ahbm_add (&leon3s, 0);

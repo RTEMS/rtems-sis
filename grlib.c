@@ -409,8 +409,11 @@ static uint32 irqmp_pextack[NCPU];
 /* Mask with the supported interrupts */
 static uint32 irqmp_mask;
 
-/* The extended interrupt line (a zero value disables the feature) */
-int irqmp_extirq;
+/*
+ * This is the extended interrupt line (a zero value disables the feature;
+ * if -1 use the default value of the CPU).
+ */
+int irqmp_extirq = -1;
 
 static void
 irqmp_init (void)
