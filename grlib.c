@@ -753,6 +753,8 @@ gpt_intr (int32 i)
 	}
       if (gpt_ctrl[i] & 8)
 	{
+	  /* Set Interrupt Pending (IP) bit to allow for shared interrupt handling */
+	  gpt_ctrl[i] |= 0x10;
 	  grlib_set_irq (gpt_irq + i);
 	}
       gpt_add_intr (i);
@@ -827,6 +829,12 @@ gpt_ctrl_write (uint32 val, int i)
       gpt_add_intr (i);
     }
   gpt_ctrl[i] = val & 0xb;
+
+  if (val & 0x10)
+    {
+      /* Clear Interrupt Pending (IP) bit if a 1 is written to it */
+      gpt_ctrl[i] &= ~0x10;
+    }
 }
 
 static uint32
