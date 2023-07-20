@@ -1784,3 +1784,60 @@ s5test_add (int irq, uint32 addr, uint32 mask)
 const struct grlib_ipcore s5test = {
   NULL, NULL, NULL, s5test_write, s5test_add
 };
+
+
+/* -------------------  Debug Support Unit (DSU)  -----------------------*/
+
+#define DSU_TIME_TAG_COUNTER	0x08
+
+static void
+dsu_init (void)
+{
+}
+
+static void
+dsu_add (int irq, uint32 addr, uint32 mask)
+{
+  grlib_ahbspp_add (GRLIB_PP_ID (VENDOR_GAISLER, GAISLER_DSU, 0, 0),
+		    GRLIB_PP_AHBADDR (addr, mask, 1, 1, 2), 0, 0, 0);
+  if (sis_verbose)
+    printf (" DSU                                0x%08x\n", addr);
+}
+
+static void
+dsu_reset (void)
+{
+}
+
+static int
+dsu_read (uint32 addr, uint32 * data)
+{
+  switch (addr & 0xff)
+    {
+    case DSU_TIME_TAG_COUNTER:		/* 0x08 */
+      /*
+       * On some implementations, a number of upper bits are zero.  For
+       * example, the GR712RC time tag has only 30 bits implemented.  Assume
+       * that the software knows how many bits are present and performs the
+       * necessary masking operations.
+       */
+      *data = sregs[cpu].simtime;
+      break;
+
+    default:
+      *data = 0;
+      break;
+    }
+
+  return 1;
+}
+
+static int
+dsu_write (uint32 addr, uint32 * data, uint32 sz)
+{
+  return 1;
+}
+
+const struct grlib_ipcore dsu = {
+  dsu_init, dsu_reset, dsu_read, dsu_write, dsu_add
+};

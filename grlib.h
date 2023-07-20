@@ -32,6 +32,7 @@
 /* Devices */
 
 #define GAISLER_LEON3	0x003
+#define GAISLER_DSU	0x004
 #define GAISLER_APBMST	0x006
 #define GAISLER_SRCTRL	0x008
 #define GAISLER_SDCTRL	0x009
@@ -105,4 +106,4 @@ extern void apbuart_restore_stdio (void);
 extern void apbuart_close_port (void);
 extern void apbuart_flush (void);
 extern const struct grlib_ipcore gptimer, irqmp, apbuart, apbmst,
-  greth, l2c, leon3s, srctrl, ns16550, clint, plic, sdctrl, s5test;
+  dsu, greth, l2c, leon3s, srctrl, ns16550, clint, plic, sdctrl, s5test;
