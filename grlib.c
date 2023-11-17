@@ -264,11 +264,16 @@ grlib_l2c_read (uint32 addr, uint32 * data)
       /* Status */
       res = 0x00502803;
       break;
+    case 0x3C:
+      /* Access control (128WF=1, SPLIT=1) */
+      res = 0x00000012;
+      break;
     default:
       res = 0;
     }
 
   *data = res;
+  return 1;
 }
 
 static void
