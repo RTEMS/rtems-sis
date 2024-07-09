@@ -1,19 +1,23 @@
-
-SIS - Simple Instruction Simulator README file
-----------------------------------------------
+SIS - Simple Instruction Simulator
+==================================
 
 SIS uses the GNU autoconf system, and can simply be build using:
 
-	./configure 
+  ```shell
+    ./configure 
+  ```
 
 followed by 
 
-	make
+  ```shell
+  make
+  ```
 
 To build a PDF version of the manual, do
 
-	make sis.pdf.
-
+  ```shell
+  make sis.pdf.
+  ```
 
 To enable emulation of an L1 cache, run configure with --enable-l1cache. This option
 only improves timing accuracy, it does not affect simulation behaviour.
