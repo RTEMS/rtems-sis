@@ -4123,6 +4123,9 @@ case "${host}" in
     *mingw*)
 	LIBADD="-lws2_32 -lkernel32"
     ;;
+    *msys*)
+	LIBADD="-lws2_32"
+    ;;
 esac
 
 ac_config_files="$ac_config_files Makefile"
