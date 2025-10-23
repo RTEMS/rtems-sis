@@ -122,8 +122,9 @@ create_socket (int port)
 
 /* poll socket periodically to detect gdb break */
 void
-socket_poll ()
+socket_poll (int32 arg)
 {
+  (void) arg;
   WSAPOLLFD fdarray = { 0 };
   int ret;
 

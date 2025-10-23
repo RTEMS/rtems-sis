@@ -933,7 +933,7 @@ dis_mem (addr, len)
 
 void
 event (cfunc, arg, delta)
-     void (*cfunc) ();
+     void (*cfunc) (int32);
      int32 arg;
      uint64 delta;
 {
@@ -972,7 +972,7 @@ event (cfunc, arg, delta)
 /* remove event from event queue */
 void
 remove_event (cfunc, arg)
-     void (*cfunc) ();
+     void (*cfunc) (int32);
      int32 arg;
 {
   struct evcell *ev1, *evdel;
@@ -1022,8 +1022,8 @@ advance_time (endtime)
 {
 
   struct evcell *evrem;
-  void (*cfunc) ();
-  uint32 arg;
+  void (*cfunc) (int32);
+  int32 arg;
 
   while (ebase.evtime <= endtime)
     {

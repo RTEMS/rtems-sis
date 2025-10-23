@@ -174,7 +174,7 @@ struct pstate
 
 struct evcell
 {
-  void (*cfunc) ();
+  void (*cfunc) (int32);
   int32 arg;
   uint64 time;
   struct evcell *nxt;
@@ -291,7 +291,7 @@ extern void init_signals (void);
 
 void print_insn_sis (uint32 addr);
 extern uint32 dis_mem (uint32 addr, uint32 len);
-extern void event (void (*cfunc) (), int32 arg, uint64 delta);
+extern void event (void (*cfunc) (int32), int32 arg, uint64 delta);
 extern uint32 now (void);
 extern int check_bpt (struct pstate *sregs);
 extern int check_wpr (struct pstate *sregs, int32 address,
@@ -316,7 +316,7 @@ extern int cpu;			/* active debug cpu */
 extern int ncpu;		/* number of online cpus */
 extern int delta;		/* time slice for MP simulation */
 extern void pwd_enter (struct pstate *sregs);
-extern void remove_event (void (*cfunc) (), int32 arg);
+extern void remove_event (void (*cfunc) (int32), int32 arg);
 extern int run_sim (uint64 icount, int dis);
 void save_sp (struct pstate *sregs);
 void cov_start (int address);
@@ -389,7 +389,7 @@ extern const struct memsys rv32;
 extern void gdb_remote (int port);
 extern int simstat;
 extern int new_socket;
-extern void socket_poll ();
+extern void socket_poll (int32 arg);
 
 /* interf.c */
 

@@ -25,7 +25,7 @@ static int fd, err, sockfd;
 static char dev[64];
 static int tun_fd, nread, br_socket_fd;
 static int br_add_interface (const char *bridge, const char *dev);
-static void sis_tap_poll ();
+static void sis_tap_poll (int32 arg);
 
 int
 sis_tap_init (long unsigned emac)
@@ -150,11 +150,13 @@ sis_tap_write (unsigned char *buffer, int len)
 }
 
 static void
-sis_tap_poll ()
+sis_tap_poll (int32 arg)
 {
   struct pollfd fds[1];
   int ret;
   unsigned char buffer[1536];
+
+  (void) arg;
 
   fds[0].fd = tun_fd;
   fds[0].events = POLLRDNORM;

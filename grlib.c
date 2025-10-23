@@ -1241,8 +1241,9 @@ apbuart_flush (void)
 }
 
 static void
-uarta_tx (void)
+uarta_tx (int32 arg)
 {
+  (void) arg;
   while (f1open)
     {
       while (fwrite (&uarta_sreg, 1, 1, f1out) != 1)

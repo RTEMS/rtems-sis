@@ -113,12 +113,14 @@ mdio_write (uint32 address, uint32 data)
 }
 
 static void
-greth_tx (void)
+greth_tx (int32 arg)
 {
   int32 ws;
   uint32 tmpdesc;
   unsigned char buffer[2048];
   int len, wlen, i;
+
+  (void) arg;
 
   if (greth_ctrl & CTRL_TE)
     {

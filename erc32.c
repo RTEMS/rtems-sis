@@ -231,8 +231,8 @@ static void port_init (void);
 static uint32 read_uart (uint32 addr);
 static void write_uart (uint32 addr, uint32 data);
 static void flush_uart (void);
-static void uarta_tx (void);
-static void uartb_tx (void);
+static void uarta_tx (int32);
+static void uartb_tx (int32);
 static void uart_rx (int32 arg);
 static void uart_intr (int32 arg);
 static void uart_irq_start (void);
@@ -1296,8 +1296,9 @@ flush_uart ()
 
 
 static void
-uarta_tx ()
+uarta_tx (int32 arg)
 {
+  (void) arg;
   while (f1open)
     {
       while (fwrite (&uarta_sreg, 1, 1, f1out) != 1)
@@ -1317,8 +1318,9 @@ uarta_tx ()
 }
 
 static void
-uartb_tx ()
+uartb_tx (int32 arg)
 {
+  (void) arg;
   while (f2open)
     {
       while (fwrite (&uartb_sreg, 1, 1, f2out) != 1)

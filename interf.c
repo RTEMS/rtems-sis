@@ -127,7 +127,7 @@ sim_resume (int step)
     simstat = run_sim_gdb (1, 0);
   else
     {
-      socket_poll ();
+      socket_poll (0);
       simstat = run_sim_gdb (UINT64_MAX / 2, 0);
       remove_event (socket_poll, -1);
     }
