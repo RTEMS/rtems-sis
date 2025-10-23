@@ -134,7 +134,7 @@ static uint32 uarta_data;
 static void mem_init (void);
 static void close_port (void);
 static void leon2_reset (void);
-static void irqctrl_intack (int32 level);
+static void irqctrl_intack (int32 level, int32 cpu);
 static void chk_irq (void);
 static void set_irq (int32 level);
 static int32 apb_read (uint32 addr, uint32 * data);
@@ -244,8 +244,9 @@ leon2_reset (void)
 }
 
 static void
-irqctrl_intack (int32 level)
+irqctrl_intack (int32 level, int32 cpu)
 {
+  (void) cpu;
   int irq_test;
 
   if (sis_verbose > 2)

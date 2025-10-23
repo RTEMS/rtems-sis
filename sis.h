@@ -146,7 +146,7 @@ struct pstate
   int cpu;
   uint64 simtime;		/* local processor time */
   uint32 cache_ctrl;		/* Leon3 cache control register */
-  void (*intack) ();		/* interrupt ack. callback */
+  void (*intack) (int32, int32);/* interrupt ack. callback */
 
   uint32 mip;
   uint32 mie;

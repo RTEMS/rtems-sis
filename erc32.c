@@ -221,7 +221,7 @@ static void decode_wcr (void);
 static void decode_mcr (void);
 static void close_port (void);
 static void mec_reset (void);
-static void mec_intack (int32 level);
+static void mec_intack (int32 level, int32 cpu);
 static void chk_irq (void);
 static void mec_irq (int32 level);
 static void set_sfsr (uint32 fault, uint32 addr, uint32 asi, uint32 read);
@@ -505,10 +505,12 @@ mec_reset ()
 
 
 static void
-mec_intack (level)
+mec_intack (level, cpu)
      int32 level;
+     int cpu;
 {
   int irq_test;
+  (void) cpu;
 
   if (sis_verbose)
     printf ("interrupt %d acknowledged\n", level);
