@@ -846,7 +846,7 @@ int_handler (int sig)
 void
 init_signals ()
 {
-  typedef void (*PFI) ();
+  typedef void (*PFI) (int);
   static PFI int_tab[2];
 
   int_tab[0] = signal (SIGTERM, int_handler);
