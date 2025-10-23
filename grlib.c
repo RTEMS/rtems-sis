@@ -289,8 +289,11 @@ const struct grlib_ipcore l2c = {
 /* ------------------- LEON3 -----------------------*/
 
 static void
-leon3_add ()
+leon3_add (int irq, uint32 addr, uint32 mask)
 {
+  (void) irq;
+  (void) addr;
+  (void) mask;
   grlib_ahbmpp_add (GRLIB_PP_ID (VENDOR_GAISLER, GAISLER_LEON3, 0, 0));
   if (sis_verbose)
     printf (" LEON3 SPARC V8 processor                      \n");
