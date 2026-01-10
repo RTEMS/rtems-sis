@@ -107,36 +107,11 @@ sis [options] [file]
 The following options are recognized:
 
 @table @code
-@item -bridge @var{bridge}
-Connect the tap device used for networking to the host @var{bridge}. Typical values are br0 or lxcbr0. Requires running SIS with sudo/root.
-
-@item -c @var{file}
-Read sis commands from @var{file} at startup.
-
-@item -cov
-Enable code coverage and write a coverage file at exit.
-
-@item -d @var{clocks}
-Set the the number of @var{clocks} in each time-slice for multi-processor
-simulation. Default is 50, set lower for higher accuracy.
+@item -help
+Display a help message
 
 @item -erc32
 Emulate the SPARC V7 ERC32 processor
-
-@item -freq @var{freq}
-Set frequency of emulated cpu. This is used by the 'perf'
-command to calculated the MIPS figure for a particular configuration.
-The frequency must be an integer indicating the frequency in MHz.
-
-@item -gdb
-Start a gdb server, listening on port 1234. An alternative port can
-be specified with @var{-port nn}.
-
-@item -gr740
-Emulate a (limited) GR740 SOC device
-
-@item -griscv
-Emulate a GRISCV (RISCV/GRLIB) SOC device
 
 @item -leon2
 Emulate the SPARC V8 LEON2 processor
@@ -144,37 +119,92 @@ Emulate the SPARC V8 LEON2 processor
 @item -leon3
 Emulate the SPARC V8 LEON3 processor
 
-@item -m @var{cores}
-Enable the number of @var{cores} (2 - 4) in a leon3 or RISC-V multi-processor system.
+@item -gr740
+Emulate a (limited) GR740 SOC device
 
-@item -nfp
-Disable the simulated FPU, so each FPU instruction will
-generate a FPU disabled trap.
+@item -griscv
+Emulate a GRISCV (RISCV/GRLIB) SOC device
 
-@item -port @var{port}
-Use @var{port} for the gdb server. Default is port 1234.
+@item -rv32
+Emulate a RISC-V RV32IMACFD processor with CLINT module.
+
+@item -v
+Increase the debug level with 1, to provide more diagnostic messages. Can be added multiple times.
 
 @item -r
 Start execution immediately without an interactive shell. This is useful
 for automated testing.
 
-@item -rt
-Real-time mode. When enabled, the simulator tries to synchronize the simulator time to the wall (host) time. Useful for interactive programs. Enabled by default when networking is used.
-
-@item -rv32
-Emulate a RISC-V RV32IMACFD processor with CLINT module.
-
-@item -tlim @var{delay}
+@item -tlim @var{value} @var{unit}
 Used together with @var{-r} to limit the amount of simulated time that
 the simulator runs for before exiting. The following units are recognized:
 @var{us}, @var{ms} and @var{s}. To limit simulated time to 100 seconds,
 use: @var{-tlim 100 s}.
 
-@item -uart1 @var{device}
-Connect UART1 (console) of the simulator to @var{device}. stdin/stout is default.
-@item -v
-Increase the debug level with 1, to provide more diagnostic messages. Can be added multiple times.
+@item -c @var{file}
+Read sis commands from @var{file} at startup.
 
+@item -gdb
+Start a gdb server, listening on port 1234. An alternative port can
+be specified with @var{-port nn}.
+
+@item -port @var{gdb_port}
+Use @var{gdb_port} for the gdb server. Default is port 1234.
+
+@item -cov
+Enable code coverage and write a coverage file at exit.
+
+@item -freq @var{freq}
+Set frequency of emulated cpu. This is used by the 'perf'
+command to calculate the MIPS figure for a particular configuration.
+The frequency must be an integer indicating the frequency in MHz.
+
+@item -d @var{clocks}
+Set the the number of @var{clocks} in each time-slice for multi-processor
+simulation. Default is 50, set lower for higher accuracy.
+
+@item -rt
+Real-time mode. When enabled, the simulator tries to synchronize the simulator time to the wall (host) time. Useful for interactive programs. Enabled by default when networking is used.
+
+@item -extirq @var{irq_num}
+Set the external IRQ that injects a hardware interrupt @var{irq_num} as soon as the simulated program starts executing.
+
+@item -ift
+Enable the trace of every instruction fetch. Useful for debugging.
+
+@item -nfp
+Disable the simulated FPU, so each FPU instruction will generate an FPU disabled trap.
+
+@item -bridge @var{bridge}
+Connect the tap device used for networking to the host @var{bridge}.
+Typical values are br0 or lxcbr0. Requires running SIS with sudo/root.
+
+@item -m @var{cores}
+Enable the number of @var{cores} (2 - 4) in a leon3 or RISC-V multi-processor system.
+
+@item -uart1 @var{device}
+Connect UART1 (console) of the simulator to @var{device}. stdin/stdout is default.
+
+@item -uart2 @var{device}
+Connect UART2 (console) of the simulator to @var{device}. Disabled by default.
+
+@item -nouartrx
+When this option is set, it disables UART RX (receive).
+It disables polling of keyboard input to be sent to the simulated UART port.
+
+@item -dumbio
+Switch to simpler I/O modes.
+Useful for environments which do not support complex terminal features.
+
+@item -wrp
+Enable write protection in certain memory regions for the ERC32 processor.
+
+@item -rom8
+When enabled, it treats the ROM as an 8-bit wide device for ERC32 processors.
+Useful when you want to simulate the timing and data-bus behavior of an 8-bit ROM.
+
+@item -uben
+Enable handling of unaligned memory accesses and specific byte-ordering behaviors for ERC32.
 
 @item file
 The executable file to be loaded must be an SPARC or RISCV ELF file.

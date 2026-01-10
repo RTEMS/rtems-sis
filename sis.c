@@ -216,11 +216,16 @@ main (argc, argv)
 	      if ((stat + 1) < argc)
 		delta = VAL (argv[++stat]);
 	      if (delta <= 0)
-		delta = 25;
+		delta = 50;
 	    }
+    else if (strcmp (argv[stat], "-help") == 0)
+      {
+        sis_usage ();
+        exit (0);
+      }
 	  else
 	    {
-	      printf ("unknown option %s\n", argv[stat]);
+        printf ("sis: unknown option \"%s\"\n", argv[stat]);
 	      sis_usage ();
 	      exit (1);
 	    }

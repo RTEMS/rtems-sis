@@ -24,13 +24,38 @@ void
 sis_usage ()
 {
 
-  printf ("usage: sis [-uart1 uart_device1] [-uart2 uart_device2]\n");
-  printf ("[-m <n>] [-dumbio] [-gdb] [-port port]\n");
-  printf ("[-nouartrx] [-extirq number]\n");
-  printf ("[-cov] [-nfp] [-ift] [-wrp] [-rom8] [-uben]\n");
-  printf ("[-freq frequency] [-c batch_file]\n");
-  printf ("[-erc32] [-leon2] [-leon3] [-gr740] [-griscv] [-rv32]\n");
-  printf ("[-d] [-v] [-rt] [-bridge name] [files]\n");
+  printf ("Usage: sis [options] [files]\n");
+  printf ("\nOptions:\n");
+  printf ("  [-help]              -> Display this help message\n");
+  printf ("  [-<processor>]       -> Set the processor for emulation. -erc32 is set by default\n");
+  printf ("                          Supported values: [ -erc32 | -leon2 | -leon3 | -gr740 | -griscv | -rv32 ]\n");
+  printf ("  [-v]                 -> Enable verbose output.\n");
+  printf ("  [-r]                 -> Start execution immediately without an interactive shell.\n");
+  printf ("  [-tlim <val> <unit>] -> Can be used when -r is set. It sets the amount of time the simulator runs before exiting\n");
+  printf ("                          <unit> can be s (seconds), ms (milliseconds), us (microseconds). E.g., -tlim 100 s\n");
+  printf ("  [-c <batch_file>]    -> Execute a batch file of SIS commands at startup\n");
+  printf ("  [-gdb]               -> Enable the GDB remote server.\n");
+  printf ("  [-port <gdb_port>]   -> Set the port for GDB server. -port 1234 is set by default.\n");
+  printf ("  [-cov]               -> Enable code coverage. Coverage data will be stored in file name same as loaded file.\n");
+  printf ("                          appended with .cov extension. E.g., hello.exe will produce hello.exe.cov\n");
+  printf ("  [-freq <frequency>]  -> Set the frequency of emulated cpu. <frequency> is integer indicating frequency in MHz.\n");
+  printf ("  [-d <clocks>]        -> Set number of <clocks> in each time-slice when <cores> is greater than 1.\n");
+  printf ("                          Default is 50, set lower for higher accuracy.\n");
+  printf ("  [-rt]                -> Enable real-time mode. When enabled, SIS tries to sync the simulator time\n");
+  printf ("                          to the host time.\n");
+  printf ("  [-extirq <irq_code>] -> Inject a hardware interrupt as soon as the simulated program starts.\n");
+  printf ("  [-ift]               -> Enables trace of every instruction fetch. Useful for debugging\n");
+  printf ("  [-nfp]               -> Disable the simulated FPU. Each FPU instruction will generate FPU disabled trap.\n");
+  printf ("  [-bridge <bridge>]   -> Connect the tap device used for networking to <bridge>. Requires running as sudo/root.\n");
+  printf ("                          Typical values are br0 or lxcbr0.\n");
+  printf ("  [-m <cores>]         -> Set number of <cores> in Leon3 or RISC-V. <cores> can range from 2 to 4\n");
+  printf ("  [-uart1 <device>]    -> Connect UART1 (serial port) of the simulator to <device>. stdin/stdout is set as default.\n");
+  printf ("  [-uart2 <device>]    -> Connect UART2 (serial port) of the simulator to <device>. Disabled by default.\n");
+  printf ("  [-dumbio]            -> Use simpler I/O mode for restricted terminals.\n");
+  printf ("  [-nouartrx]          -> Disables UART RX (Receive) by ignoring keyboard input ie sent to UART port.\n");
+  printf ("  [-wrp]               -> Enables write protection in certain memory regions. (ERC32 only)\n");
+  printf ("  [-rom8]              -> Simulate 8-bit ROM timing and data-bus behavior (ERC32 only).\n");
+  printf ("  [-uben]              -> Enable handling of unaligned memory accesses (ERC32 only).\n");
 }
 
 void
