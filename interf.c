@@ -42,7 +42,7 @@ run_sim_gdb (icount, dis)
 {
   int res;
 
-  if ((sregs[cpu].pc != 0) && (ebase.simtime == 0))
+  if (ebase.simtime == 0)
     ms->boot_init ();
   res = run_sim (icount, dis);
   ms->sim_halt ();
