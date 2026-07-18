@@ -1,0 +1,10 @@
+---
+BasedOnStyle: GNU
+UseTab: Always
+SortIncludes: false
+PointerAlignment: Right
+ReflowComments: true
+SpaceAfterCStyleCast: true
+BreakBeforeBinaryOperators: None
+AlignConsecutiveMacros:
+  Enabled: true

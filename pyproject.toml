@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: BSD-2-Clause
+
+# Copyright (C) 2026 embedded brains GmbH & Co. KG
+
+[project]
+name = "package"
+version = "0.1.0"
+description = "This is a software repository using clang-format."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "clang-format>=22.1.5",
+]

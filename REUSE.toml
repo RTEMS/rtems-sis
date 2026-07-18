@@ -10,6 +10,11 @@ SPDX-FileCopyrightText = "2019 Jiri Gaisler"
 SPDX-License-Identifier = "BSD-2-Clause"
 
 [[annotations]]
+path = [".clang-format", ".clang-format-ignore", "uv.lock"]
+SPDX-FileCopyrightText = "2026 embedded brains GmbH & Co. KG"
+SPDX-License-Identifier = "BSD-2-Clause"
+
+[[annotations]]
 path = ["CODEOWNERS", ".gitlab/gitlab-ci.yml"]
 SPDX-FileCopyrightText = "2024 Amar Takhar"
 SPDX-License-Identifier = "BSD-2-Clause"
