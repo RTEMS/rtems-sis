@@ -5,8 +5,8 @@
  * SIS, SPARC instruction simulator V2.5 Copyright (C) 1995 Jiri Gaisler,
  * European Space Agency
  *
- * This program is free software; you can redistribute it and/or modify it under
- * the terms of the GNU General Public License as published by the Free
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the Free
  * Software Foundation; either version 3 of the License, or (at your option)
  * any later version.
  *
@@ -21,10 +21,10 @@
  * Leon3 emulation, loosely based on erc32.c.
  */
 
-#define ROM_START 	0x20000000
-#define ROM_SIZE 	0x01000000
-#define RAM_START 	0x80000000
-#define RAM_SIZE 	0x04000000
+#define ROM_START 0x20000000
+#define ROM_SIZE  0x01000000
+#define RAM_START 0x80000000
+#define RAM_SIZE  0x04000000
 
 #include <errno.h>
 #include <sys/types.h>
@@ -40,19 +40,18 @@
 #include "grlib.h"
 #include "rv32dtb.h"
 
-#define PLIC_START	0x0C000000
-#define PLIC_MASK  	0xFFC
-#define NS16550_START 	0x10000000
-#define TESTSTART  	0x00100000
+#define PLIC_START    0x0C000000
+#define PLIC_MASK     0xFFC
+#define NS16550_START 0x10000000
+#define TESTSTART     0x00100000
 
-#define CLINT_START	0x02000000
+#define CLINT_START 0x02000000
 
 /* APB registers */
-#define APBSTART	0xC0000000
+#define APBSTART 0xC0000000
 
 /* Memory exception waitstates.  */
-#define MEM_EX_WS 	1
-
+#define MEM_EX_WS 1
 
 /* Forward declarations. */
 static char *get_mem_ptr (uint32 addr, uint32 size);
@@ -92,7 +91,6 @@ reset (void)
 static void
 error_mode (uint32 pc)
 {
-
 }
 
 /* Flush ports when simulator stops. */
@@ -114,7 +112,7 @@ exit_sim (void)
 /* Memory emulation.  */
 
 static int
-memory_read (uint32 addr, uint32 * data, int32 * ws)
+memory_read (uint32 addr, uint32 *data, int32 *ws)
 {
   uint64 tmp;
   int32 mexc;
@@ -149,7 +147,7 @@ memory_read (uint32 addr, uint32 * data, int32 * ws)
 }
 
 static int
-memory_write (uint32 addr, uint32 * data, int32 sz, int32 * ws)
+memory_write (uint32 addr, uint32 *data, int32 sz, int32 *ws)
 {
   uint32 waddr;
   int32 mexc;
@@ -249,26 +247,24 @@ boot_init (void)
       sregs[i].r[30] = RAM_END - (i * 0x20000);
       sregs[i].r[14] = sregs[i].r[30] - 96 * 4;
       sregs[i].cache_ctrl = 0x81000f;
-      sregs[i].r[2] = sregs[i].r[30];	/* sp on RISCV-V */
-      sregs[i].r[11] = ROM_END - 0x10000;	/* dtb on RISCV-V */
+      sregs[i].r[2] = sregs[i].r[30];	  /* sp on RISCV-V */
+      sregs[i].r[11] = ROM_END - 0x10000; /* dtb on RISCV-V */
       sregs[i].pwd_mode = 0;
     }
 }
 
-const struct memsys rv32 = {
-  init_sim,
-  reset,
-  error_mode,
-  sim_halt,
-  exit_sim,
-  apbuart_init_stdio,
-  apbuart_restore_stdio,
-  memory_read,
-  memory_read,
-  memory_write,
-  sis_memory_write,
-  sis_memory_read,
-  boot_init,
-  get_mem_ptr,
-  grlib_set_irq
-};
+const struct memsys rv32 = { init_sim,
+			     reset,
+			     error_mode,
+			     sim_halt,
+			     exit_sim,
+			     apbuart_init_stdio,
+			     apbuart_restore_stdio,
+			     memory_read,
+			     memory_read,
+			     memory_write,
+			     sis_memory_write,
+			     sis_memory_read,
+			     boot_init,
+			     get_mem_ptr,
+			     grlib_set_irq };

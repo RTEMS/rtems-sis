@@ -35,7 +35,7 @@
 #include <net/if.h>
 #include <linux/if_tun.h>
 #include <linux/if_bridge.h>
-#include <net/if_arp.h>		/* for ARPHRD_ETHER */
+#include <net/if_arp.h> /* for ARPHRD_ETHER */
 #include <arpa/inet.h>
 #include <poll.h>
 
@@ -133,8 +133,8 @@ sis_tap_init (long unsigned emac)
     {
       if (br_add_interface (bridge, dev))
 	{
-	  printf ("ERR: Could not attach %s to bridge %s: %s\n",
-		  dev, bridge, strerror (errno));
+	  printf ("ERR: Could not attach %s to bridge %s: %s\n", dev, bridge,
+		  strerror (errno));
 	  /*
 	     close (fd);
 	     close (sockfd);

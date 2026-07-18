@@ -44,7 +44,7 @@ struct elf_file
 static struct elf_file efile;
 
 static int
-read_elf_header (FILE * fp)
+read_elf_header (FILE *fp)
 {
   Elf32_Ehdr ehdr;
 
@@ -187,8 +187,8 @@ read_elf_body ()
 	  sh.sh_flags = SWAP_UINT32 (sh.sh_flags);
 	}
 
-      if ((sh.sh_type != SHT_NOBITS) && (sh.sh_size)
-	  && (sh.sh_flags & SHF_ALLOC))
+      if ((sh.sh_type != SHT_NOBITS) && (sh.sh_size) &&
+	  (sh.sh_flags & SHF_ALLOC))
 	{
 	  for (k = 0; k < ehdr.e_phnum; k++)
 	    {
@@ -207,9 +207,9 @@ read_elf_body ()
 	  mem = calloc (sh.sh_size / 4 + 1, 4);
 	  if (mem != NULL)
 	    {
-	      if ((sh.sh_type == SHT_PROGBITS)
-		  || (sh.sh_type == SHT_INIT_ARRAY)
-		  || (sh.sh_type == SHT_FINI_ARRAY))
+	      if ((sh.sh_type == SHT_PROGBITS) ||
+		  (sh.sh_type == SHT_INIT_ARRAY) ||
+		  (sh.sh_type == SHT_FINI_ARRAY))
 		{
 		  fseek (fp, sh.sh_offset, SEEK_SET);
 		  if (fread (mem, sh.sh_size, 1, fp) != 1)
@@ -248,7 +248,6 @@ elf_load (char *fname, int load)
       return (-1);
     }
 
-
   res = read_elf_header (fp);
   if (res == -1)
     printf ("File read error\n");
@@ -263,5 +262,4 @@ elf_load (char *fname, int load)
       fclose (efile.fp);
     }
   return res;
-
 }

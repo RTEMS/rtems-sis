@@ -27,14 +27,14 @@
 #endif
 #include "sis.h"
 
-#define PSR_CWP 0x7
-#define SIM_DESC int
-#define SIM_ADDR uint32
-#define SIM_RC int
+#define PSR_CWP	    0x7
+#define SIM_DESC    int
+#define SIM_ADDR    uint32
+#define SIM_RC	    int
 #define SIM_RC_FAIL 0
-#define SIM_RC_OK 1
-#define EBREAK 0x00100073
-#define CEBREAK 0x90002
+#define SIM_RC_OK   1
+#define EBREAK	    0x00100073
+#define CEBREAK	    0x90002
 
 static int
 run_sim_gdb (uint64 icount, int dis)
@@ -57,7 +57,6 @@ sim_close (SIM_DESC sd, int quitting)
 #if defined(F_GETFL) && defined(F_SETFL)
   fcntl (0, F_SETFL, termsave);
 #endif
-
 };
 
 void
@@ -248,12 +247,11 @@ sis_remove_watchpoint_write (int addr)
 int
 sim_can_use_hw_breakpoint (SIM_DESC sd, int type, int cnt, int othertype)
 {
-  if (type == 2)		/* bp_hardware_breakpoint not supported */
+  if (type == 2) /* bp_hardware_breakpoint not supported */
     return 0;
   else
     return 1;
 }
-
 
 int
 sim_set_watchpoint (uint32 mem, int length, int type)
@@ -262,7 +260,7 @@ sim_set_watchpoint (uint32 mem, int length, int type)
   unsigned char mask;
 
   if (!length)
-    return 1;			/* used by gdb for probing of watchpoints */
+    return 1; /* used by gdb for probing of watchpoints */
 
   mask = length - 1;
 
@@ -291,7 +289,6 @@ sim_set_watchpoint (uint32 mem, int length, int type)
     }
   return (res);
 }
-
 
 int
 sim_clear_watchpoint (uint32 mem, int length, int type)
@@ -368,7 +365,7 @@ sim_insert_swbreakpoint (uint32 addr, int len)
       ebase.bptnum += 1;
       return 1;
     }
-  return 0;			/* Too many breakpoints */
+  return 0; /* Too many breakpoints */
 }
 
 int
@@ -387,8 +384,8 @@ sim_remove_swbreakpoint (uint32 addr, int len)
       /* write back saved opcode */
       ms->sis_memory_write (addr, (char *) &ebase.bpsave[i], len);
       if (sis_verbose > 1)
-	printf ("sim_remove_swbreakpoint: remove breakpoint %d at 0x%08x\n",
-		i, addr);
+	printf ("sim_remove_swbreakpoint: remove breakpoint %d at 0x%08x\n", i,
+		addr);
       /* shift down remaining breakpoints */
       for (; i < ebase.bptnum; i++)
 	{
@@ -398,5 +395,5 @@ sim_remove_swbreakpoint (uint32 addr, int len)
       ebase.bptnum -= 1;
       return 1;
     }
-  return 0;			/* breakpoint not found */
+  return 0; /* breakpoint not found */
 }

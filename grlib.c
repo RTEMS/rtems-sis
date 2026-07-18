@@ -4,8 +4,8 @@
  *
  * SIS, SPARC instruction simulator. Copyright (C) 2014 Jiri Gaisler
  *
- * This program is free software; you can redistribute it and/or modify it under
- * the terms of the GNU General Public License as published by the Free
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the Free
  * Software Foundation; either version 3 of the License, or (at your option)
  * any later version.
  *
@@ -32,10 +32,9 @@
 #include <string.h>
 #include "grlib.h"
 
-
 /* APB PNP */
 
-static uint32 apbppmem[32 * 2];	/* 32-entry APB PP AREA */
+static uint32 apbppmem[32 * 2]; /* 32-entry APB PP AREA */
 static int apbppindex;
 
 int
@@ -44,7 +43,7 @@ grlib_apbpp_add (uint32 id, uint32 addr)
   apbppmem[apbppindex++] = id;
   apbppmem[apbppindex++] = addr;
   if (apbppindex >= (32 * 2))
-    apbppindex = 0;		/* prevent overflow of area */
+    apbppindex = 0; /* prevent overflow of area */
   return apbppindex;
 }
 
@@ -60,7 +59,7 @@ grlib_apbpnp_read (uint32 addr)
 
 /* AHB PNP */
 
-static uint32 ahbppmem[128 * 8];	/* 128-entry AHB PP AREA */
+static uint32 ahbppmem[128 * 8]; /* 128-entry AHB PP AREA */
 static int ahbmppindex;
 static int ahbsppindex = 64 * 8;
 
@@ -70,13 +69,13 @@ grlib_ahbmpp_add (uint32 id)
   ahbppmem[ahbmppindex] = id;
   ahbmppindex += 8;
   if (ahbmppindex >= (64 * 8))
-    ahbmppindex = 0;		/* prevent overflow of area */
+    ahbmppindex = 0; /* prevent overflow of area */
   return ahbmppindex;
 }
 
 int
-grlib_ahbspp_add (uint32 id, uint32 addr1, uint32 addr2,
-		  uint32 addr3, uint32 addr4)
+grlib_ahbspp_add (uint32 id, uint32 addr1, uint32 addr2, uint32 addr3,
+		  uint32 addr4)
 {
   ahbppmem[ahbsppindex] = id;
   ahbsppindex += 4;
@@ -85,7 +84,7 @@ grlib_ahbspp_add (uint32 id, uint32 addr1, uint32 addr2,
   ahbppmem[ahbsppindex++] = addr3;
   ahbppmem[ahbsppindex++] = addr4;
   if (ahbsppindex >= (128 * 8))
-    ahbsppindex = 64 * 8;	/* prevent overflow of area */
+    ahbsppindex = 64 * 8; /* prevent overflow of area */
   return ahbsppindex;
 }
 
@@ -97,7 +96,6 @@ grlib_ahbpnp_read (uint32 addr)
   addr &= 0xfff;
   read_data = ahbppmem[addr >> 2];
   return read_data;
-
 }
 
 static struct grlib_buscore ahbmcores[16];
@@ -133,7 +131,6 @@ grlib_reset ()
       ahbscores[i].core->reset ();
 }
 
-
 void
 grlib_ahbm_add (const struct grlib_ipcore *core, int irq)
 {
@@ -144,8 +141,8 @@ grlib_ahbm_add (const struct grlib_ipcore *core, int irq)
 }
 
 void
-grlib_ahbs_add (const struct grlib_ipcore *core, int irq,
-		uint32 addr, uint32 mask)
+grlib_ahbs_add (const struct grlib_ipcore *core, int irq, uint32 addr,
+		uint32 mask)
 {
   ahbscores[ahbsi].core = core;
   if (core->add)
@@ -159,7 +156,7 @@ grlib_ahbs_add (const struct grlib_ipcore *core, int irq,
 }
 
 int
-grlib_read (uint32 addr, uint32 * data)
+grlib_read (uint32 addr, uint32 *data)
 {
   int i;
   int res = 0;
@@ -186,7 +183,7 @@ grlib_read (uint32 addr, uint32 * data)
 }
 
 int
-grlib_write (uint32 addr, uint32 * data, uint32 sz)
+grlib_write (uint32 addr, uint32 *data, uint32 sz)
 {
   int i;
   int res = 0;
@@ -206,15 +203,15 @@ grlib_write (uint32 addr, uint32 * data, uint32 sz)
 }
 
 void
-grlib_apb_add (const struct grlib_ipcore *core, int irq,
-	       uint32 addr, uint32 mask)
+grlib_apb_add (const struct grlib_ipcore *core, int irq, uint32 addr,
+	       uint32 mask)
 {
   apbcores[apbi].core = core;
   if (core->add)
     {
       apbcores[apbi].start = addr & (mask << 8);
       apbcores[apbi].end =
-	(apbcores[apbi].start + ~(mask << 8) + 1) & 0x0fffff;
+	  (apbcores[apbi].start + ~(mask << 8) + 1) & 0x0fffff;
       apbcores[apbi].mask = ~(mask << 8) & 0x0fffff;
       core->add (irq, addr, mask);
     }
@@ -226,13 +223,13 @@ grlib_apb_add (const struct grlib_ipcore *core, int irq,
 extern int greth_irq;
 
 static int
-grlib_greth_read (uint32 addr, uint32 * data)
+grlib_greth_read (uint32 addr, uint32 *data)
 {
   *data = greth_read (addr);
 }
 
 static int
-grlib_greth_write (uint32 addr, uint32 * data, uint32 size)
+grlib_greth_write (uint32 addr, uint32 *data, uint32 size)
 {
   greth_write (addr, *data);
 }
@@ -248,14 +245,13 @@ greth_add (int irq, uint32 addr, uint32 mask)
     printf (" GRETH 10/100 Mbit Ethernet core    0x%08x   %d\n", addr, irq);
 }
 
-const struct grlib_ipcore greth = {
-  NULL, NULL, grlib_greth_read, grlib_greth_write, greth_add
-};
+const struct grlib_ipcore greth = { NULL, NULL, grlib_greth_read,
+				    grlib_greth_write, greth_add };
 
 /* ------------------- L2C -----------------------*/
 
 static int
-grlib_l2c_read (uint32 addr, uint32 * data)
+grlib_l2c_read (uint32 addr, uint32 *data)
 {
   uint32 res;
 
@@ -284,13 +280,10 @@ l2c_add (int irq, uint32 addr, uint32 mask)
   grlib_apbpp_add (GRLIB_PP_ID (VENDOR_GAISLER, GAISLER_L2C, 0, 0),
 		   GRLIB_PP_APBADDR (addr, mask));
   if (sis_verbose)
-    printf(" Level 2 Cache controller           0x%08x\n", addr);
+    printf (" Level 2 Cache controller           0x%08x\n", addr);
 }
 
-const struct grlib_ipcore l2c = {
-  NULL, NULL, grlib_l2c_read, NULL, l2c_add
-};
-
+const struct grlib_ipcore l2c = { NULL, NULL, grlib_l2c_read, NULL, l2c_add };
 
 /* ------------------- LEON3 -----------------------*/
 
@@ -305,9 +298,7 @@ leon3_add (int irq, uint32 addr, uint32 mask)
     printf (" LEON3 SPARC V8 processor                      \n");
 }
 
-const struct grlib_ipcore leon3s = {
-  NULL, NULL, NULL, NULL, leon3_add
-};
+const struct grlib_ipcore leon3s = { NULL, NULL, NULL, NULL, leon3_add };
 
 /* ------------------- APBMST ----------------------*/
 
@@ -332,7 +323,7 @@ apbmst_reset ()
 }
 
 static int
-apbmst_read (uint32 addr, uint32 * data)
+apbmst_read (uint32 addr, uint32 *data)
 {
   int i;
   int res = 0;
@@ -357,7 +348,7 @@ apbmst_read (uint32 addr, uint32 * data)
 }
 
 static int
-apbmst_write (uint32 addr, uint32 * data, uint32 size)
+apbmst_write (uint32 addr, uint32 *data, uint32 size)
 {
   int i;
 
@@ -380,29 +371,28 @@ apbmst_add (int irq, uint32 addr, uint32 mask)
     printf (" AHB/APB Bridge                     0x%08x\n", addr);
 }
 
-const struct grlib_ipcore apbmst = {
-  apbmst_init, apbmst_reset, apbmst_read, apbmst_write, apbmst_add
-};
+const struct grlib_ipcore apbmst = { apbmst_init, apbmst_reset, apbmst_read,
+				     apbmst_write, apbmst_add };
 
 /* ------------------- IRQMP -----------------------*/
 
-#define IRQMP_IPR	0x04
-#define IRQMP_IFR 	0x08
-#define IRQMP_ICR 	0x0C
-#define IRQMP_ISR 	0x10
-#define IRQMP_IBR 	0x14
-#define IRQMP_IMR 	0x40
-#define IRQMP_IMR1	0x44
-#define IRQMP_IMR2	0x48
-#define IRQMP_IMR3	0x4C
-#define IRQMP_IFR0 	0x80
-#define IRQMP_IFR1 	0x84
-#define IRQMP_IFR2 	0x88
-#define IRQMP_IFR3 	0x8C
-#define IRQMP_PEXTACK0 	0xC0
-#define IRQMP_PEXTACK1 	0xC4
-#define IRQMP_PEXTACK2 	0xC8
-#define IRQMP_PEXTACK3 	0xCC
+#define IRQMP_IPR      0x04
+#define IRQMP_IFR      0x08
+#define IRQMP_ICR      0x0C
+#define IRQMP_ISR      0x10
+#define IRQMP_IBR      0x14
+#define IRQMP_IMR      0x40
+#define IRQMP_IMR1     0x44
+#define IRQMP_IMR2     0x48
+#define IRQMP_IMR3     0x4C
+#define IRQMP_IFR0     0x80
+#define IRQMP_IFR1     0x84
+#define IRQMP_IFR2     0x88
+#define IRQMP_IFR3     0x8C
+#define IRQMP_PEXTACK0 0xC0
+#define IRQMP_PEXTACK1 0xC4
+#define IRQMP_PEXTACK2 0xC8
+#define IRQMP_PEXTACK3 0xCC
 
 static void irqmp_intack (int level, int cpu);
 static void chk_irq (void);
@@ -460,8 +450,8 @@ irqmp_intack (int level, int cpu)
   int bit = 1 << level;
 
   if (sis_verbose > 2)
-    printf ("%8" PRIu64 " cpu %d interrupt %d acknowledged\n",
-	    ebase.simtime, cpu, level);
+    printf ("%8" PRIu64 " cpu %d interrupt %d acknowledged\n", ebase.simtime,
+	    cpu, level);
 
   irqmp_pextack[cpu] = 0;
   if (level == irqmp_extirq)
@@ -473,7 +463,8 @@ irqmp_intack (int level, int cpu)
 	  {
 	    if (sis_verbose > 2)
 	      printf ("%8" PRIu64 " cpu %d set extended interrupt "
-		      "acknowledge to %i\n", ebase.simtime, cpu, i);
+		      "acknowledge to %i\n",
+		      ebase.simtime, cpu, i);
 	    irqmp_ipr &= ~(1 << i);
 	    irqmp_pextack[cpu] = i;
 	    break;
@@ -513,8 +504,8 @@ chk_irq ()
 	      if (((itmp >> i) & 1) != 0)
 		{
 		  if ((sis_verbose > 2) && (i != old_irl))
-		    printf ("%8" PRIu64 " cpu %d irl: %d\n",
-			    ebase.simtime, cpu, i);
+		    printf ("%8" PRIu64 " cpu %d irl: %d\n", ebase.simtime,
+			    cpu, i);
 		  ext_irl[cpu] = i;
 		  break;
 		}
@@ -537,75 +528,75 @@ grlib_set_irq (int32 level)
 }
 
 static int
-irqmp_read (uint32 addr, uint32 * data)
+irqmp_read (uint32 addr, uint32 *data)
 {
   int i;
 
   switch (addr & 0xff)
     {
-    case IRQMP_IPR:		/* 0x04 */
+    case IRQMP_IPR: /* 0x04 */
       *data = irqmp_ipr;
       break;
 
-    case IRQMP_IFR:		/* 0x08 */
+    case IRQMP_IFR: /* 0x08 */
       *data = irqmp_ifr[0];
       break;
 
-    case IRQMP_ISR:		/* 0x10 */
+    case IRQMP_ISR: /* 0x10 */
       *data = ((ncpu - 1) << 28) | (irqmp_extirq << 16);
       for (i = 0; i < ncpu; i++)
 	*data |= (sregs[i].pwd_mode << i);
       break;
 
-    case IRQMP_IBR:		/* 0x14 */
+    case IRQMP_IBR: /* 0x14 */
       *data = irqmp_ibr;
       break;
 
-    case IRQMP_IMR:		/* 0x40 */
+    case IRQMP_IMR: /* 0x40 */
       *data = irqmp_imr[0];
       break;
 
-    case IRQMP_IMR1:		/* 0x44 */
+    case IRQMP_IMR1: /* 0x44 */
       *data = irqmp_imr[1];
       break;
 
-    case IRQMP_IMR2:		/* 0x48 */
+    case IRQMP_IMR2: /* 0x48 */
       *data = irqmp_imr[2];
       break;
 
-    case IRQMP_IMR3:		/* 0x4C */
+    case IRQMP_IMR3: /* 0x4C */
       *data = irqmp_imr[3];
       break;
 
-    case IRQMP_IFR0:		/* 0x80 */
+    case IRQMP_IFR0: /* 0x80 */
       *data = irqmp_ifr[0];
       break;
 
-    case IRQMP_IFR1:		/* 0x84 */
+    case IRQMP_IFR1: /* 0x84 */
       *data = irqmp_ifr[1];
       break;
 
-    case IRQMP_IFR2:		/* 0x88 */
+    case IRQMP_IFR2: /* 0x88 */
       *data = irqmp_ifr[2];
       break;
 
-    case IRQMP_IFR3:		/* 0x8C */
+    case IRQMP_IFR3: /* 0x8C */
       *data = irqmp_ifr[3];
       break;
 
-    case IRQMP_PEXTACK0:	/* 0xC0 */
+    case IRQMP_PEXTACK0: /* 0xC0 */
       *data = irqmp_pextack[0];
       break;
 
-    case IRQMP_PEXTACK1:	/* 0xC4 */
+    case IRQMP_PEXTACK1: /* 0xC4 */
       *data = irqmp_pextack[1];
       break;
 
-    case IRQMP_PEXTACK2:	/* 0xC8 */
+    case IRQMP_PEXTACK2: /* 0xC8 */
       *data = irqmp_pextack[2];
       break;
 
-    case IRQMP_PEXTACK3:	/* 0xCC */
+    case IRQMP_PEXTACK3: /* 0xCC */
       *data = irqmp_pextack[3];
       break;
 
@@ -615,29 +606,29 @@ irqmp_read (uint32 addr, uint32 * data)
 }
 
 static int
-irqmp_write (uint32 addr, uint32 * data, uint32 size)
+irqmp_write (uint32 addr, uint32 *data, uint32 size)
 {
   int i;
 
   switch (addr & 0xff)
     {
 
-    case IRQMP_IPR:		/* 0x04 */
+    case IRQMP_IPR: /* 0x04 */
       irqmp_ipr = *data & irqmp_mask;
       chk_irq ();
       break;
 
-    case IRQMP_IFR:		/* 0x08 */
+    case IRQMP_IFR: /* 0x08 */
       irqmp_ifr[0] = *data & 0xfffe;
       chk_irq ();
       break;
 
-    case IRQMP_ICR:		/* 0x0C */
+    case IRQMP_ICR: /* 0x0C */
       irqmp_ipr &= ~*data & irqmp_mask;
       chk_irq ();
       break;
 
-    case IRQMP_ISR:		/* 0x10 */
+    case IRQMP_ISR: /* 0x10 */
       for (i = 0; i < ncpu; i++)
 	{
 	  if ((*data >> i) & 1)
@@ -655,46 +646,46 @@ irqmp_write (uint32 addr, uint32 * data, uint32 size)
 	}
       break;
 
-    case IRQMP_IBR:		/* 0x14 */
+    case IRQMP_IBR: /* 0x14 */
       irqmp_ibr = *data & 0xfffe;
       break;
 
-    case IRQMP_IMR:		/* 0x40 */
+    case IRQMP_IMR: /* 0x40 */
       irqmp_imr[0] = *data & irqmp_mask;
       chk_irq ();
       break;
 
-    case IRQMP_IMR1:		/* 0x44 */
+    case IRQMP_IMR1: /* 0x44 */
       irqmp_imr[1] = *data & irqmp_mask;
       chk_irq ();
       break;
 
-    case IRQMP_IMR2:		/* 0x48 */
+    case IRQMP_IMR2: /* 0x48 */
       irqmp_imr[2] = *data & irqmp_mask;
       chk_irq ();
       break;
 
-    case IRQMP_IMR3:		/* 0x4C */
+    case IRQMP_IMR3: /* 0x4C */
       irqmp_imr[3] = *data & irqmp_mask;
       chk_irq ();
       break;
 
-    case IRQMP_IFR0:		/* 0x80 */
+    case IRQMP_IFR0: /* 0x80 */
       irqmp_ifr[0] = *data & 0xfffe;
       chk_irq ();
       break;
 
-    case IRQMP_IFR1:		/* 0x84 */
+    case IRQMP_IFR1: /* 0x84 */
       irqmp_ifr[1] = *data & 0xfffe;
       chk_irq ();
       break;
 
-    case IRQMP_IFR2:		/* 0x88 */
+    case IRQMP_IFR2: /* 0x88 */
       irqmp_ifr[2] = *data & 0xfffe;
       chk_irq ();
       break;
 
-    case IRQMP_IFR3:		/* 0x8C */
+    case IRQMP_IFR3: /* 0x8C */
       irqmp_ifr[3] = *data & 0xfffe;
       chk_irq ();
       break;
@@ -710,23 +701,22 @@ irqmp_add (int irq, uint32 addr, uint32 mask)
     printf (" IRQMP Interrupt controller         0x%08x\n", addr);
 }
 
-const struct grlib_ipcore irqmp = {
-  irqmp_init, irqmp_reset, irqmp_read, irqmp_write, irqmp_add
-};
+const struct grlib_ipcore irqmp = { irqmp_init, irqmp_reset, irqmp_read,
+				    irqmp_write, irqmp_add };
 
 /* ------------------- GPTIMER -----------------------*/
 
-#define GPTIMER_SCALER  0x00
-#define GPTIMER_SCLOAD  0x04
-#define GPTIMER_CONFIG  0x08
-#define GPTIMER_TIMER1 	0x10
-#define GPTIMER_RELOAD1	0x14
-#define GPTIMER_CTRL1 	0x18
-#define GPTIMER_TIMER2 	0x20
-#define GPTIMER_RELOAD2	0x24
-#define GPTIMER_CTRL2 	0x28
+#define GPTIMER_SCALER	0x00
+#define GPTIMER_SCLOAD	0x04
+#define GPTIMER_CONFIG	0x08
+#define GPTIMER_TIMER1	0x10
+#define GPTIMER_RELOAD1 0x14
+#define GPTIMER_CTRL1	0x18
+#define GPTIMER_TIMER2	0x20
+#define GPTIMER_RELOAD2 0x24
+#define GPTIMER_CTRL2	0x28
 
-#define NGPTIMERS  2
+#define NGPTIMERS 2
 
 static uint32 gpt_irq;
 static uint32 gpt_scaler;
@@ -744,8 +734,8 @@ gpt_add_intr (int i)
   if (gpt_ctrl[i] & 1)
     {
       event (gpt_intr, i,
-	     (uint64) (gpt_scaler + 1) * (uint64) ((uint64) gpt_counter[i] +
-						   (uint64) 1));
+	     (uint64) (gpt_scaler + 1) *
+		 (uint64) ((uint64) gpt_counter[i] + (uint64) 1));
       gpt_counter_start[i] = now ();
     }
 }
@@ -762,7 +752,8 @@ gpt_intr (int32 i)
 	}
       if (gpt_ctrl[i] & 8)
 	{
-	  /* Set Interrupt Pending (IP) bit to allow for shared interrupt handling */
+	  /* Set Interrupt Pending (IP) bit to allow for shared interrupt
+	   * handling */
 	  gpt_ctrl[i] |= 0x10;
 	  grlib_set_irq (gpt_irq + i);
 	}
@@ -851,7 +842,7 @@ gpt_counter_read (int i)
 {
   if (gpt_ctrl[i] & 1)
     return gpt_counter[i] -
-      ((now () - gpt_counter_start[i]) / (gpt_scaler + 1));
+	   ((now () - gpt_counter_start[i]) / (gpt_scaler + 1));
   else
     return gpt_counter[i];
 }
@@ -863,45 +854,45 @@ gpt_scaler_read ()
 }
 
 static int
-gpt_read (uint32 addr, uint32 * data)
+gpt_read (uint32 addr, uint32 *data)
 {
   int i;
 
   switch (addr & 0xff)
     {
-    case GPTIMER_SCALER:	/* 0x00 */
+    case GPTIMER_SCALER: /* 0x00 */
       *data = gpt_scaler_read ();
       break;
 
-    case GPTIMER_SCLOAD:	/* 0x04 */
+    case GPTIMER_SCLOAD: /* 0x04 */
       *data = gpt_scaler;
       break;
 
-    case GPTIMER_CONFIG:	/* 0x08 */
+    case GPTIMER_CONFIG: /* 0x08 */
       *data = 0x100 | (gpt_irq << 3) | NGPTIMERS;
       break;
 
-    case GPTIMER_TIMER1:	/* 0x10 */
+    case GPTIMER_TIMER1: /* 0x10 */
       *data = gpt_counter_read (0);
       break;
 
-    case GPTIMER_RELOAD1:	/* 0x14 */
+    case GPTIMER_RELOAD1: /* 0x14 */
       *data = gpt_reload[0];
       break;
 
-    case GPTIMER_CTRL1:	/* 0x18 */
+    case GPTIMER_CTRL1: /* 0x18 */
       *data = gpt_ctrl[0];
       break;
 
-    case GPTIMER_TIMER2:	/* 0x20 */
+    case GPTIMER_TIMER2: /* 0x20 */
       *data = gpt_counter_read (1);
       break;
 
-    case GPTIMER_RELOAD2:	/* 0x24 */
+    case GPTIMER_RELOAD2: /* 0x24 */
       *data = gpt_reload[1];
       break;
 
-    case GPTIMER_CTRL2:	/* 0x28 */
+    case GPTIMER_CTRL2: /* 0x28 */
       *data = gpt_ctrl[1];
       break;
 
@@ -911,72 +902,69 @@ gpt_read (uint32 addr, uint32 * data)
 }
 
 static int
-gpt_write (uint32 addr, uint32 * data, uint32 sz)
+gpt_write (uint32 addr, uint32 *data, uint32 sz)
 {
   int i;
 
   switch (addr & 0xff)
     {
-    case GPTIMER_SCLOAD:	/* 0x04 */
+    case GPTIMER_SCLOAD: /* 0x04 */
       gpt_scaler_set (*data);
       break;
 
-    case GPTIMER_TIMER1:	/* 0x10 */
+    case GPTIMER_TIMER1: /* 0x10 */
       gpt_counter[0] = *data;
       remove_event (gpt_intr, 0);
       gpt_add_intr (0);
       break;
 
-    case GPTIMER_RELOAD1:	/* 0x14 */
+    case GPTIMER_RELOAD1: /* 0x14 */
       gpt_reload[0] = *data;
       break;
 
-    case GPTIMER_CTRL1:	/* 0x18 */
+    case GPTIMER_CTRL1: /* 0x18 */
       gpt_ctrl_write (*data, 0);
       break;
 
-    case GPTIMER_TIMER2:	/* 0x20 */
+    case GPTIMER_TIMER2: /* 0x20 */
       gpt_counter[1] = *data;
       remove_event (gpt_intr, 1);
       gpt_add_intr (1);
       break;
 
-    case GPTIMER_RELOAD2:	/* 0x24 */
+    case GPTIMER_RELOAD2: /* 0x24 */
       gpt_reload[1] = *data;
       break;
 
-    case GPTIMER_CTRL2:	/* 0x28 */
+    case GPTIMER_CTRL2: /* 0x28 */
       gpt_ctrl_write (*data, 1);
       break;
-
     }
 }
 
-const struct grlib_ipcore gptimer = {
-  gpt_init, gpt_reset, gpt_read, gpt_write, gpt_add
-};
-
+const struct grlib_ipcore gptimer = { gpt_init, gpt_reset, gpt_read, gpt_write,
+				      gpt_add };
 
 /* APBUART.  */
 
-#define APBUART_RXTX	0x00
-#define APBUART_STATUS  0x04
-#define APBUART_CTRL    0x08
+#define APBUART_RXTX   0x00
+#define APBUART_STATUS 0x04
+#define APBUART_CTRL   0x08
 
 /* Size of UART buffers (bytes).  */
-#define UARTBUF	1024
+#define UARTBUF 1024
 
 /* Number of simulator ticks between flushing the UARTS.  */
 /* For good performance, keep above 1000.  */
-#define UART_FLUSH_TIME	  5000
+#define UART_FLUSH_TIME 5000
 
 /* New uart defines.  */
-#define UART_TX_TIME	1000
-#define UART_RX_TIME	1000
-#define UARTA_DR	0x1
-#define UARTA_SRE	0x2
-#define UARTA_HRE	0x4
-#define UARTA_OR	0x10
+#define UART_TX_TIME 1000
+#define UART_RX_TIME 1000
+#define UARTA_DR     0x1
+#define UARTA_SRE    0x2
+#define UARTA_HRE    0x4
+#define UARTA_OR     0x10
 
 /* UART support variables.  */
 
@@ -1033,8 +1021,8 @@ apbuart_restore_stdio (void)
 #endif
 }
 
-#define DO_STDIO_READ( _fd_, _buf_, _len_ )          \
-		( dumbio || nouartrx ? (0) : read( _fd_, _buf_, _len_ ) )
+#define DO_STDIO_READ(_fd_, _buf_, _len_)                                     \
+  (dumbio || nouartrx ? (0) : read (_fd_, _buf_, _len_))
 
 static void
 apbuart_init (void)
@@ -1089,14 +1077,14 @@ apbuart_init (void)
 }
 
 static int
-apbuart_read (uint32 addr, uint32 * data)
+apbuart_read (uint32 addr, uint32 *data)
 {
   unsigned tmp = 0;
 
   switch (addr & 0xff)
     {
 
-    case 0x00:			/* UART 1 RX/TX */
+    case 0x00: /* UART 1 RX/TX */
 #ifndef _WIN32
 #ifdef FAST_UART
 
@@ -1140,7 +1128,7 @@ apbuart_read (uint32 addr, uint32 * data)
 #endif
       break;
 
-    case 0x04:			/* UART status register  */
+    case 0x04: /* UART status register  */
 #ifndef _WIN32
 #ifdef FAST_UART
 
@@ -1174,7 +1162,7 @@ apbuart_read (uint32 addr, uint32 * data)
       return 0;
 #endif
       break;
-    case 0x08:			/* UART control register  */
+    case 0x08: /* UART control register  */
       *data = 3;
       return 0;
       break;
@@ -1188,7 +1176,7 @@ apbuart_read (uint32 addr, uint32 * data)
 }
 
 static int
-apbuart_write (uint32 addr, uint32 * data, uint32 sz)
+apbuart_write (uint32 addr, uint32 *data, uint32 sz)
 {
   unsigned char c;
 
@@ -1196,7 +1184,7 @@ apbuart_write (uint32 addr, uint32 * data, uint32 sz)
   switch (addr & 0xff)
     {
 
-    case 0x00:			/* UART A */
+    case 0x00: /* UART A */
 #ifdef FAST_UART
       if (f1open)
 	{
@@ -1227,12 +1215,12 @@ apbuart_write (uint32 addr, uint32 * data, uint32 sz)
 #endif
       break;
 
-    case 0x04:			/* UART status register */
+    case 0x04: /* UART status register */
 #ifndef FAST_UART
       uart_stat_reg &= 1;
 #endif
       break;
-    case 0x08:			/* UART control register  */
+    case 0x08: /* UART control register  */
       break;
     default:
       if (sis_verbose)
@@ -1277,7 +1265,6 @@ uart_rx (int32 arg)
   char rxd;
   int32 rsize = 0;
 
-
   if (f1open)
     rsize = DO_STDIO_READ (ifd1, &rxd, 1);
   else
@@ -1304,7 +1291,6 @@ uart_intr (int32 arg)
   apbuart_flush ();
   event (uart_intr, 0, UART_FLUSH_TIME);
 }
-
 
 static void
 uart_irq_start (void)
@@ -1344,20 +1330,21 @@ apbuart_add (int irq, uint32 addr, uint32 mask)
     printf (" APBUART serial port                0x%08x   %d\n", addr, irq);
 }
 
-const struct grlib_ipcore apbuart = {
-  apbuart_init, apbuart_reset, apbuart_read, apbuart_write, apbuart_add
-};
+const struct grlib_ipcore apbuart = { apbuart_init, apbuart_reset,
+				      apbuart_read, apbuart_write,
+				      apbuart_add };
 
 /* ------------------- SDCTRL -----------------------*/
 
 /* Store data in host byte order.  MEM points to the beginning of the
    emulated memory; WADDR contains the index the emulated memory,
    DATA points to words in host byte order to be stored.  SZ contains log(2)
-   of the number of bytes to retrieve, and can be 0 (1 byte), 1 (one half-word),
-   2 (one word), or 3 (two words); WS should return the number of wait-states. */
+   of the number of bytes to retrieve, and can be 0 (1 byte), 1 (one
+   half-word), 2 (one word), or 3 (two words); WS should return the number of
+   wait-states. */
 
 void
-grlib_store_bytes (char *mem, uint32 waddr, uint32 * data, int32 sz)
+grlib_store_bytes (char *mem, uint32 waddr, uint32 *data, int32 sz)
 {
   if (sz == 2)
     memcpy (&mem[waddr], data, 4);
@@ -1370,7 +1357,7 @@ grlib_store_bytes (char *mem, uint32 waddr, uint32 * data, int32 sz)
 	break;
       case 1:
 	waddr ^= arch->bswap & 2;
-	*((uint16 *) & mem[waddr]) = (*data & 0x0ffff);
+	*((uint16 *) &mem[waddr]) = (*data & 0x0ffff);
 	break;
       case 3:
 	memcpy (&mem[waddr], data, 8);
@@ -1379,14 +1366,14 @@ grlib_store_bytes (char *mem, uint32 waddr, uint32 * data, int32 sz)
 }
 
 static int
-sdctrl_write (uint32 addr, uint32 * data, uint32 sz)
+sdctrl_write (uint32 addr, uint32 *data, uint32 sz)
 {
   grlib_store_bytes (ramb, addr, data, sz);
   return 1;
 }
 
 static int
-sdctrl_read (uint32 addr, uint32 * data)
+sdctrl_read (uint32 addr, uint32 *data)
 {
   memcpy (data, &ramb[addr & ~0x3], 4);
   return 4;
@@ -1402,22 +1389,21 @@ sdctrl_add (int irq, uint32 addr, uint32 mask)
 	    (~(mask << 20) + 1) >> 20, addr);
 }
 
-const struct grlib_ipcore sdctrl = {
-  NULL, NULL, sdctrl_read, sdctrl_write, sdctrl_add
-};
+const struct grlib_ipcore sdctrl = { NULL, NULL, sdctrl_read, sdctrl_write,
+				     sdctrl_add };
 
 /* ------------------- srctrl -----------------------*/
 /* used only for ROM access */
 
 static int
-srctrl_write (uint32 addr, uint32 * data, uint32 sz)
+srctrl_write (uint32 addr, uint32 *data, uint32 sz)
 {
   grlib_store_bytes (romb, addr, data, sz);
   return 1;
 }
 
 static int
-srctrl_read (uint32 addr, uint32 * data)
+srctrl_read (uint32 addr, uint32 *data)
 {
   memcpy (data, &romb[addr & ~0x3], 4);
   return 4;
@@ -1433,9 +1419,8 @@ srctrl_add (int irq, uint32 addr, uint32 mask)
 	    (~(mask << 20) + 1) >> 20, addr);
 }
 
-const struct grlib_ipcore srctrl = {
-  NULL, NULL, srctrl_read, srctrl_write, srctrl_add
-};
+const struct grlib_ipcore srctrl = { NULL, NULL, srctrl_read, srctrl_write,
+				     srctrl_add };
 
 /* ------------------- boot init --------------------*/
 void
@@ -1466,7 +1451,7 @@ ns16550_add (int irq, uint32 addr, uint32 mask)
 }
 
 static int
-ns16550_write (uint32 addr, uint32 * data, uint32 sz)
+ns16550_write (uint32 addr, uint32 *data, uint32 sz)
 {
   switch (addr & 0xff)
     {
@@ -1497,7 +1482,7 @@ ns16550_write (uint32 addr, uint32 * data, uint32 sz)
 }
 
 static int
-ns16550_read (uint32 addr, uint32 * data)
+ns16550_read (uint32 addr, uint32 *data)
 {
   *data = 0;
   switch (addr & 0xff)
@@ -1509,7 +1494,7 @@ ns16550_read (uint32 addr, uint32 * data)
       *data = uart_txctrl;
       break;
     case 0x10:
-      *data = uart_mcr;		//0x03;
+      *data = uart_mcr; // 0x03;
       break;
     case 0x14:
       *data = 0x60;
@@ -1526,9 +1511,8 @@ ns16550_reset (void)
   uart_mcr = 0;
 }
 
-const struct grlib_ipcore ns16550 = {
-  NULL, ns16550_reset, ns16550_read, ns16550_write, ns16550_add
-};
+const struct grlib_ipcore ns16550 = { NULL, ns16550_reset, ns16550_read,
+				      ns16550_write, ns16550_add };
 
 /* ------------------- clint -------------------------*/
 
@@ -1541,12 +1525,12 @@ clint_add (int irq, uint32 addr, uint32 mask)
     printf (" CLINT Interrupt controller         0x%08x   %d\n", addr, irq);
 }
 
-#define CLINTSTART  	0x00000
-#define CLINTEND  	0x10000
-#define CLINT_TIMECMP	0x04000
-#define CLINT_TIMEBASE	0x0BFF8
+#define CLINTSTART     0x00000
+#define CLINTEND       0x10000
+#define CLINT_TIMECMP  0x04000
+#define CLINT_TIMEBASE 0x0BFF8
 static int
-clint_read (uint32 addr, uint32 * data)
+clint_read (uint32 addr, uint32 *data)
 {
   uint64 tmp;
   int reg, cpuid;
@@ -1586,7 +1570,7 @@ set_mtip (int32 arg)
 }
 
 static int
-clint_write (uint32 addr, uint32 * data, uint32 sz)
+clint_write (uint32 addr, uint32 *data, uint32 sz)
 {
   uint64 tmp;
   int reg, cpuid;
@@ -1631,14 +1615,13 @@ clint_write (uint32 addr, uint32 * data, uint32 sz)
   return 1;
 }
 
-const struct grlib_ipcore clint = {
-  NULL, NULL, clint_read, clint_write, clint_add
-};
+const struct grlib_ipcore clint = { NULL, NULL, clint_read, clint_write,
+				    clint_add };
 
 /* ------------------- plic --------------------------*/
 /* simplified functionality supported for now */
 
-#define PLIC_PRIO 0
+#define PLIC_PRIO  0
 #define PLIC_IPEND 0x1000
 #define PLIC_IENA  0x2000
 #define PLIC_THRES 0x200000
@@ -1679,14 +1662,14 @@ plic_irq (int irq)
 }
 
 static int
-plic_read (uint32 addr, uint32 * data)
+plic_read (uint32 addr, uint32 *data)
 {
   int hart;
   if (addr >= PLIC_THRES)
     {
       hart = ((addr >> 12) & 0x0F) % NCPU;
       if ((addr & PLIC_MASK1) == 0)
-	*data = plic_thres[hart];	// irq threshold, not used for now
+	*data = plic_thres[hart]; // irq threshold, not used for now
       else
 	{
 	  *data = plic_claim[hart];
@@ -1698,7 +1681,7 @@ plic_read (uint32 addr, uint32 * data)
     {
       hart = ((addr >> 7) & 0x0F) % NCPU;
       if (addr & 4)
-	*data = plic_ie[hart][1];	// irq enable
+	*data = plic_ie[hart][1]; // irq enable
       else
 	*data = plic_ie[hart][0];
     }
@@ -1706,13 +1689,13 @@ plic_read (uint32 addr, uint32 * data)
     {
       hart = ((addr >> 7) & 0x0F) % NCPU;
       if (addr & 4)
-	*data = plic_ip[1];	// irq pending
+	*data = plic_ip[1]; // irq pending
       else
 	*data = plic_ip[0];
     }
   else if (addr < PLIC_IPEND)
     {
-      *data = plic_prio[(addr & 0x0ff) >> 2];	// irq priority, not used for now
+      *data = plic_prio[(addr & 0x0ff) >> 2]; // irq priority, not used for now
     }
   if (sis_verbose)
     printf (" PLIC read          0x%08x   %d\n", addr, *data);
@@ -1720,28 +1703,28 @@ plic_read (uint32 addr, uint32 * data)
 }
 
 static int
-plic_write (uint32 addr, uint32 * data, uint32 sz)
+plic_write (uint32 addr, uint32 *data, uint32 sz)
 {
   int hart;
   if (addr >= PLIC_THRES)
     {
       hart = ((addr >> 12) & 0x0F) % NCPU;
       if ((addr & PLIC_MASK1) == 0)
-	plic_thres[hart] = *data;	// irq threshold, not used for now
+	plic_thres[hart] = *data; // irq threshold, not used for now
       else
-	plic_check_irq (hart);	// irq completion
+	plic_check_irq (hart); // irq completion
     }
   else if (addr >= PLIC_IENA)
     {
       hart = ((addr >> 7) & 0x0F) % NCPU;
       if (addr & 4)
-	plic_ie[hart][1] = *data;	// irq enable
+	plic_ie[hart][1] = *data; // irq enable
       else
 	plic_ie[hart][0] = *data;
     }
   else if (addr < PLIC_IPEND)
     {
-      plic_prio[(addr & 0x0ff) >> 2] = *data;	// irq priority, not used for now
+      plic_prio[(addr & 0x0ff) >> 2] = *data; // irq priority, not used for now
     }
   return 1;
 }
@@ -1755,15 +1738,14 @@ plic_add (int irq, uint32 addr, uint32 mask)
     printf (" PLIC Interrupt controller          0x%08x   %d\n", addr, irq);
 }
 
-const struct grlib_ipcore plic = {
-  NULL, NULL, plic_read, plic_write, plic_add
-};
+const struct grlib_ipcore plic = { NULL, NULL, plic_read, plic_write,
+				   plic_add };
 
 /* ------------------- sifive test module --------------*/
 /* used to halt processor */
 
 static int
-s5test_write (uint32 addr, uint32 * data, uint32 sz)
+s5test_write (uint32 addr, uint32 *data, uint32 sz)
 {
   int i;
 
@@ -1791,14 +1773,12 @@ s5test_add (int irq, uint32 addr, uint32 mask)
     printf (" S5 Test module                     0x%08x   %d\n", addr, irq);
 }
 
-const struct grlib_ipcore s5test = {
-  NULL, NULL, NULL, s5test_write, s5test_add
-};
-
+const struct grlib_ipcore s5test = { NULL, NULL, NULL, s5test_write,
+				     s5test_add };
 
 /* -------------------  Debug Support Unit (DSU)  -----------------------*/
 
-#define DSU_TIME_TAG_COUNTER	0x08
+#define DSU_TIME_TAG_COUNTER 0x08
 
 static void
 dsu_init (void)
@@ -1820,11 +1800,11 @@ dsu_reset (void)
 }
 
 static int
-dsu_read (uint32 addr, uint32 * data)
+dsu_read (uint32 addr, uint32 *data)
 {
   switch (addr & 0xff)
     {
-    case DSU_TIME_TAG_COUNTER:		/* 0x08 */
+    case DSU_TIME_TAG_COUNTER: /* 0x08 */
       /*
        * On some implementations, a number of upper bits are zero.  For
        * example, the GR712RC time tag has only 30 bits implemented.  Assume
@@ -1843,11 +1823,10 @@ dsu_read (uint32 addr, uint32 * data)
 }
 
 static int
-dsu_write (uint32 addr, uint32 * data, uint32 sz)
+dsu_write (uint32 addr, uint32 *data, uint32 sz)
 {
   return 1;
 }
 
-const struct grlib_ipcore dsu = {
-  dsu_init, dsu_reset, dsu_read, dsu_write, dsu_add
-};
+const struct grlib_ipcore dsu = { dsu_init, dsu_reset, dsu_read, dsu_write,
+				  dsu_add };

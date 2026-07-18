@@ -4,8 +4,8 @@
  *
  * SIS, SPARC instruction simulator V2.8 Copyright (C) 2015 Jiri Gaisler
  *
- * This program is free software; you can redistribute it and/or modify it under
- * the terms of the GNU General Public License as published by the Free
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the Free
  * Software Foundation; either version 3 of the License, or (at your option)
  * any later version.
  *
@@ -20,10 +20,10 @@
  * Leon2 emulation, based on leon3.c and erc32.c/
  */
 
-#define ROM_START	0x00000000
-#define ROM_SIZE 	0x01000000
-#define RAM_START	0x40000000
-#define RAM_SIZE 	0x02000000
+#define ROM_START 0x00000000
+#define ROM_SIZE  0x01000000
+#define RAM_START 0x40000000
+#define RAM_SIZE  0x02000000
 
 #include "config.h"
 #include <errno.h>
@@ -39,49 +39,49 @@
 #include "grlib.h"
 
 /* APB registers */
-#define APBSTART	0x80000000
-#define APBEND		0x80000100
+#define APBSTART 0x80000000
+#define APBEND	 0x80000100
 
 /* Memory exception waitstates */
-#define MEM_EX_WS	1
+#define MEM_EX_WS 1
 
-#define MOK		0
+#define MOK 0
 
 /* LEON2 APB register addresses */
 
-#define IRQCTRL_IPR	0x094
-#define IRQCTRL_IMR	0x090
-#define IRQCTRL_ICR	0x09C
-#define IRQCTRL_IFR	0x098
-#define TIMER_SCALER	0x060
-#define TIMER_SCLOAD	0x064
-#define LEON2_CONFIG	0x024
-#define TIMER_TIMER1	0x040
-#define TIMER_RELOAD1	0x044
-#define TIMER_CTRL1	0x048
-#define TIMER_TIMER2	0x050
-#define TIMER_RELOAD2	0x054
-#define TIMER_CTRL2	0x058
-#define CACHE_CTRL	0x014
-#define POWER_DOWN	0x018
+#define IRQCTRL_IPR   0x094
+#define IRQCTRL_IMR   0x090
+#define IRQCTRL_ICR   0x09C
+#define IRQCTRL_IFR   0x098
+#define TIMER_SCALER  0x060
+#define TIMER_SCLOAD  0x064
+#define LEON2_CONFIG  0x024
+#define TIMER_TIMER1  0x040
+#define TIMER_RELOAD1 0x044
+#define TIMER_CTRL1   0x048
+#define TIMER_TIMER2  0x050
+#define TIMER_RELOAD2 0x054
+#define TIMER_CTRL2   0x058
+#define CACHE_CTRL    0x014
+#define POWER_DOWN    0x018
 
-#define APBUART_RXTX	0x070
-#define APBUART_STATUS	0x074
+#define APBUART_RXTX   0x070
+#define APBUART_STATUS 0x074
 
 /* Size of UART buffers (bytes).  */
-#define UARTBUF	1024
+#define UARTBUF 1024
 
 /* Number of simulator ticks between flushing the UARTS.  */
 /* For good performance, keep above 1000.  */
-#define UART_FLUSH_TIME	  3000
+#define UART_FLUSH_TIME 3000
 
 /* New uart defines.  */
-#define UART_TX_TIME	1000
-#define UART_RX_TIME	1000
-#define UARTA_DR	0x1
-#define UARTA_SRE	0x2
-#define UARTA_HRE	0x4
-#define UARTA_OR	0x10
+#define UART_TX_TIME 1000
+#define UART_RX_TIME 1000
+#define UARTA_DR     0x1
+#define UARTA_SRE    0x2
+#define UARTA_HRE    0x4
+#define UARTA_OR     0x10
 
 /* IRQCTRL registers.  */
 
@@ -91,8 +91,8 @@ static uint32 irqctrl_ifr;
 
 /* TIMER registers.  */
 
-#define NTIMERS		2
-#define TIMER_IRQ	8
+#define NTIMERS	  2
+#define TIMER_IRQ 8
 
 static uint32 gpt_scaler;
 static uint32 gpt_scaler_start;
@@ -138,7 +138,7 @@ static void leon2_reset (void);
 static void irqctrl_intack (int32 level, int32 cpu);
 static void chk_irq (void);
 static void set_irq (int32 level);
-static int32 apb_read (uint32 addr, uint32 * data);
+static int32 apb_read (uint32 addr, uint32 *data);
 static int apb_write (uint32 addr, uint32 data);
 static void port_init (void);
 static uint32 grlib_read_uart (uint32 addr);
@@ -154,8 +154,8 @@ static void gpt_reset (void);
 static void gpt_scaler_set (uint32 val);
 static void timer_ctrl (uint32 val, int i);
 static char *get_mem_ptr (uint32 addr, uint32 size);
-static void store_bytes (char *mem, uint32 waddr,
-			 uint32 * data, int sz, int32 * ws);
+static void store_bytes (char *mem, uint32 waddr, uint32 *data, int sz,
+			 int32 *ws);
 
 /* One-time init. */
 
@@ -178,7 +178,6 @@ reset (void)
   uart_irq_start ();
   gpt_reset ();
   sregs[0].intack = irqctrl_intack;
-
 }
 
 /* IU error mode manager. */
@@ -186,7 +185,6 @@ reset (void)
 static void
 error_mode (uint32 pc)
 {
-
 }
 
 /* Memory init. */
@@ -196,8 +194,8 @@ mem_init (void)
 {
 
   if (sis_verbose)
-    printf ("RAM start: 0x%x, RAM size: %d K, ROM size: %d K\n",
-	    RAM_START, (RAM_MASK + 1) / 1024, (ROM_MASK + 1) / 1024);
+    printf ("RAM start: 0x%x, RAM size: %d K, ROM size: %d K\n", RAM_START,
+	    (RAM_MASK + 1) / 1024, (ROM_MASK + 1) / 1024);
 }
 
 /* Flush ports when simulator stops. */
@@ -292,66 +290,66 @@ set_irq (int32 level)
 }
 
 static int32
-apb_read (uint32 addr, uint32 * data)
+apb_read (uint32 addr, uint32 *data)
 {
 
   switch (addr & 0xfff)
     {
 
-    case APBUART_RXTX:		/* 0x100 */
-    case APBUART_STATUS:	/* 0x104 */
+    case APBUART_RXTX:	 /* 0x100 */
+    case APBUART_STATUS: /* 0x104 */
       *data = grlib_read_uart (addr);
       break;
 
-    case IRQCTRL_IPR:		/* 0x204 */
+    case IRQCTRL_IPR: /* 0x204 */
       *data = irqctrl_ipr;
       break;
 
-    case IRQCTRL_IFR:		/* 0x208 */
+    case IRQCTRL_IFR: /* 0x208 */
       *data = irqctrl_ifr;
       break;
 
-    case IRQCTRL_IMR:		/* 0x240 */
+    case IRQCTRL_IMR: /* 0x240 */
       *data = irqctrl_imr;
       break;
 
-    case TIMER_SCALER:		/* 0x300 */
+    case TIMER_SCALER: /* 0x300 */
       *data = gpt_scaler - (now () - gpt_scaler_start);
       break;
 
-    case TIMER_SCLOAD:		/* 0x304 */
+    case TIMER_SCLOAD: /* 0x304 */
       *data = gpt_scaler;
       break;
 
-    case LEON2_CONFIG:		/* 0x308 */
+    case LEON2_CONFIG: /* 0x308 */
       *data = 0x700310;
       break;
 
-    case TIMER_TIMER1:		/* 0x310 */
+    case TIMER_TIMER1: /* 0x310 */
       *data = gpt_counter[0];
       break;
 
-    case TIMER_RELOAD1:	/* 0x314 */
+    case TIMER_RELOAD1: /* 0x314 */
       *data = gpt_reload[0];
       break;
 
-    case TIMER_CTRL1:		/* 0x318 */
+    case TIMER_CTRL1: /* 0x318 */
       *data = gpt_ctrl[0];
       break;
 
-    case TIMER_TIMER2:		/* 0x320 */
+    case TIMER_TIMER2: /* 0x320 */
       *data = gpt_counter[1];
       break;
 
-    case TIMER_RELOAD2:	/* 0x324 */
+    case TIMER_RELOAD2: /* 0x324 */
       *data = gpt_reload[1];
       break;
 
-    case TIMER_CTRL2:		/* 0x328 */
+    case TIMER_CTRL2: /* 0x328 */
       *data = gpt_ctrl[1];
       break;
 
-    case CACHE_CTRL:		/* 0x328 */
+    case CACHE_CTRL: /* 0x328 */
       *data = cache_ctrl;
       break;
 
@@ -374,59 +372,59 @@ apb_write (uint32 addr, uint32 data)
   switch (addr & 0xff)
     {
 
-    case APBUART_RXTX:		/* 0x100 */
-    case APBUART_STATUS:	/* 0x104 */
+    case APBUART_RXTX:	 /* 0x100 */
+    case APBUART_STATUS: /* 0x104 */
       grlib_write_uart (addr, data);
       break;
 
-    case IRQCTRL_IFR:		/* 0x208 */
+    case IRQCTRL_IFR: /* 0x208 */
       irqctrl_ifr = data & 0xfffe;
       chk_irq ();
       break;
 
-    case IRQCTRL_ICR:		/* 0x20C */
+    case IRQCTRL_ICR: /* 0x20C */
       irqctrl_ipr &= ~data & 0x0fffe;
       chk_irq ();
       break;
 
-    case IRQCTRL_IMR:		/* 0x240 */
+    case IRQCTRL_IMR: /* 0x240 */
       irqctrl_imr = data & 0x7ffe;
       chk_irq ();
       break;
 
-    case TIMER_SCLOAD:		/* 0x304 */
+    case TIMER_SCLOAD: /* 0x304 */
       gpt_scaler_set (data);
       break;
 
-    case TIMER_TIMER1:		/* 0x310 */
+    case TIMER_TIMER1: /* 0x310 */
       gpt_counter[0] = data;
       break;
 
-    case TIMER_RELOAD1:	/* 0x314 */
+    case TIMER_RELOAD1: /* 0x314 */
       gpt_reload[0] = data;
       break;
 
-    case TIMER_CTRL1:		/* 0x318 */
+    case TIMER_CTRL1: /* 0x318 */
       timer_ctrl (data, 0);
       break;
 
-    case TIMER_TIMER2:		/* 0x320 */
+    case TIMER_TIMER2: /* 0x320 */
       gpt_counter[1] = data;
       break;
 
-    case TIMER_RELOAD2:	/* 0x324 */
+    case TIMER_RELOAD2: /* 0x324 */
       gpt_reload[1] = data;
       break;
 
-    case TIMER_CTRL2:		/* 0x328 */
+    case TIMER_CTRL2: /* 0x328 */
       timer_ctrl (data, 1);
       break;
 
-    case POWER_DOWN:		/* 0x328 */
+    case POWER_DOWN: /* 0x328 */
       pwd_enter (sregs);
       break;
 
-    case CACHE_CTRL:		/* 0x328 */
+    case CACHE_CTRL: /* 0x328 */
       cache_ctrl = data & 0x1000f;
       break;
 
@@ -435,7 +433,6 @@ apb_write (uint32 addr, uint32 data)
     }
   return MOK;
 }
-
 
 /* APBUART. */
 
@@ -466,8 +463,8 @@ restore_stdio (void)
 #endif
 }
 
-#define DO_STDIO_READ( _fd_, _buf_, _len_ )          \
-		( dumbio || nouartrx ? (0) : read( _fd_, _buf_, _len_ ) )
+#define DO_STDIO_READ(_fd_, _buf_, _len_)                                     \
+  (dumbio || nouartrx ? (0) : read (_fd_, _buf_, _len_))
 
 static void
 port_init (void)
@@ -526,7 +523,7 @@ grlib_read_uart (uint32 addr)
   switch (addr & 0xfff)
     {
 
-    case 0x070:		/* UART 1 RX/TX */
+    case 0x070: /* UART 1 RX/TX */
 #ifndef _WIN32
 #ifdef FAST_UART
       if (aind < anum)
@@ -562,7 +559,7 @@ grlib_read_uart (uint32 addr)
 #endif
       break;
 
-    case 0x074:		/* UART status register  */
+    case 0x074: /* UART status register  */
 #ifndef _WIN32
 #ifdef FAST_UART
 
@@ -594,7 +591,6 @@ grlib_read_uart (uint32 addr)
     default:
       if (sis_verbose)
 	printf ("Read from unimplemented LEON2 register (%x)\n", addr);
-
     }
   return 0;
 }
@@ -608,7 +604,7 @@ grlib_write_uart (uint32 addr, uint32 data)
   switch (addr & 0xfff)
     {
 
-    case 0x070:		/* UART A */
+    case 0x070: /* UART A */
 #ifdef FAST_UART
       if (f1open)
 	{
@@ -639,7 +635,7 @@ grlib_write_uart (uint32 addr, uint32 data)
 #endif
       break;
 
-    case 0x074:		/* UART status register */
+    case 0x074: /* UART status register */
 #ifndef FAST_UART
       uart_stat_reg &= 1;
 #endif
@@ -647,7 +643,6 @@ grlib_write_uart (uint32 addr, uint32 data)
     default:
       if (sis_verbose)
 	printf ("Write to unimplemented APB register (%x)\n", addr);
-
     }
 }
 
@@ -713,7 +708,6 @@ uart_intr (int32 arg)
   flush_uart ();
   event (uart_intr, 0, UART_FLUSH_TIME);
 }
-
 
 static void
 uart_irq_start (void)
@@ -786,11 +780,12 @@ timer_ctrl (uint32 val, int i)
 /* Store data in host byte order.  MEM points to the beginning of the
    emulated memory; WADDR contains the index the emulated memory,
    DATA points to words in host byte order to be stored.  SZ contains log(2)
-   of the number of bytes to retrieve, and can be 0 (1 byte), 1 (one half-word),
-   2 (one word), or 3 (two words); WS should return the number of wait-states. */
+   of the number of bytes to retrieve, and can be 0 (1 byte), 1 (one
+   half-word), 2 (one word), or 3 (two words); WS should return the number of
+   wait-states. */
 
 static void
-store_bytes (char *mem, uint32 waddr, uint32 * data, int32 sz, int32 * ws)
+store_bytes (char *mem, uint32 waddr, uint32 *data, int32 sz, int32 *ws)
 {
   switch (sz)
     {
@@ -805,7 +800,7 @@ store_bytes (char *mem, uint32 waddr, uint32 * data, int32 sz, int32 * ws)
 #ifdef HOST_LITTLE_ENDIAN
       waddr ^= 2;
 #endif
-      *((uint16 *) & mem[waddr]) = *data & 0x0ffff;
+      *((uint16 *) &mem[waddr]) = *data & 0x0ffff;
       *ws = 0;
       break;
     case 2:
@@ -819,11 +814,10 @@ store_bytes (char *mem, uint32 waddr, uint32 * data, int32 sz, int32 * ws)
     }
 }
 
-
 /* Memory emulation.  */
 
 static int
-memory_iread (uint32 addr, uint32 * data, int32 * ws)
+memory_iread (uint32 addr, uint32 *data, int32 *ws)
 {
   if ((addr >= RAM_START) && (addr < RAM_END))
     {
@@ -845,7 +839,7 @@ memory_iread (uint32 addr, uint32 * data, int32 * ws)
 }
 
 static int
-memory_read (uint32 addr, uint32 * data, int32 * ws)
+memory_read (uint32 addr, uint32 *data, int32 *ws)
 {
   int32 mexc;
 
@@ -878,7 +872,7 @@ memory_read (uint32 addr, uint32 * data, int32 * ws)
 }
 
 static int
-memory_write (uint32 addr, uint32 * data, int32 sz, int32 * ws)
+memory_write (uint32 addr, uint32 *data, int32 sz, int32 *ws)
 {
   uint32 byte_addr;
   uint32 byte_mask;
@@ -982,17 +976,7 @@ boot_init (void)
 }
 
 const struct memsys leon2 = {
-  init_sim,
-  reset,
-  error_mode,
-  sim_halt,
-  exit_sim,
-  init_stdio,
-  restore_stdio,
-  memory_iread,
-  memory_read,
-  memory_write,
-  sis_memory_write,
-  sis_memory_read,
-  boot_init
+  init_sim,	    reset,	     error_mode,   sim_halt,	exit_sim,
+  init_stdio,	    restore_stdio,   memory_iread, memory_read, memory_write,
+  sis_memory_write, sis_memory_read, boot_init
 };

@@ -4,8 +4,8 @@
  *
  * SIS, SPARC/RISCV instruction simulator. Copyright (C) 2020 Jiri Gaisler
  *
- * This program is free software; you can redistribute it and/or modify it under
- * the terms of the GNU General Public License as published by the Free
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the Free
  * Software Foundation; either version 3 of the License, or (at your option)
  * any later version.
  *
@@ -19,7 +19,6 @@
  *
  */
 
-
 /* Emulation of GRETH 10/100 Mbit network interface */
 /* Based on grlib-gpl-2018.1-b4217/doc/grip.pdf */
 /* Multicast not supported for now ... */
@@ -29,26 +28,26 @@
 #include <stdlib.h>
 #include <sys/file.h>
 #include <unistd.h>
-//#include <arpa/inet.h>
+// #include <arpa/inet.h>
 
 #include "sis.h"
 #include "grlib.h"
 
-#define MDIO_WRITE 	1
-#define MDIO_READ 	2
-#define CTRL_SPEED	0x80
-#define CTRL_RST	0x40
-#define CTRL_RI		8
-#define CTRL_TI		4
-#define CTRL_RE		2
-#define CTRL_TE		1
-#define STATUS_TI	8
-#define STATUS_RI	4
+#define MDIO_WRITE 1
+#define MDIO_READ  2
+#define CTRL_SPEED 0x80
+#define CTRL_RST   0x40
+#define CTRL_RI	   8
+#define CTRL_TI	   4
+#define CTRL_RE	   2
+#define CTRL_TE	   1
+#define STATUS_TI  8
+#define STATUS_RI  4
 
-#define BASE_PNT	0x3f8
-#define DESC_EN		(1 << 11)
-#define DESC_WRAP	(1 << 12)
-#define DESC_IE		(1 << 13)
+#define BASE_PNT  0x3f8
+#define DESC_EN	  (1 << 11)
+#define DESC_WRAP (1 << 12)
+#define DESC_IE	  (1 << 13)
 
 static uint32 greth_ctrl;
 static uint32 greth_status;
@@ -100,8 +99,8 @@ mdio_read (uint32 address)
     }
 
   if (sis_verbose > 1)
-    printf ("%8lu cpu %d MDIO read a: %02x, d: %04x\n",
-	    ebase.simtime, cpu, address, res);
+    printf ("%8lu cpu %d MDIO read a: %02x, d: %04x\n", ebase.simtime, cpu,
+	    address, res);
   return res;
 }
 
@@ -109,8 +108,8 @@ static void
 mdio_write (uint32 address, uint32 data)
 {
   if (sis_verbose > 1)
-    printf ("%8lu cpu %d MDIO write a: %02x, d: %04x\n",
-	    ebase.simtime, cpu, address, data);
+    printf ("%8lu cpu %d MDIO write a: %02x, d: %04x\n", ebase.simtime, cpu,
+	    address, data);
 }
 
 static void
@@ -134,7 +133,7 @@ greth_tx (int32 arg)
 	  /* endian swap on host/target endian mismatch */
 	  if (arch->bswap)
 	    {
-	      wlen = (len + 3) & ~3;	// align up to 32-bit word
+	      wlen = (len + 3) & ~3; // align up to 32-bit word
 	      for (i = 0; i < wlen; i++)
 		buffer[i] = greth_txbufptr[arch->bswap ^ i];
 	      sis_tap_write ((unsigned char *) buffer, len);
@@ -223,8 +222,8 @@ greth_write (uint32 address, uint32 data)
       break;
     }
   if (sis_verbose > 1)
-    printf ("%8lu cpu %d APB write a: %08x, d: %08x\n",
-	    ebase.simtime, cpu, address, data);
+    printf ("%8lu cpu %d APB write a: %08x, d: %08x\n", ebase.simtime, cpu,
+	    address, data);
 }
 
 /* Read GRETH APB registers */
@@ -278,7 +277,8 @@ greth_rxready (unsigned char *buffer, int len)
     }
   /* accept only unicast or broadcast packets */
   if (((strncmp (greth_mac, buffer, 6) == 0) ||
-       (strncmp (buffer, broadcast, 6) == 0)) && (greth_ctrl & CTRL_RE))
+       (strncmp (buffer, broadcast, 6) == 0)) &&
+      (greth_ctrl & CTRL_RE))
     {
       ms->memory_read (greth_rxbase, &greth_rxdesc, &ws);
       if (greth_rxdesc & DESC_EN)
@@ -288,7 +288,7 @@ greth_rxready (unsigned char *buffer, int len)
 	  /* endian swap on host/target endian mismatch */
 	  if (arch->bswap)
 	    {
-	      wlen = (len + 3) & ~3;	// align up to 32-bit word
+	      wlen = (len + 3) & ~3; // align up to 32-bit word
 	      for (i = 0; i < wlen; i++)
 		greth_rxbufptr[i] = buffer[arch->bswap ^ i];
 	    }
@@ -297,8 +297,8 @@ greth_rxready (unsigned char *buffer, int len)
 	  tmpdesc = len & 0x7ff;
 	  ms->memory_write (greth_rxbase, &tmpdesc, 2, &ws);
 	  greth_status |= STATUS_RI;
-	  if ((greth_rxdesc & DESC_WRAP)
-	      || ((greth_rxbase & BASE_PNT) == BASE_PNT))
+	  if ((greth_rxdesc & DESC_WRAP) ||
+	      ((greth_rxbase & BASE_PNT) == BASE_PNT))
 	    greth_rxbase &= ~BASE_PNT;
 	  else
 	    greth_rxbase += 8;

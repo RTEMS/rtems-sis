@@ -45,8 +45,7 @@ add32 (uint32 n1, uint32 n2, int *carry)
 /* Multiply two 32-bit integers.  */
 
 void
-mul64 (uint32 n1, uint32 n2, uint32 * result_hi, uint32 * result_lo,
-       int msigned)
+mul64 (uint32 n1, uint32 n2, uint32 *result_hi, uint32 *result_lo, int msigned)
 {
   uint32 lo, mid1, mid2, hi, reg_lo, reg_hi;
   int carry;
@@ -61,7 +60,6 @@ mul64 (uint32 n1, uint32 n2, uint32 * result_hi, uint32 * result_lo,
 	n1 = -n1;
       if (n2 & SIGN_BIT)
 	n2 = -n2;
-
     }
 
   /* We can split the 32x32 into four 16x16 operations. This ensures
@@ -91,12 +89,11 @@ mul64 (uint32 n1, uint32 n2, uint32 * result_hi, uint32 * result_lo,
   *result_hi = reg_hi;
 }
 
-
 /* Divide a 64-bit integer by a 32-bit integer.  We cheat and assume
    that the host compiler supports long long operations.  */
 
 void
-div64 (uint32 n1_hi, uint32 n1_low, uint32 n2, uint32 * result, int msigned)
+div64 (uint32 n1_hi, uint32 n1_low, uint32 n2, uint32 *result, int msigned)
 {
   uint64 n1;
 
@@ -137,11 +134,11 @@ init_regs (struct pstate *sregs)
       sregs[i].trap = 0;
       sregs[i].psr &= 0x00f03fdf;
       if (cputype == CPU_ERC32)
-	sregs[i].psr |= 0x11000080;	/* Set supervisor bit */
+	sregs[i].psr |= 0x11000080; /* Set supervisor bit */
       else if (cputype == CPU_LEON2)
-	sregs[i].psr |= 0x00000080;	/* Set supervisor bit */
+	sregs[i].psr |= 0x00000080; /* Set supervisor bit */
       else
-	sregs[i].psr |= 0xF3000080;	/* Set supervisor bit */
+	sregs[i].psr |= 0xF3000080; /* Set supervisor bit */
       sregs[i].breakpoint = 0;
       sregs[i].fpstate = 0;
       sregs[i].fpqn = 0;
@@ -165,7 +162,7 @@ init_regs (struct pstate *sregs)
       sregs[i].jmpltime = 0;
       sregs[i].asr17 = 0x04000107 | (i << 28);
       if (!nfp)
-	sregs[i].asr17 |= (3 << 10);	/* Meiko FPU */
+	sregs[i].asr17 |= (3 << 10); /* Meiko FPU */
       sregs[i].cpu = i;
       sregs[i].simtime = 0;
       sregs[i].pwdtime = 0;
@@ -197,7 +194,8 @@ l1data_snoop (uint32 address, uint32 cpu)
 	  if (cpu != i)
 	    {
 	      sregs[i].l1dtags[(address >> L1DLINEBITS) & L1DMASK] = 0;
-//                              printf("l1 snoop hit : 0x%08X,  %d  %d\n", address, cpu, i);
+	      //                              printf("l1 snoop hit : 0x%08X, %d
+	      //                              %d\n", address, cpu, i);
 	    }
 	}
     }
@@ -210,7 +208,7 @@ l1data_update (uint32 address, uint32 cpu)
       (address >> L1DLINEBITS))
     {
       sregs[cpu].l1dtags[(address >> L1DLINEBITS) & L1DMASK] =
-	(address >> L1DLINEBITS);
+	  (address >> L1DLINEBITS);
       sregs[cpu].hold += T_L1DMISS;
       sregs[cpu].l1dmiss++;
     }

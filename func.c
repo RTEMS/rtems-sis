@@ -37,7 +37,8 @@
 #include <inttypes.h>
 #include <sys/time.h>
 
-/* set if UART device cannot handle attributes, terminal oriented IO by default */
+/* set if UART device cannot handle attributes, terminal oriented IO by default
+ */
 int dumbio = 0;
 
 /* set if UARTs are connected to a tty, enable by default */
@@ -72,9 +73,9 @@ const struct memsys *ms;
 int cputype = 0;
 int archtype = 0;
 int sis_gdb_break;
-int cpu = 0;			/* active cpu */
-int ncpu = 1;			/* number of cpus to emulate */
-int delta = 50;			/* time slice for MP simulation */
+int cpu = 0;	/* active cpu */
+int ncpu = 1;	/* number of cpus to emulate */
+int delta = 50; /* time slice for MP simulation */
 const struct cpu_arch *arch = &sparc32;
 uint32 daddr = 0;
 /*
@@ -89,7 +90,7 @@ static int symcount = 0;
 static int batch (struct pstate *sregs, char *fname);
 static void init_event (void);
 static void disp_mem (uint32 addr, uint32 len);
-static ssize_t mygetline (char **lineptr, size_t * n, FILE * stream);
+static ssize_t mygetline (char **lineptr, size_t *n, FILE *stream);
 static void symprint ();
 static uint32 symtoaddr (char *s);
 
@@ -142,8 +143,8 @@ limcalc (float32 freq)
 	  if (strcmp (cmd2, "s") == 0)
 	    unit = 1000000;
 	}
-      flim = (double) lim *(double) unit *(double) freq +
-	(double) ebase.simtime;
+      flim = (double) lim * (double) unit * (double) freq +
+	     (double) ebase.simtime;
       if (flim > ebase.simtime)
 	{
 	  lim = (uint64) flim;
@@ -188,14 +189,14 @@ exec_cmd (const char *cmd)
 	      if (isdigit (cmd1[0]))
 		len = VAL (cmd1);
 	      /*
-	         else
-	         len = symtoaddr(cmd1);
+		 else
+		 len = symtoaddr(cmd1);
 	       */
 	      if (len)
 		{
 		  if (sim_set_watchpoint (len & ~1, 4, 1))
-		    printf ("added breakpoint %d at 0x%08x\n",
-			    ebase.bptnum, ebase.bpts[ebase.bptnum - 1]);
+		    printf ("added breakpoint %d at 0x%08x\n", ebase.bptnum,
+			    ebase.bpts[ebase.bptnum - 1]);
 		}
 	    }
 	  else
@@ -335,13 +336,11 @@ exec_cmd (const char *cmd)
 		{
 		  if (sregs[i].histbuf != NULL)
 		    free (sregs[i].histbuf);
-		  sregs[i].histbuf =
-		    (struct histype *) calloc (ebase.histlen,
-					       sizeof (struct histype));
+		  sregs[i].histbuf = (struct histype *) calloc (
+		      ebase.histlen, sizeof (struct histype));
 		  sregs[i].histind = 0;
 		}
 	      printf ("trace history length = %d\n\r", ebase.histlen);
-
 	    }
 	  else
 	    {
@@ -355,7 +354,6 @@ exec_cmd (const char *cmd)
 		  j++;
 		}
 	    }
-
 	}
       else if (strncmp (cmd1, "load", clen) == 0)
 	{
@@ -526,11 +524,10 @@ exec_cmd (const char *cmd)
       else if (strncmp (cmd1, "tlimit", clen) == 0)
 	{
 	  ebase.tlimit = limcalc (ebase.freq);
-	  if (ebase.tlimit != (uint32) - 1)
+	  if (ebase.tlimit != (uint32) -1)
 	    if (sis_verbose)
 	      printf ("simulation limit = %u (%.3f ms)\n",
-		      (uint32) ebase.tlimit,
-		      ebase.tlimit / ebase.freq / 1000);
+		      (uint32) ebase.tlimit, ebase.tlimit / ebase.freq / 1000);
 	}
       else if (strncmp (cmd1, "tra", clen) == 0)
 	{
@@ -584,8 +581,8 @@ exec_cmd (const char *cmd)
 	  if ((cmd1 = strtok (NULL, " \t\n\r")) != NULL)
 	    {
 	      if (sim_set_watchpoint (VAL (cmd1) & ~0x3, 4, 3))
-		printf ("added read watchpoint %d at 0x%08x\n",
-			ebase.wprnum, ebase.wprs[ebase.wprnum - 1]);
+		printf ("added read watchpoint %d at 0x%08x\n", ebase.wprnum,
+			ebase.wprs[ebase.wprnum - 1]);
 	    }
 	}
       else if (strncmp (cmd1, "-wpr", clen) == 0)
@@ -611,8 +608,8 @@ exec_cmd (const char *cmd)
 	  if ((cmd1 = strtok (NULL, " \t\n\r")) != NULL)
 	    {
 	      if (sim_set_watchpoint (VAL (cmd1) & ~0x3, 4, 2))
-		printf ("added write watchpoint %d at 0x%08x\n",
-			ebase.wpwnum, ebase.wpws[ebase.wpwnum - 1]);
+		printf ("added write watchpoint %d at 0x%08x\n", ebase.wpwnum,
+			ebase.wpws[ebase.wpwnum - 1]);
 	    }
 	  else
 	    {
@@ -649,7 +646,6 @@ exec_cmd (const char *cmd)
   return stat;
 }
 
-
 void
 reset_stat (struct pstate *sregs)
 {
@@ -666,7 +662,6 @@ reset_stat (struct pstate *sregs)
   ebase.simstart = ebase.simtime;
   sregs->l1imiss = 0;
   sregs->l1dmiss = 0;
-
 }
 
 void
@@ -691,7 +686,7 @@ show_stat (struct pstate *sregs)
       ninst += sregs[i].ninst;
       pwdtime += sregs[i].pwdtime;
     }
-  stime = ebase.simtime - ebase.simstart;	/* Total simulated time */
+  stime = ebase.simtime - ebase.simstart; /* Total simulated time */
   printf ("\n Frequency       : %4.1f MHz\n", ebase.freq);
   printf (" Cycles          : %" PRIu64 "\n", stime);
   printf (" Instructions    : %" PRIu64 "\n", ninst);
@@ -700,8 +695,7 @@ show_stat (struct pstate *sregs)
   printf (" System perf.    : %.2f MOPS\n",
 	  (double) ninst / ((double) (stime) / ebase.freq));
   printf (" Real-time perf. : %.2f %%\n",
-	  100.0 / (ebase.tottime /
-		   ((double) (stime) / (ebase.freq * 1.0E6))));
+	  100.0 / (ebase.tottime / ((double) (stime) / (ebase.freq * 1.0E6))));
   printf (" Simulator perf. : %.2f MIPS\n",
 	  (double) (ninst / ebase.tottime / 1E6));
   printf (" Wall time       : %.2f s\n\n", ebase.tottime);
@@ -713,33 +707,32 @@ show_stat (struct pstate *sregs)
   for (i = 0; i < ncpu; i++)
     {
 #ifdef STAT
-      iinst =
-	sregs[i].ninst - sregs[i].finst - sregs[i].nload - sregs[i].nstore -
-	sregs[i].nbranch;
+      iinst = sregs[i].ninst - sregs[i].finst - sregs[i].nload -
+	      sregs[i].nstore - sregs[i].nbranch;
 #endif
 
-      stime = sregs[i].simtime - ebase.simstart + 1;	/* Core simulated time */
-      printf ("  %d    %5.2f    %5.2f    %5.2f    %5.2f%%"
+      stime = sregs[i].simtime - ebase.simstart + 1; /* Core simulated time */
+      printf (
+	  "  %d    %5.2f    %5.2f    %5.2f    %5.2f%%"
 #ifdef ENABLE_L1CACHE
-	      "    %5.2f%%    %5.2f%%"
+	  "    %5.2f%%    %5.2f%%"
 #endif
-	      "\n", i,
-	      ebase.freq * (double) (sregs[i].ninst - sregs[i].finst) /
+	  "\n",
+	  i,
+	  ebase.freq * (double) (sregs[i].ninst - sregs[i].finst) /
 	      (double) (stime - sregs[i].pwdtime),
-	      ebase.freq * (double) sregs[i].finst / (double) (stime -
-							       sregs
-							       [i].pwdtime),
-	      (double) (stime - sregs[i].pwdtime) / (double) (sregs[i].ninst +
-							      1),
-	      100.0 * (1.0 - ((double) sregs[i].pwdtime / (double) stime))
+	  ebase.freq * (double) sregs[i].finst /
+	      (double) (stime - sregs[i].pwdtime),
+	  (double) (stime - sregs[i].pwdtime) / (double) (sregs[i].ninst + 1),
+	  100.0 * (1.0 - ((double) sregs[i].pwdtime / (double) stime))
 #ifdef ENABLE_L1CACHE
-	      , (double) (sregs[i].ninst - sregs[i].l1imiss + 1) /
+	      ,
+	  (double) (sregs[i].ninst - sregs[i].l1imiss + 1) /
 	      (double) (sregs[i].ninst + 1) * 100.0,
-	      (double) (sregs[i].nload + sregs[i].nstore - sregs[i].l1dmiss +
-			1) / (double) (sregs[i].nload + sregs[i].nstore +
-				       1) * 100.0
+	  (double) (sregs[i].nload + sregs[i].nstore - sregs[i].l1dmiss + 1) /
+	      (double) (sregs[i].nload + sregs[i].nstore + 1) * 100.0
 #endif
-	);
+      );
     }
 
 #ifdef STAT
@@ -754,16 +747,14 @@ show_stat (struct pstate *sregs)
   printf ("   float      : %9.2f %%\n",
 	  100.0 * (double) sregs->finst / (double) sregs[i].ninst);
   printf (" Integer CPI  : %9.2f\n",
-	  ((double)
-	   (stime - sregs[i].pwdtime - sregs[i].fholdt -
-	    sregs[i].finst)) / (double) (sregs[i].ninst - sregs[i].finst));
+	  ((double) (stime - sregs[i].pwdtime - sregs[i].fholdt -
+		     sregs[i].finst)) /
+	      (double) (sregs[i].ninst - sregs[i].finst));
   printf (" Float CPI    : %9.2f\n",
 	  ((double) sregs[i].fholdt / (double) sregs[i].finst) + 1.0);
 #endif
   printf ("\n");
 }
-
-
 
 void
 init_bpt (struct pstate *sregs)
@@ -781,7 +772,6 @@ init_bpt (struct pstate *sregs)
     }
   ebase.tlimit = 0;
 }
-
 
 /* support for catching ctrl-c */
 
@@ -1023,7 +1013,6 @@ advance_time (uint64 endtime)
       cfunc (arg);
     }
   ebase.simtime = endtime;
-
 }
 
 uint32
@@ -1045,7 +1034,7 @@ rt_sync ()
 {
   double walltime, realtime, dtime;
   int64 stime;
-  stime = ebase.simtime - ebase.simstart;	/* Total simulated time */
+  stime = ebase.simtime - ebase.simstart; /* Total simulated time */
   realtime = (double) ((stime) / 1000000.0 / ebase.freq);
   walltime = ebase.tottime + get_time () - ebase.starttime;
   dtime = (realtime - walltime);
@@ -1118,7 +1107,7 @@ check_wpw (struct pstate *sregs, int32 address, unsigned char mask)
 void
 reset_all ()
 {
-  init_event ();		/* Clear event queue */
+  init_event (); /* Clear event queue */
   init_regs (sregs);
   ms->reset ();
 }
@@ -1127,13 +1116,13 @@ void
 sys_reset ()
 {
   reset_all ();
-  sregs[0].trap = 256;		/* Force fake reset trap */
+  sregs[0].trap = 256; /* Force fake reset trap */
 }
 
 void
 sys_halt ()
 {
-  sregs[0].trap = 257;		/* Force fake halt trap */
+  sregs[0].trap = 257; /* Force fake halt trap */
 }
 
 /* simulate one core instruction-wise */
@@ -1152,7 +1141,7 @@ run_sim_un (struct pstate *sregs, uint64 icount, int dis)
     {
       if (sregs->pwd_mode)
 	{
-	  sregs->simtime = ebase.evtime;	/* skip forward to next event */
+	  sregs->simtime = ebase.evtime; /* skip forward to next event */
 	  if (ext_irl[sregs->cpu])
 	    irq = arch->check_interrupts (sregs);
 	}
@@ -1173,8 +1162,7 @@ run_sim_un (struct pstate *sregs, uint64 icount, int dis)
 		{
 		  if (deb)
 		    {
-		      if ((ebase.bptnum)
-			  && (sregs->bphit = check_bpt (sregs)))
+		      if ((ebase.bptnum) && (sregs->bphit = check_bpt (sregs)))
 			icount = 0;
 		      else
 			{
@@ -1182,7 +1170,7 @@ run_sim_un (struct pstate *sregs, uint64 icount, int dis)
 			    {
 			      sregs->histbuf[sregs->histind].addr = sregs->pc;
 			      sregs->histbuf[sregs->histind].time =
-				ebase.simtime;
+				  ebase.simtime;
 			      sregs->histind++;
 			      if (sregs->histind >= ebase.histlen)
 				sregs->histind = 0;
@@ -1287,7 +1275,7 @@ run_sim_core (struct pstate *sregs, uint64 ntime, int deb, int dis)
 	  {
 	    sregs->hold = T_L1IMISS;
 	    sregs->l1itags[(sregs->pc >> L1ILINEBITS) & L1IMASK] =
-	      (sregs->pc >> L1ILINEBITS);
+		(sregs->pc >> L1ILINEBITS);
 	    sregs->l1imiss++;
 	  }
 #endif
@@ -1376,7 +1364,6 @@ run_sim_core (struct pstate *sregs, uint64 ntime, int deb, int dis)
 	irq = arch->check_interrupts (sregs);
     }
   sregs->lrq = 0;
-
 }
 
 /* time slice simulation of cpu cores in MP system */
@@ -1484,7 +1471,7 @@ get_time (void)
 static const int line_size = 128;
 
 static ssize_t
-mygetdelim (char **lineptr, size_t * n, int delim, FILE * stream)
+mygetdelim (char **lineptr, size_t *n, int delim, FILE *stream)
 {
   int indx = 0;
   int c;
@@ -1533,18 +1520,18 @@ mygetdelim (char **lineptr, size_t * n, int delim, FILE * stream)
 }
 
 static ssize_t
-mygetline (char **lineptr, size_t * n, FILE * stream)
+mygetline (char **lineptr, size_t *n, FILE *stream)
 {
   return mygetdelim (lineptr, n, '\n', stream);
 }
 
 /* Coverage support */
 
-#define COV_EXEC	1
-#define COV_START	2
-#define COV_JMP		4
-#define COV_BT		8
-#define COV_BNT		16
+#define COV_EXEC  1
+#define COV_START 2
+#define COV_JMP	  4
+#define COV_BT	  8
+#define COV_BNT	  16
 
 unsigned char covram[MAX_RAM_SIZE / 4];
 
@@ -1559,7 +1546,6 @@ cov_exec (int address)
 {
   covram[(address >> 2) & MAX_RAM_MASK] |= COV_EXEC;
 }
-
 
 void
 cov_bt (int address1, int address2)

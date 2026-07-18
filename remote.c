@@ -17,7 +17,7 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-/* This code based on socket example at 
+/* This code based on socket example at
  * https://www.geeksforgeeks.org/socket-programming-cc/
  * and on sparc-stub.c from gdb.
  */
@@ -28,7 +28,7 @@
 #include <winsock2.h>
 #else
 #define WSAPOLLFD struct pollfd
-#define WSAPoll poll
+#define WSAPoll	  poll
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
@@ -41,7 +41,7 @@
 #include <signal.h>
 #include "sis.h"
 
-#define EBREAK 0x00100073
+#define EBREAK	0x00100073
 #define CEBREAK 0x90002
 
 #ifndef SIGTRAP
@@ -73,7 +73,7 @@ create_socket (int port)
     return 0;
 #endif
 
-  // Creating socket file descriptor 
+  // Creating socket file descriptor
   if ((server_fd = socket (AF_INET, SOCK_STREAM, 0)) == 0)
     {
       perror ("socket failed");
@@ -81,8 +81,8 @@ create_socket (int port)
     }
 
   // Forcefully attaching socket to the port
-  if (setsockopt
-      (server_fd, SOL_SOCKET, SO_REUSEADDR, (char *) &opt, sizeof (opt)))
+  if (setsockopt (server_fd, SOL_SOCKET, SO_REUSEADDR, (char *) &opt,
+		  sizeof (opt)))
     {
       perror ("setsockopt");
       return 0;
@@ -241,22 +241,22 @@ gdb_remote_exec (char *buf)
       if (buf[1] != 'c')
 	strcpy (txbuf, "OK");
       break;
-    case '?':			/* last signal */
+    case '?': /* last signal */
       if ((ebase.simtime == 0) && (sregs[cpu].pc == last_load_addr) &&
 	  last_load_addr)
 	sprintf (txbuf, "W%02d", sim_stat ());
       else
 	sprintf (txbuf, "S%02d", sim_stat ());
       break;
-    case 'D':			/* detach */
+    case 'D': /* detach */
       strcpy (txbuf, "OK");
       detach = 1;
       break;
-    case 'g':			/* get registers */
+    case 'g': /* get registers */
       len = arch->gdb_get_reg (membuf);
       int2hex (txbuf, membuf, len);
       break;
-    case 'm':			/* read memory */
+    case 'm': /* read memory */
       i = 1;
       len = 0;
       addr = 0;
@@ -274,7 +274,7 @@ gdb_remote_exec (char *buf)
       sim_read (addr, membuf, len);
       int2hex (txbuf, membuf, len);
       break;
-    case 'M':			/* write memory */
+    case 'M': /* write memory */
       i = 1;
       len = 0;
       addr = 0;
@@ -300,7 +300,7 @@ gdb_remote_exec (char *buf)
       sim_write (addr, membuf, len);
       strcpy (txbuf, "OK");
       break;
-    case 'P':			/* write register */
+    case 'P': /* write register */
       i = 1;
       len = 0;
       addr = 0;
@@ -317,7 +317,7 @@ gdb_remote_exec (char *buf)
 	      j = hex (buf[i++]);
 	      j <<= 4;
 	      j |= hex (buf[i]);
-	      len = (j << 24) | (len >> 8);	/* value is in target order! */
+	      len = (j << 24) | (len >> 8); /* value is in target order! */
 	    }
 	  else
 	    len = (len << 4) | hex (buf[i]);
@@ -327,7 +327,7 @@ gdb_remote_exec (char *buf)
       arch->set_register (&sregs[cpu], NULL, len, addr);
       strcpy (txbuf, "OK");
       break;
-    case 'C':			/* continue execution */
+    case 'C': /* continue execution */
       sim_create_inferior ();
     case 'c':
       sim_resume (0);
@@ -341,24 +341,24 @@ gdb_remote_exec (char *buf)
 	    sprintf (txbuf, "T%02xrwatch:%x;", i, ebase.wpaddress);
 	}
       break;
-    case 'k':			/* kill */
-    case 'R':			/* restart */
+    case 'k': /* kill */
+    case 'R': /* restart */
       sim_create_inferior ();
       strcpy (txbuf, "OK");
       break;
     case 'v':
       if (strncmp (&buf[1], "Kill", 4) == 0)
-	{			/* restart */
+	{ /* restart */
 	  sim_create_inferior ();
 	  strcpy (txbuf, "OK");
 	}
       else if (strncmp (&buf[1], "Run;", 4) == 0)
-	{			/* Restart */
+	{ /* Restart */
 	  sim_create_inferior ();
 	  strcpy (txbuf, "S00");
 	}
       else if (strncmp (&buf[1], "Cont", 4) == 0)
-	{			/* continue/step */
+	{ /* continue/step */
 	  switch (buf[5])
 	    {
 	    case '?':
@@ -385,8 +385,8 @@ gdb_remote_exec (char *buf)
       i = sim_stat ();
       sprintf (txbuf, "S%02x", i);
       break;
-    case 'Z':			/* add break/watch point */
-    case 'z':			/* remove break/watch point */
+    case 'Z': /* add break/watch point */
+    case 'z': /* remove break/watch point */
       i = 3;
       addr = 0;
       while (buf[i] && (buf[i] != ','))
@@ -405,7 +405,7 @@ gdb_remote_exec (char *buf)
       else
 	strcpy (txbuf, "E01");
       break;
-    case 'q':			/* query */
+    case 'q': /* query */
       if (strncmp (&buf[1], "fThreadInfo", 11) == 0)
 	{
 	  strcpy (txbuf, "l");
@@ -432,7 +432,7 @@ gdb_remote_exec (char *buf)
 	  strcpy (txbuf, "OK");
 	}
       break;
-    case '!':			/* extended protocl */
+    case '!': /* extended protocl */
       strcpy (txbuf, "OK");
       break;
     default:

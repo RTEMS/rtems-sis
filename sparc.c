@@ -37,11 +37,14 @@ sub_cc (uint32 psr, int32 operand1, int32 operand2, int32 result)
     psr &= ~PSR_Z;
   else
     psr |= PSR_Z;
-  psr = (psr & ~PSR_V) | ((((operand1 & ~operand2 & ~result) |
-			    (~operand1 & operand2 & result)) >> 10) & PSR_V);
-  psr = (psr & ~PSR_C) | ((((~operand1 & operand2) |
-			    ((~operand1 | operand2) & result)) >> 11) &
-			  PSR_C);
+  psr =
+      (psr & ~PSR_V) |
+      ((((operand1 & ~operand2 & ~result) | (~operand1 & operand2 & result)) >>
+	10) &
+       PSR_V);
+  psr = (psr & ~PSR_C) |
+	((((~operand1 & operand2) | ((~operand1 | operand2) & result)) >> 11) &
+	 PSR_C);
   return psr;
 }
 
@@ -53,18 +56,21 @@ add_cc (uint32 psr, int32 operand1, int32 operand2, int32 result)
     psr &= ~PSR_Z;
   else
     psr |= PSR_Z;
-  psr = (psr & ~PSR_V) | ((((operand1 & operand2 & ~result) |
-			    (~operand1 & ~operand2 & result)) >> 10) & PSR_V);
-  psr = (psr & ~PSR_C) | ((((operand1 & operand2) |
-			    ((operand1 | operand2) & ~result)) >> 11) &
-			  PSR_C);
+  psr =
+      (psr & ~PSR_V) |
+      ((((operand1 & operand2 & ~result) | (~operand1 & ~operand2 & result)) >>
+	10) &
+       PSR_V);
+  psr = (psr & ~PSR_C) |
+	((((operand1 & operand2) | ((operand1 | operand2) & ~result)) >> 11) &
+	 PSR_C);
   return psr;
 }
 
 static void
 log_cc (int32 result, struct pstate *sregs)
 {
-  sregs->psr &= ~(PSR_CC);	/* Zero CC bits */
+  sregs->psr &= ~(PSR_CC); /* Zero CC bits */
   sregs->psr = (sregs->psr | ((result >> 8) & PSR_N));
   if (result == 0)
     sregs->psr |= PSR_Z;
@@ -88,7 +94,6 @@ chk_asi (struct pstate *sregs, uint32 *asi, uint32 op3)
   return 1;
 }
 
-
 /* Decode watchpoint address mask from opcode. Not correct for LDST,
    SWAP and STFSR but watchpoints will work anyway. */
 
@@ -98,13 +103,13 @@ wpmask (uint32 op3)
   switch (op3 & 3)
     {
     case 0:
-      return (3);		/* word */
+      return (3); /* word */
     case 1:
-      return (0);		/* byte */
+      return (0); /* byte */
     case 2:
-      return (1);		/* half-word */
+      return (1); /* half-word */
     default:
-      return (7);		/* double word */
+      return (7); /* double word */
     }
 }
 
@@ -116,7 +121,6 @@ extract_byte_signed (uint32 data, uint32 address)
     tmp |= 0xffffff00;
   return tmp;
 }
-
 
 int
 extract_short (uint32 data, uint32 address)
@@ -194,8 +198,8 @@ sparc_dispatch_instruction (struct pstate *sregs)
 
       /* Check if load dependecy is possible */
       if (sregs->simtime <= sregs->ildtime)
-	ldep = (((op3 & 0x38) != 0x28) && ((op3 & 0x3e) != 0x34)
-		&& (sregs->ildreg != 0));
+	ldep = (((op3 & 0x38) != 0x28) && ((op3 & 0x3e) != 0x34) &&
+		(sregs->ildreg != 0));
       else
 	ldep = 0;
       if (sregs->inst & INST_I)
@@ -203,7 +207,7 @@ sparc_dispatch_instruction (struct pstate *sregs)
 	  if (ldep && (sregs->ildreg == rs1))
 	    sregs->hold++;
 	  operand2 = sregs->inst;
-	  operand2 = ((operand2 << 19) >> 19);	/* sign extend */
+	  operand2 = ((operand2 << 19) >> 19); /* sign extend */
 	}
       else
 	{
@@ -219,7 +223,7 @@ sparc_dispatch_instruction (struct pstate *sregs)
       if (sregs->inst & INST_I)
 	{
 	  operand2 = sregs->inst;
-	  operand2 = ((operand2 << 19) >> 19);	/* sign extend */
+	  operand2 = ((operand2 << 19) >> 19); /* sign extend */
 	}
       else
 	{
@@ -316,7 +320,7 @@ sparc_dispatch_instruction (struct pstate *sregs)
 	  if (eicc & 1)
 	    {
 	      operand1 = sregs->inst;
-	      operand1 = ((operand1 << 10) >> 8);	/* sign extend */
+	      operand1 = ((operand1 << 10) >> 8); /* sign extend */
 	      npc = sregs->pc + operand1;
 	      if (ebase.coven)
 		{
@@ -324,7 +328,7 @@ sparc_dispatch_instruction (struct pstate *sregs)
 		    cov_jmp (sregs->pc, npc);
 		  else
 		    cov_bt (sregs->pc, npc);
-		  cov_exec (pc);	/* delay slot executed */
+		  cov_exec (pc); /* delay slot executed */
 		}
 	    }
 	  else
@@ -333,14 +337,14 @@ sparc_dispatch_instruction (struct pstate *sregs)
 		{
 		  if (ebase.coven)
 		    {
-		      cov_start (npc);	/* jump over delay slot */
+		      cov_start (npc); /* jump over delay slot */
 		    }
 		  annul = 1;
 		}
 	      else
 		{
 		  if (ebase.coven)
-		    cov_start (sregs->npc);	/* delay slot executed */
+		    cov_start (sregs->npc); /* delay slot executed */
 		}
 	      if (ebase.coven)
 		cov_bnt (sregs->pc);
@@ -417,12 +421,12 @@ sparc_dispatch_instruction (struct pstate *sregs)
 	  if (eicc)
 	    {
 	      operand1 = sregs->inst;
-	      operand1 = ((operand1 << 10) >> 8);	/* sign extend */
+	      operand1 = ((operand1 << 10) >> 8); /* sign extend */
 	      npc = sregs->pc + operand1;
 	      if (ebase.coven)
 		{
 		  cov_bt (sregs->pc, npc);
-		  cov_exec (pc);	/* delay slot executed */
+		  cov_exec (pc); /* delay slot executed */
 		}
 	    }
 	  else
@@ -431,14 +435,14 @@ sparc_dispatch_instruction (struct pstate *sregs)
 		{
 		  if (ebase.coven)
 		    {
-		      cov_start (npc);	/* jump over delay slot */
+		      cov_start (npc); /* jump over delay slot */
 		    }
 		  annul = 1;
 		}
 	      else
 		{
 		  if (ebase.coven)
-		    cov_start (pc);	/* delay slot executed */
+		    cov_start (pc); /* delay slot executed */
 		}
 	      if (ebase.coven)
 		cov_bnt (sregs->pc);
@@ -450,7 +454,7 @@ sparc_dispatch_instruction (struct pstate *sregs)
 	  break;
 	}
       break;
-    case 1:			/* CALL */
+    case 1: /* CALL */
 #ifdef STAT
       sregs->nbranch++;
 #endif
@@ -459,7 +463,7 @@ sparc_dispatch_instruction (struct pstate *sregs)
       if (ebase.coven)
 	{
 	  cov_jmp (sregs->pc, npc);
-	  cov_exec (pc);	/* delay slot executed */
+	  cov_exec (pc); /* delay slot executed */
 	}
       break;
 
@@ -549,9 +553,9 @@ sparc_dispatch_instruction (struct pstate *sregs)
 	      break;
 
 	    case MULScc:
-	      operand1 =
-		(((sregs->psr & PSR_V) ^ ((sregs->psr & PSR_N) >> 2))
-		 << 10) | (rs1 >> 1);
+	      operand1 = (((sregs->psr & PSR_V) ^ ((sregs->psr & PSR_N) >> 2))
+			  << 10) |
+			 (rs1 >> 1);
 	      if ((sregs->y & 1) == 0)
 		operand2 = 0;
 	      *rdd = operand1 + operand2;
@@ -898,8 +902,8 @@ sparc_dispatch_instruction (struct pstate *sregs)
 		  sregs->trap = TRAP_PRIVI;
 		  break;
 		}
-	      sregs->psr = (sregs->psr & 0xff000000) |
-		((rs1 ^ operand2) & 0x00f03fff);
+	      sregs->psr =
+		  (sregs->psr & 0xff000000) | ((rs1 ^ operand2) & 0x00f03fff);
 	      break;
 	    case WRWIM:
 	      if (!(sregs->psr & PSR_S))
@@ -915,8 +919,8 @@ sparc_dispatch_instruction (struct pstate *sregs)
 		  sregs->trap = TRAP_PRIVI;
 		  break;
 		}
-	      sregs->tbr = (sregs->tbr & 0x00000ff0) |
-		((rs1 ^ operand2) & 0xfffff000);
+	      sregs->tbr =
+		  (sregs->tbr & 0x00000ff0) | ((rs1 ^ operand2) & 0xfffff000);
 	      break;
 	    case WRY:
 	      sregs->y = (rs1 ^ operand2);
@@ -940,7 +944,7 @@ sparc_dispatch_instruction (struct pstate *sregs)
 #ifdef STAT
 	      sregs->nbranch++;
 #endif
-	      sregs->icnt = T_JMPL;	/* JMPL takes two cycles */
+	      sregs->icnt = T_JMPL; /* JMPL takes two cycles */
 	      if (rs1 & 0x3)
 		{
 		  sregs->trap = TRAP_UNALI;
@@ -949,17 +953,17 @@ sparc_dispatch_instruction (struct pstate *sregs)
 	      *rdd = sregs->pc;
 	      npc = rs1 + operand2;
 	      if (!npc)
-		sregs->trap = NULL_TRAP;	// halt on null pointer
+		sregs->trap = NULL_TRAP; // halt on null pointer
 	      if (ebase.coven)
 		{
 		  cov_jmp (sregs->pc, npc);
-		  cov_exec (pc);	/* delay slot executed */
+		  cov_exec (pc); /* delay slot executed */
 		}
 	      break;
 	    case RETT:
 	      address = rs1 + operand2;
 	      new_cwp = ((sregs->psr & PSR_CWP) + 1) & PSR_CWP;
-	      sregs->icnt = T_RETT;	/* RETT takes two cycles */
+	      sregs->icnt = T_RETT; /* RETT takes two cycles */
 	      if (sregs->psr & PSR_ET)
 		{
 		  sregs->trap = TRAP_UNIMP;
@@ -981,15 +985,15 @@ sparc_dispatch_instruction (struct pstate *sregs)
 		  break;
 		}
 	      if (!address)
-		sregs->trap = NULL_TRAP;	// halt on null pointer
+		sregs->trap = NULL_TRAP; // halt on null pointer
 	      sregs->psr = (sregs->psr & ~PSR_CWP) | new_cwp | PSR_ET;
 	      sregs->psr =
-		(sregs->psr & ~PSR_S) | ((sregs->psr & PSR_PS) << 1);
+		  (sregs->psr & ~PSR_S) | ((sregs->psr & PSR_PS) << 1);
 	      npc = address;
 	      if (ebase.coven)
 		{
 		  cov_jmp (sregs->pc, npc);
-		  cov_exec (pc);	/* delay slot executed */
+		  cov_exec (pc); /* delay slot executed */
 		}
 	      break;
 
@@ -999,13 +1003,13 @@ sparc_dispatch_instruction (struct pstate *sregs)
 	    }
 	}
       break;
-    case 3:			/* Load/store instructions */
+    case 3: /* Load/store instructions */
 
       address = rs1 + operand2;
 
       if (op3 & 4)
 	{
-	  sregs->icnt = T_ST;	/* Set store instruction count */
+	  sregs->icnt = T_ST; /* Set store instruction count */
 
 	  /* skip store if we resume after a write watchpoint */
 	  if (sis_gdb_break && ebase.wphit)
@@ -1020,7 +1024,8 @@ sparc_dispatch_instruction (struct pstate *sregs)
 		{
 		  sregs->trap = WPT_TRAP;
 		  /* gdb seems to expect that the write goes trough when the
-		   * watchpoint is hit, but PC stays on the store instruction */
+		   * watchpoint is hit, but PC stays on the store instruction
+		   */
 		  if (!sis_gdb_break)
 		    break;
 		}
@@ -1031,7 +1036,7 @@ sparc_dispatch_instruction (struct pstate *sregs)
 	}
       else
 	{
-	  sregs->icnt = T_LD;	/* Set load instruction count */
+	  sregs->icnt = T_LD; /* Set load instruction count */
 	  if (ebase.wprnum)
 	    {
 	      if ((ebase.wphit = check_wpr (sregs, address, wpmask (op3))))
@@ -1080,7 +1085,7 @@ sparc_dispatch_instruction (struct pstate *sregs)
 	      rdd[0] = ddata[0];
 	      rdd[1] = ddata[1];
 #if defined(STAT) || defined(ENABLE_L1CACHE)
-	      sregs->nload++;	/* Double load counts twice */
+	      sregs->nload++; /* Double load counts twice */
 #endif
 	    }
 	  break;
@@ -1213,7 +1218,7 @@ sparc_dispatch_instruction (struct pstate *sregs)
 	  sregs->hold += ws;
 	  sregs->flrd = rd;
 	  sregs->ltime = sregs->simtime + sregs->icnt + FLSTHOLD +
-	    sregs->hold + sregs->fhold;
+			 sregs->hold + sregs->fhold;
 	  if (mexc)
 	    {
 	      sregs->trap = TRAP_DEXC;
@@ -1257,12 +1262,12 @@ sparc_dispatch_instruction (struct pstate *sregs)
 #endif
 	      sregs->fsi[rd] = ddata[0];
 #if defined(STAT) || defined(ENABLE_L1CACHE)
-	      sregs->nload++;	/* Double load counts twice */
+	      sregs->nload++; /* Double load counts twice */
 #endif
 	      rd ^= 1;
 	      sregs->fsi[rd] = ddata[1];
 	      sregs->ltime = sregs->simtime + sregs->icnt + FLSTHOLD +
-		sregs->hold + sregs->fhold;
+			     sregs->hold + sregs->fhold;
 	      rd &= 0x1E;
 	      sregs->flrd = rd;
 	    }
@@ -1376,7 +1381,7 @@ sparc_dispatch_instruction (struct pstate *sregs)
 	  sregs->hold += ws;
 	  sregs->icnt = T_STD;
 #if defined(STAT) || defined(ENABLE_L1CACHE)
-	  sregs->nstore++;	/* Double store counts twice */
+	  sregs->nstore++; /* Double store counts twice */
 #endif
 	  if (mexc)
 	    {
@@ -1410,7 +1415,7 @@ sparc_dispatch_instruction (struct pstate *sregs)
 	  sregs->hold += ws;
 	  sregs->icnt = T_STD;
 #if defined(STAT) || defined(ENABLE_L1CACHE)
-	  sregs->nstore++;	/* Double store counts twice */
+	  sregs->nstore++; /* Double store counts twice */
 #endif
 	  if (mexc)
 	    {
@@ -1459,7 +1464,7 @@ sparc_dispatch_instruction (struct pstate *sregs)
 	  rd ^= 1;
 #endif
 	  mexc =
-	    ms->memory_write (address, (uint32 *) & sregs->fsi[rd], 2, &ws);
+	      ms->memory_write (address, (uint32 *) &sregs->fsi[rd], 2, &ws);
 	  sregs->hold += ws;
 	  if (mexc)
 	    {
@@ -1494,7 +1499,7 @@ sparc_dispatch_instruction (struct pstate *sregs)
 	  sregs->hold += ws;
 	  sregs->icnt = T_STD;
 #if defined(STAT) || defined(ENABLE_L1CACHE)
-	  sregs->nstore++;	/* Double store counts twice */
+	  sregs->nstore++; /* Double store counts twice */
 #endif
 	  if (mexc)
 	    {
@@ -1579,7 +1584,7 @@ sparc_dispatch_instruction (struct pstate *sregs)
 	  sregs->ildtime = sregs->simtime + sregs->hold + sregs->icnt;
 	  sregs->ildreg = rd;
 	  if ((op3 | 0x10) == 0x13)
-	    sregs->ildreg |= 1;	/* Double load, odd register loaded
+	    sregs->ildreg |= 1; /* Double load, odd register loaded
 				 * last */
 	}
 #endif
@@ -1614,31 +1619,30 @@ sparc_dispatch_instruction (struct pstate *sregs)
   return 0;
 }
 
-
-#define FABSs	0x09
-#define FADDs	0x41
-#define FADDd	0x42
-#define FCMPs	0x51
-#define FCMPd	0x52
-#define FCMPEs	0x55
-#define FCMPEd	0x56
-#define FDIVs	0x4D
-#define FDIVd	0x4E
-#define FMOVs	0x01
-#define FMULs	0x49
-#define FMULd	0x4A
-#define FsMULd	0x69
-#define FNEGs	0x05
-#define FSQRTs	0x29
-#define FSQRTd	0x2A
-#define FSUBs	0x45
-#define FSUBd	0x46
-#define FdTOi	0xD2
-#define FdTOs	0xC6
-#define FiTOs	0xC4
-#define FiTOd	0xC8
-#define FsTOi	0xD1
-#define FsTOd	0xC9
+#define FABSs  0x09
+#define FADDs  0x41
+#define FADDd  0x42
+#define FCMPs  0x51
+#define FCMPd  0x52
+#define FCMPEs 0x55
+#define FCMPEd 0x56
+#define FDIVs  0x4D
+#define FDIVd  0x4E
+#define FMOVs  0x01
+#define FMULs  0x49
+#define FMULd  0x4A
+#define FsMULd 0x69
+#define FNEGs  0x05
+#define FSQRTs 0x29
+#define FSQRTd 0x2A
+#define FSUBs  0x45
+#define FSUBd  0x46
+#define FdTOi  0xD2
+#define FdTOs  0xC6
+#define FiTOs  0xC4
+#define FiTOd  0xC8
+#define FsTOi  0xD1
+#define FsTOd  0xC9
 
 /* This routine should return the accrued exceptions */
 static int
@@ -1714,16 +1718,15 @@ fpexec (uint32 op3, uint32 rd, uint32 rs1, uint32 rs2, struct pstate *sregs)
 	  /* Adjust for double floats */
 
 	  ldadj = opf & 1;
-	  if (!
-	      (((sregs->flrd - rs1) >> ldadj)
-	       && ((sregs->flrd - rs2) >> ldadj)))
+	  if (!(((sregs->flrd - rs1) >> ldadj) &&
+		((sregs->flrd - rs2) >> ldadj)))
 	    sregs->fhold++;
 	}
     }
 
   sregs->finst++;
 
-  sregs->frs1 = rs1;		/* Store src and dst for dependecy check */
+  sregs->frs1 = rs1; /* Store src and dst for dependecy check */
   sregs->frs2 = rs2;
   sregs->frd = rd;
 
@@ -1736,7 +1739,7 @@ fpexec (uint32 op3, uint32 rd, uint32 rs1, uint32 rs2, struct pstate *sregs)
     case FABSs:
       sregs->fs[rd] = fabs (sregs->fs[rs2]);
       sregs->ftime += T_FABSs;
-      sregs->frs1 = 32;		/* rs1 ignored */
+      sregs->frs1 = 32; /* rs1 ignored */
       break;
     case FADDs:
       sregs->fs[rd] = sregs->fs[rs1] + sregs->fs[rs2];
@@ -1759,7 +1762,7 @@ fpexec (uint32 op3, uint32 rd, uint32 rs1, uint32 rs2, struct pstate *sregs)
       sregs->fsr |= 0x0C00;
       sregs->fsr &= ~(fcc << 10);
       sregs->ftime += T_FCMPs;
-      sregs->frd = 32;		/* rd ignored */
+      sregs->frd = 32; /* rd ignored */
       if ((fcc == 0) && (opf == FCMPEs))
 	{
 	  sregs->fpstate = FP_EXC_PE;
@@ -1779,7 +1782,7 @@ fpexec (uint32 op3, uint32 rd, uint32 rs1, uint32 rs2, struct pstate *sregs)
       sregs->fsr |= 0x0C00;
       sregs->fsr &= ~(fcc << 10);
       sregs->ftime += T_FCMPd;
-      sregs->frd = 32;		/* rd ignored */
+      sregs->frd = 32; /* rd ignored */
       if ((fcc == 0) && (opf == FCMPEd))
 	{
 	  sregs->fpstate = FP_EXC_PE;
@@ -1797,7 +1800,7 @@ fpexec (uint32 op3, uint32 rd, uint32 rs1, uint32 rs2, struct pstate *sregs)
     case FMOVs:
       sregs->fsi[rd] = sregs->fsi[rs2];
       sregs->ftime += T_FMOVs;
-      sregs->frs1 = 32;		/* rs1 ignored */
+      sregs->frs1 = 32; /* rs1 ignored */
       break;
     case FMULs:
       sregs->fs[rd] = sregs->fs[rs1] * sregs->fs[rs2];
@@ -1805,9 +1808,9 @@ fpexec (uint32 op3, uint32 rd, uint32 rs1, uint32 rs2, struct pstate *sregs)
       break;
     case FsMULd:
       if (cputype != CPU_ERC32)
-	{			/* FSMULD only supported for LEON3 */
+	{ /* FSMULD only supported for LEON3 */
 	  sregs->fd[rd >> 1] =
-	    (double) sregs->fs[rs1] * (double) sregs->fs[rs2];
+	      (double) sregs->fs[rs1] * (double) sregs->fs[rs2];
 	  sregs->ftime += T_FMULd;
 	}
       else
@@ -1823,7 +1826,7 @@ fpexec (uint32 op3, uint32 rd, uint32 rs1, uint32 rs2, struct pstate *sregs)
     case FNEGs:
       sregs->fs[rd] = -sregs->fs[rs2];
       sregs->ftime += T_FNEGs;
-      sregs->frs1 = 32;		/* rs1 ignored */
+      sregs->frs1 = 32; /* rs1 ignored */
       break;
     case FSQRTs:
       if (sregs->fs[rs2] < 0.0)
@@ -1835,7 +1838,7 @@ fpexec (uint32 op3, uint32 rd, uint32 rs1, uint32 rs2, struct pstate *sregs)
 	}
       sregs->fs[rd] = sqrtf (sregs->fs[rs2]);
       sregs->ftime += T_FSQRTs;
-      sregs->frs1 = 32;		/* rs1 ignored */
+      sregs->frs1 = 32; /* rs1 ignored */
       break;
     case FSQRTd:
       if (sregs->fd[rs2 >> 1] < 0.0)
@@ -1847,7 +1850,7 @@ fpexec (uint32 op3, uint32 rd, uint32 rs1, uint32 rs2, struct pstate *sregs)
 	}
       sregs->fd[rd >> 1] = sqrt (sregs->fd[rs2 >> 1]);
       sregs->ftime += T_FSQRTd;
-      sregs->frs1 = 32;		/* rs1 ignored */
+      sregs->frs1 = 32; /* rs1 ignored */
       break;
     case FSUBs:
       sregs->fs[rd] = sregs->fs[rs1] - sregs->fs[rs2];
@@ -1860,32 +1863,32 @@ fpexec (uint32 op3, uint32 rd, uint32 rs1, uint32 rs2, struct pstate *sregs)
     case FdTOi:
       sregs->fsi[rd] = (int) sregs->fd[rs2 >> 1];
       sregs->ftime += T_FdTOi;
-      sregs->frs1 = 32;		/* rs1 ignored */
+      sregs->frs1 = 32; /* rs1 ignored */
       break;
     case FdTOs:
       sregs->fs[rd] = (float32) sregs->fd[rs2 >> 1];
       sregs->ftime += T_FdTOs;
-      sregs->frs1 = 32;		/* rs1 ignored */
+      sregs->frs1 = 32; /* rs1 ignored */
       break;
     case FiTOs:
       sregs->fs[rd] = (float32) sregs->fsi[rs2];
       sregs->ftime += T_FiTOs;
-      sregs->frs1 = 32;		/* rs1 ignored */
+      sregs->frs1 = 32; /* rs1 ignored */
       break;
     case FiTOd:
       sregs->fd[rd >> 1] = (float64) sregs->fsi[rs2];
       sregs->ftime += T_FiTOd;
-      sregs->frs1 = 32;		/* rs1 ignored */
+      sregs->frs1 = 32; /* rs1 ignored */
       break;
     case FsTOi:
       sregs->fsi[rd] = (int) sregs->fs[rs2];
       sregs->ftime += T_FsTOi;
-      sregs->frs1 = 32;		/* rs1 ignored */
+      sregs->frs1 = 32; /* rs1 ignored */
       break;
     case FsTOd:
       sregs->fd[rd >> 1] = sregs->fs[rs2];
       sregs->ftime += T_FsTOd;
-      sregs->frs1 = 32;		/* rs1 ignored */
+      sregs->frs1 = 32; /* rs1 ignored */
       break;
 
     default:
@@ -1935,8 +1938,6 @@ fpexec (uint32 op3, uint32 rd, uint32 rs1, uint32 rs2, struct pstate *sregs)
   clear_accex ();
 
   return 0;
-
-
 }
 
 static int
@@ -1974,7 +1975,7 @@ sparc_execute_trap (struct pstate *sregs)
       sregs->psr &= ~PSR_ET;
       sregs->psr |= ((sregs->psr & PSR_S) >> 1);
       sregs->psr =
-	(((sregs->psr & PSR_CWP) - 1) & 0x7) | (sregs->psr & ~PSR_CWP);
+	  (((sregs->psr & PSR_CWP) - 1) & 0x7) | (sregs->psr & ~PSR_CWP);
       cwp = ((sregs->psr & PSR_CWP) << 4);
       sregs->r[(cwp + 17) & 0x7f] = sregs->pc;
       sregs->r[(cwp + 18) & 0x7f] = sregs->npc;
@@ -1993,20 +1994,17 @@ sparc_execute_trap (struct pstate *sregs)
 
       /* Increase simulator time and add some jitter */
       sregs->icnt = TRAP_C + (sregs->ninst ^ sregs->simtime) & 0x7;
-
     }
 
-
   return 0;
-
 }
 
 static int
 sparc_check_interrupts (struct pstate *sregs)
 {
   if ((ext_irl[sregs->cpu]) && (sregs->psr & PSR_ET) &&
-      ((ext_irl[sregs->cpu] == 15)
-       || (ext_irl[sregs->cpu] > (int) ((sregs->psr & PSR_PIL) >> 8))))
+      ((ext_irl[sregs->cpu] == 15) ||
+       (ext_irl[sregs->cpu] > (int) ((sregs->psr & PSR_PIL) >> 8))))
     {
       if (sregs->pwd_mode)
 	{
@@ -2032,9 +2030,8 @@ sparc_disp_regs (struct pstate *sregs, int cwp)
   for (i = 0; i < 8; i++)
     {
       printf ("   %d:  %08X   %08X   %08X   %08X\n", i,
-	      sregs->r[(cwp + i + 24) & 0x7f],
-	      sregs->r[(cwp + i + 16) & 0x7f], sregs->r[(cwp + i + 8) & 0x7f],
-	      sregs->g[i]);
+	      sregs->r[(cwp + i + 24) & 0x7f], sregs->r[(cwp + i + 16) & 0x7f],
+	      sregs->r[(cwp + i + 8) & 0x7f], sregs->g[i]);
     }
 }
 
@@ -2050,8 +2047,8 @@ sparc_display_ctrl (struct pstate *sregs)
 
   uint32 i;
 
-  printf ("\n psr: %08X   wim: %08X   tbr: %08X   y: %08X\n",
-	  sregs->psr, sregs->wim, sregs->tbr, sregs->y);
+  printf ("\n psr: %08X   wim: %08X   tbr: %08X   y: %08X\n", sregs->psr,
+	  sregs->wim, sregs->tbr, sregs->y);
   ms->sis_memory_read (sregs->pc, (char *) &i, 4);
   printf ("\n  pc: %08X = %08X    ", sregs->pc, i);
   print_insn_sis (sregs->pc);
@@ -2068,8 +2065,8 @@ sparc_display_ctrl (struct pstate *sregs)
 static void
 sparc_display_special (struct pstate *sregs)
 {
-  printf ("\n cache ctrl  :   %08X\n asr17       :   %08X",
-	  sregs->cache_ctrl, sregs->asr17);
+  printf ("\n cache ctrl  :   %08X\n asr17       :   %08X", sregs->cache_ctrl,
+	  sregs->asr17);
   printf ("\n asr22       :   %08X\n asr23       :   %08X\n\n",
 	  (uint32) (sregs->simtime >> 32),
 	  (uint32) sregs->simtime & 0xffffffff);
@@ -2290,7 +2287,6 @@ sparc_set_rega (struct pstate *sregs, char *reg, uint32 rval)
     default:
       break;
     }
-
 }
 
 static void
@@ -2337,10 +2333,9 @@ gdb_sp_read (uint32 mem, char *buf, int length)
     {
       if ((mem >= sregs[cpu].sp[i]) && (mem < (sregs[cpu].sp[i] + 64)))
 	{
-	  data =
-	    (char *)
-	    &sregs[cpu].r[((i + 1) * 16 +
-			   ((mem - sregs->sp[i]) >> 2)) % (NWIN * 16)];
+	  data = (char *) &sregs[cpu]
+		     .r[((i + 1) * 16 + ((mem - sregs->sp[i]) >> 2)) %
+			(NWIN * 16)];
 	  for (j = 0; j < length; j++)
 #ifdef HOST_LITTLE_ENDIAN
 	    buf[j] = data[j ^ 3];
@@ -2397,70 +2392,69 @@ sparc_gdb_get_reg (char *buf)
 #define LDST 3
 
 /* -- OP2 codes (INST[31..30]) */
-#define UNIMP    0
-#define FBFCC    6
-#define CBCCC    7
+#define UNIMP 0
+#define FBFCC 6
+#define CBCCC 7
 
 /*-- OP3 codes (INST[24..19]) */
-#define IADD     0
-#define ISUB     4
-#define ANDN     5
-#define ORN      6
-#define ANDCC    0x11
-#define ORCC     0x12
-#define XORCC    0x13
-#define ANDNCC   0x15
-#define ORNCC    0x16
-#define XNORCC   0x17
-#define MULSCC   0x24
-#define FPOP1    0x34
-#define FPOP2    0x35
-#define CPOP1    0x36
-#define CPOP2    0x37
-#define UMAC	 0x3e
-#define SMAC	 0x3f
+#define IADD   0
+#define ISUB   4
+#define ANDN   5
+#define ORN    6
+#define ANDCC  0x11
+#define ORCC   0x12
+#define XORCC  0x13
+#define ANDNCC 0x15
+#define ORNCC  0x16
+#define XNORCC 0x17
+#define MULSCC 0x24
+#define FPOP1  0x34
+#define FPOP2  0x35
+#define CPOP1  0x36
+#define CPOP2  0x37
+#define UMAC   0x3e
+#define SMAC   0x3f
 
-#define STC      0x34
-#define STDCQ    0x36
-#define STDC     0x37
+#define STC   0x34
+#define STDCQ 0x36
+#define STDC  0x37
 
 /* -- BICC codes */
 #define BA 8
 
 /* -- FPOP1 */
-#define FITOS    0xc4
-#define FITOD    0xc8
-#define FSTOI    0xd1
-#define FDTOI    0xd2
-#define FSTOD    0xc9
-#define FDTOS    0xc6
-#define FMOVS    0x1
-#define FNEGS    0x5
-#define FABSS    0x9
-#define FSQRTS   0x29
-#define FSQRTD   0x2a
-#define FADDS    0x41
-#define FADDD    0x42
-#define FSUBS    0x45
-#define FSUBD    0x46
-#define FMULS    0x49
-#define FMULD    0x4a
-#define FSMULD   0x69
-#define FDIVS    0x4d
-#define FDIVD    0x4e
+#define FITOS  0xc4
+#define FITOD  0xc8
+#define FSTOI  0xd1
+#define FDTOI  0xd2
+#define FSTOD  0xc9
+#define FDTOS  0xc6
+#define FMOVS  0x1
+#define FNEGS  0x5
+#define FABSS  0x9
+#define FSQRTS 0x29
+#define FSQRTD 0x2a
+#define FADDS  0x41
+#define FADDD  0x42
+#define FSUBS  0x45
+#define FSUBD  0x46
+#define FMULS  0x49
+#define FMULD  0x4a
+#define FSMULD 0x69
+#define FDIVS  0x4d
+#define FDIVD  0x4e
 
 /* -- FPOP2 */
-#define FCMPS    0x51
-#define FCMPD    0x52
-#define FCMPES   0x55
-#define FCMPED   0x56
+#define FCMPS  0x51
+#define FCMPD  0x52
+#define FCMPES 0x55
+#define FCMPED 0x56
 
 struct insn_type
 {
   unsigned int op, op2, op3, opf, cond, annul;
   int rs1, rs2, rd, i, simm, asi, insn;
 };
-
 
 static void
 regdec (char *st, int r)
@@ -2663,15 +2657,11 @@ regres (char *st, struct insn_type insn, int hex)
   regdec (st, insn.rd);
 }
 
-static char brtbl[16][4] =
-  { "n", "e", "le", "l", "lue", "cs", "neg", "vs", "a", "ne", "g", "ge", "gu",
-  "cc", "pos", "vc"
-};
+static char brtbl[16][4] = { "n", "e",	"le", "l",  "lue", "cs", "neg", "vs",
+			     "a", "ne", "g",  "ge", "gu",  "cc", "pos", "vc" };
 
-static char fbrtbl[16][4] =
-  { "n", "ne", "lg", "ul", "l", "ug", "g", "u", "a", "e", "ue", "ge", "uge",
-  "le", "ule", "o"
-};
+static char fbrtbl[16][4] = { "n", "ne", "lg", "ul", "l",   "ug", "g",	 "u",
+			      "a", "e",	 "ue", "ge", "uge", "le", "ule", "o" };
 
 char *
 branchop (int insn)
@@ -3515,7 +3505,6 @@ sparc_disas (char *st, unsigned pc, unsigned int inst)
       sprintf (st, "unknown opcode: 0x%08x", inst);
     }
 }
-
 
 static void
 sparc_print_insn (uint32 addr)

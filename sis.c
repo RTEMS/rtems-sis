@@ -33,13 +33,13 @@
 #include "readline/readline.h"
 #include "readline/history.h"
 #else
- /* Linenoise as a readline library replacement
-    https://github.com/antirez/linenoise */
+/* Linenoise as a readline library replacement
+   https://github.com/antirez/linenoise */
 #include "linenoise.h"
 #endif
 
 /* Command history buffer length - MUST be binary */
-#define HIST_LEN	256
+#define HIST_LEN 256
 
 int
 main (int argc, char **argv)
@@ -60,9 +60,9 @@ main (int argc, char **argv)
   char prompt[8];
   int gdb = 0;
 
-  printf
-    ("\n SIS - SPARC/RISCV instruction simulator %s,  copyright Jiri Gaisler 2020\n",
-     sis_version);
+  printf ("\n SIS - SPARC/RISCV instruction simulator %s,  copyright Jiri "
+	  "Gaisler 2020\n",
+	  sis_version);
   printf (" Bug-reports to jiri@gaisler.se\n\n");
 
   /* initialize history buffer */
@@ -217,14 +217,14 @@ main (int argc, char **argv)
 	      if (delta <= 0)
 		delta = 50;
 	    }
-    else if (strcmp (argv[stat], "-help") == 0)
-      {
-        sis_usage ();
-        exit (0);
-      }
+	  else if (strcmp (argv[stat], "-help") == 0)
+	    {
+	      sis_usage ();
+	      exit (0);
+	    }
 	  else
 	    {
-        printf ("sis: unknown option \"%s\"\n", argv[stat]);
+	      printf ("sis: unknown option \"%s\"\n", argv[stat]);
 	      sis_usage ();
 	      exit (1);
 	    }
@@ -289,9 +289,9 @@ main (int argc, char **argv)
 		ncpu, delta);
       else
 	{
-	  printf
-	    (" RISCV/GRLIB emulation enabled, %d cpus online, delta %d clocks\n",
-	     ncpu, delta);
+	  printf (" RISCV/GRLIB emulation enabled, %d cpus online, delta %d "
+		  "clocks\n",
+		  ncpu, delta);
 	  arch = &riscv;
 	}
       ms = &leon3;
@@ -299,18 +299,19 @@ main (int argc, char **argv)
 	freq = 50;
       break;
     case CPU_LEON4:
-      printf
-	(" GR740/LEON4 emulation enabled, %d cpus online, delta %d clocks\n",
-	 ncpu, delta);
+      printf (
+	  " GR740/LEON4 emulation enabled, %d cpus online, delta %d clocks\n",
+	  ncpu, delta);
       ms = &gr740;
       if (!freq)
 	freq = 50;
       break;
     case CPU_RISCV:
-//      if (delta == 50)        delta = 25;   // 25 clock delta works better with the CLINT
-      printf
-	(" RISCV/CLINT emulation enabled, %d cpus online, delta %d clocks\n",
-	 ncpu, delta);
+      //      if (delta == 50)        delta = 25;   // 25 clock delta works
+      //      better with the CLINT
+      printf (
+	  " RISCV/CLINT emulation enabled, %d cpus online, delta %d clocks\n",
+	  ncpu, delta);
       ms = &rv32;
       arch = &riscv;
       if (!freq)
@@ -326,8 +327,8 @@ main (int argc, char **argv)
 
 #ifdef ENABLE_L1CACHE
   if (ncpu > 1)
-    printf (" L1 cache: %dK/%dK, %d bytes/line \n",
-	    (1 << (L1IBITS - 10)), (1 << (L1DBITS - 10)), (1 << L1ILINEBITS));
+    printf (" L1 cache: %dK/%dK, %d bytes/line \n", (1 << (L1IBITS - 10)),
+	    (1 << (L1DBITS - 10)), (1 << L1ILINEBITS));
 #endif
 
   if (nfp)
@@ -429,12 +430,12 @@ main (int argc, char **argv)
 		  ((double) ebase.simtime / (double) ebase.freq) / 1000.0);
 	  break;
 	case BPT_HIT:
-	  printf ("cpu %d breakpoint at 0x%08x reached\n",
-		  ebase.bpcpu, sregs[ebase.bpcpu].pc);
+	  printf ("cpu %d breakpoint at 0x%08x reached\n", ebase.bpcpu,
+		  sregs[ebase.bpcpu].pc);
 	  break;
 	case ERROR_MODE:
-	  printf ("cpu %d in error mode (tt = 0x%02x)\n",
-		  ebase.bpcpu, sregs[ebase.bpcpu].trap);
+	  printf ("cpu %d in error mode (tt = 0x%02x)\n", ebase.bpcpu,
+		  sregs[ebase.bpcpu].trap);
 	  stat = 0;
 	  printf (" %8" PRIu64 " ", ebase.simtime);
 	  dis_mem (sregs[cpu].pc, 1);
@@ -460,7 +461,6 @@ main (int argc, char **argv)
       stat = OK;
 
       cmdi = (cmdi + 1) & (HIST_LEN - 1);
-
     }
   if (ebase.coven)
     cov_save (argv[lfile]);
