@@ -30,11 +30,7 @@ static int fpexec (uint32 op3, uint32 rd, uint32 rs1, uint32 rs2,
 		   struct pstate *sregs);
 
 static uint32
-sub_cc (psr, operand1, operand2, result)
-     uint32 psr;
-     int32 operand1;
-     int32 operand2;
-     int32 result;
+sub_cc (uint32 psr, int32 operand1, int32 operand2, int32 result)
 {
   psr = ((psr & ~PSR_N) | ((result >> 8) & PSR_N));
   if (result)
@@ -50,11 +46,7 @@ sub_cc (psr, operand1, operand2, result)
 }
 
 uint32
-add_cc (psr, operand1, operand2, result)
-     uint32 psr;
-     int32 operand1;
-     int32 operand2;
-     int32 result;
+add_cc (uint32 psr, int32 operand1, int32 operand2, int32 result)
 {
   psr = ((psr & ~PSR_N) | ((result >> 8) & PSR_N));
   if (result)
@@ -70,9 +62,7 @@ add_cc (psr, operand1, operand2, result)
 }
 
 static void
-log_cc (result, sregs)
-     int32 result;
-     struct pstate *sregs;
+log_cc (int32 result, struct pstate *sregs)
 {
   sregs->psr &= ~(PSR_CC);	/* Zero CC bits */
   sregs->psr = (sregs->psr | ((result >> 8) & PSR_N));
@@ -81,10 +71,7 @@ log_cc (result, sregs)
 }
 
 static int
-chk_asi (sregs, asi, op3)
-     struct pstate *sregs;
-     uint32 *asi, op3;
-
+chk_asi (struct pstate *sregs, uint32 *asi, uint32 op3)
 {
   if (!(sregs->psr & PSR_S))
     {
@@ -154,8 +141,7 @@ extract_byte (uint32 data, uint32 address)
 
 /* How to map SPARC FSR onto the host */
 static void
-sparc_set_fsr (fsr)
-     uint32 fsr;
+sparc_set_fsr (uint32 fsr)
 {
   int fround;
 
@@ -179,8 +165,7 @@ sparc_set_fsr (fsr)
 }
 
 static int
-sparc_dispatch_instruction (sregs)
-     struct pstate *sregs;
+sparc_dispatch_instruction (struct pstate *sregs)
 {
 
   uint32 cwp, op, op2, op3, asi, rd, cond, rs1, rs2;
@@ -1677,9 +1662,7 @@ sparc_get_accex ()
 }
 
 static int
-fpexec (op3, rd, rs1, rs2, sregs)
-     uint32 op3, rd, rs1, rs2;
-     struct pstate *sregs;
+fpexec (uint32 op3, uint32 rd, uint32 rs1, uint32 rs2, struct pstate *sregs)
 {
   uint32 opf, tem, accex;
   int32 fcc;
@@ -1957,8 +1940,7 @@ fpexec (op3, rd, rs1, rs2, sregs)
 }
 
 static int
-sparc_execute_trap (sregs)
-     struct pstate *sregs;
+sparc_execute_trap (struct pstate *sregs)
 {
   int32 cwp;
 
@@ -2020,8 +2002,7 @@ sparc_execute_trap (sregs)
 }
 
 static int
-sparc_check_interrupts (sregs)
-     struct pstate *sregs;
+sparc_check_interrupts (struct pstate *sregs)
 {
   if ((ext_irl[sregs->cpu]) && (sregs->psr & PSR_ET) &&
       ((ext_irl[sregs->cpu] == 15)
@@ -2095,10 +2076,7 @@ sparc_display_special (struct pstate *sregs)
 }
 
 static void
-sparc_set_regi (sregs, reg, rval)
-     struct pstate *sregs;
-     int32 reg;
-     uint32 rval;
+sparc_set_regi (struct pstate *sregs, int32 reg, uint32 rval)
 {
   uint32 cwp;
 
@@ -2325,9 +2303,7 @@ sparc_set_register (struct pstate *sregs, char *reg, uint32 rval, uint32 addr)
 }
 
 static void
-disp_reg (sregs, reg)
-     struct pstate *sregs;
-     char *reg;
+disp_reg (struct pstate *sregs, char *reg)
 {
   if (strncmp (reg, "w", 1) == 0)
     sparc_disp_regs (sregs, VAL (&reg[1]));

@@ -55,8 +55,7 @@ riscv_get_accex ()
 
 /* How to map RISCV FSR onto the host */
 static void
-riscv_set_fsr (fsr)
-     uint32 fsr;
+riscv_set_fsr (uint32 fsr)
 {
   int fround;
 
@@ -81,10 +80,7 @@ riscv_set_fsr (fsr)
 }
 
 static int
-set_csr (address, sregs, value)
-     uint32 address;
-     struct pstate *sregs;
-     uint32 value;
+set_csr (uint32 address, struct pstate *sregs, uint32 value)
 {
   int res = 0;
   switch (address)
@@ -133,9 +129,7 @@ set_csr (address, sregs, value)
 }
 
 int
-get_csr (address, sregs)
-     uint32 address;
-     struct pstate *sregs;
+get_csr (uint32 address, struct pstate *sregs)
 {
   uint64 tmp;
   switch (address)
@@ -217,8 +211,7 @@ rv32_check_lirq (int cpu)
 }
 
 static int
-riscv_dispatch_instruction (sregs)
-     struct pstate *sregs;
+riscv_dispatch_instruction (struct pstate *sregs)
 {
 
   uint32 op1, op2, op3, rd, rs1, rs2, npc, btrue, inst, *wdata;
@@ -2026,8 +2019,7 @@ riscv_dispatch_instruction (sregs)
 }
 
 static int
-riscv_execute_trap (sregs)
-     struct pstate *sregs;
+riscv_execute_trap (struct pstate *sregs)
 {
   if (sis_verbose > 1)
     printf (" %8" PRIu64 " cpu %d trap :  %08X\n",
@@ -2124,8 +2116,7 @@ riscv_execute_trap (sregs)
 }
 
 static int
-riscv_check_interrupts (sregs)
-     struct pstate *sregs;
+riscv_check_interrupts (struct pstate *sregs)
 {
   if ((ext_irl[sregs->cpu]) &&
       ((sregs->mstatus & MSTATUS_MIE) && (sregs->mie & MIE_MEIE)))
@@ -2144,10 +2135,7 @@ riscv_check_interrupts (sregs)
 }
 
 static void
-riscv_set_regi (sregs, reg, rval)
-     struct pstate *sregs;
-     int32 reg;
-     uint32 rval;
+riscv_set_regi (struct pstate *sregs, int32 reg, uint32 rval)
 {
 
   if ((reg >= 0) && (reg < 32))

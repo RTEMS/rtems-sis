@@ -37,9 +37,7 @@
 #define CEBREAK 0x90002
 
 static int
-run_sim_gdb (icount, dis)
-     uint64 icount;
-     int dis;
+run_sim_gdb (uint64 icount, int dis)
 {
   int res;
 
@@ -52,9 +50,7 @@ run_sim_gdb (icount, dis)
 }
 
 void
-sim_close (sd, quitting)
-     SIM_DESC sd;
-     int quitting;
+sim_close (SIM_DESC sd, int quitting)
 {
 
   ms->exit_sim ();
@@ -112,9 +108,7 @@ sim_read (uint32 mem, char *buf, int length)
 }
 
 void
-sim_info (sd, verbose)
-     SIM_DESC sd;
-     int verbose;
+sim_info (SIM_DESC sd, int verbose)
 {
   show_stat (&sregs[cpu]);
 }

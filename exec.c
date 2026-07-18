@@ -124,8 +124,7 @@ clear_accex ()
 }
 
 void
-init_regs (sregs)
-     struct pstate *sregs;
+init_regs (struct pstate *sregs)
 {
   int i;
 
