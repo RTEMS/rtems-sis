@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# SPDX-FileCopyrightText: 2026 embedded brains GmbH & Co. KG
+#
+# Simulator sources that have reached 100% line and branch coverage, checked
+# by tests/check-coverage.py.  A file is added by the commit that finishes
+# it.  Entries are never removed: a file that regresses is fixed, not
+# delisted.
+#
+# Keep sorted.
