@@ -19,6 +19,7 @@
 import shutil
 
 from waflib import Context
+from waflib.Tools import waf_unit_test
 
 APPNAME = 'sis'
 VERSION = '2.30'
@@ -49,6 +50,7 @@ HEADERS = ['fcntl.h', 'stdlib.h', 'termios.h']
 
 def options(opt):
     opt.load('compiler_c compiler_cxx')
+    opt.load('waf_unit_test')
     opt.add_option('--enable-l1cache',
                    action='store_true',
                    default=False,
@@ -63,6 +65,7 @@ def options(opt):
 
 def configure(conf):
     conf.load('compiler_c compiler_cxx')
+    conf.load('waf_unit_test')
 
     # compiler_c is loaded only for check_endianness, which is a C test.
     level = conf.options.enable_optimization
@@ -114,6 +117,10 @@ def build(bld):
                 includes=['.'],
                 use='sislib',
                 lib=lib)
+
+    bld.recurse('tests')
+    bld.add_post_fun(waf_unit_test.summary)
+    bld.add_post_fun(waf_unit_test.set_exit_code)
 
 
 def dtb(ctx):

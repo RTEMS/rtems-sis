@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# SIS - SPARC/RISC-V instruction simulator
+#
+# SPDX-FileCopyrightText: 2026 embedded brains GmbH & Co. KG
+
+# One binary from every source here, so that a new test file needs no edit.
+# The simulator communicates through globals, so the cases share process
+# state and each one starts from a fixture that resets it.
+
+bld.program(source=bld.path.ant_glob('*.cc'),
+            features='cxx cxxprogram test',
+            target='sis-test',
+            includes=['.', '..'],
+            use='sislib',
+            lib=[] if bld.env.DEST_OS == 'win32' else ['m'])
