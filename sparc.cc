@@ -259,9 +259,6 @@ sparc_dispatch_instruction (struct pstate *sregs)
 	  *rdd = sregs->inst << 10;
 	  break;
 	case BICC:
-#ifdef STAT
-	  sregs->nbranch++;
-#endif
 	  icc = sregs->psr >> 20;
 	  cond = ((sregs->inst >> 25) & 0x0f);
 	  switch (cond)
@@ -351,9 +348,6 @@ sparc_dispatch_instruction (struct pstate *sregs)
 	    }
 	  break;
 	case FPBCC:
-#ifdef STAT
-	  sregs->nbranch++;
-#endif
 	  if (!((sregs->psr & PSR_EF) && FP_PRES))
 	    {
 	      sregs->trap = TRAP_FPDIS;
@@ -455,9 +449,6 @@ sparc_dispatch_instruction (struct pstate *sregs)
 	}
       break;
     case 1: /* CALL */
-#ifdef STAT
-      sregs->nbranch++;
-#endif
       sregs->r[(cwp + 15) & 0x7f] = sregs->pc;
       npc = sregs->pc + (sregs->inst << 2);
       if (ebase.coven)
@@ -941,9 +932,6 @@ sparc_dispatch_instruction (struct pstate *sregs)
 	      break;
 	    case JMPL:
 
-#ifdef STAT
-	      sregs->nbranch++;
-#endif
 	      sregs->icnt = T_JMPL; /* JMPL takes two cycles */
 	      if (rs1 & 0x3)
 		{
@@ -1895,17 +1883,6 @@ fpexec (uint32 op3, uint32 rd, uint32 rs1, uint32 rs2, struct pstate *sregs)
       sregs->fsr = (sregs->fsr & ~FSR_TT) | FP_UNIMP;
       sregs->fpstate = FP_EXC_PE;
     }
-
-#ifdef ERRINJ
-  if (errftt)
-    {
-      sregs->fsr = (sregs->fsr & ~FSR_TT) | (errftt << 14);
-      sregs->fpstate = FP_EXC_PE;
-      if (sis_verbose)
-	printf ("Inserted fpu error %X\n", errftt);
-      errftt = 0;
-    }
-#endif
 
   accex = sparc_get_accex ();
 

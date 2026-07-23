@@ -652,13 +652,9 @@ reset_stat (struct pstate *sregs)
   ebase.tottime = 0.0;
   sregs->pwdtime = 0;
   sregs->ninst = 0;
-  sregs->fholdt = 0;
-  sregs->holdt = 0;
-  sregs->icntt = 0;
   sregs->finst = 0;
   sregs->nstore = 0;
   sregs->nload = 0;
-  sregs->nbranch = 0;
   ebase.simstart = ebase.simtime;
   sregs->l1imiss = 0;
   sregs->l1dmiss = 0;
@@ -667,7 +663,7 @@ reset_stat (struct pstate *sregs)
 void
 show_stat (struct pstate *sregs)
 {
-  uint64 iinst, ninst, pwdtime;
+  uint64 ninst, pwdtime;
   uint64 stime, atime;
   int i;
 
@@ -706,10 +702,6 @@ show_stat (struct pstate *sregs)
 	  "\n");
   for (i = 0; i < ncpu; i++)
     {
-#ifdef STAT
-      iinst = sregs[i].ninst - sregs[i].finst - sregs[i].nload -
-	      sregs[i].nstore - sregs[i].nbranch;
-#endif
 
       stime = sregs[i].simtime - ebase.simstart + 1; /* Core simulated time */
       printf (
@@ -735,24 +727,6 @@ show_stat (struct pstate *sregs)
       );
     }
 
-#ifdef STAT
-  printf ("   integer    : %9.2f %%\n",
-	  100.0 * (double) iinst / (double) sregs[i].ninst);
-  printf ("   load       : %9.2f %%\n",
-	  100.0 * (double) sregs->nload / (double) sregs[i].ninst);
-  printf ("   store      : %9.2f %%\n",
-	  100.0 * (double) sregs->nstore / (double) sregs[i].ninst);
-  printf ("   branch     : %9.2f %%\n",
-	  100.0 * (double) sregs->nbranch / (double) sregs[i].ninst);
-  printf ("   float      : %9.2f %%\n",
-	  100.0 * (double) sregs->finst / (double) sregs[i].ninst);
-  printf (" Integer CPI  : %9.2f\n",
-	  ((double) (stime - sregs[i].pwdtime - sregs[i].fholdt -
-		     sregs[i].finst)) /
-	      (double) (sregs[i].ninst - sregs[i].finst));
-  printf (" Float CPI    : %9.2f\n",
-	  ((double) sregs[i].fholdt / (double) sregs[i].finst) + 1.0);
-#endif
   printf ("\n");
 }
 
@@ -1218,11 +1192,6 @@ run_sim_un (struct pstate *sregs, uint64 icount, int dis)
 		  ebase.bpcpu = sregs->cpu;
 		}
 	    }
-#ifdef STAT
-	  sregs->fholdt += sregs->fhold;
-	  sregs->holdt += sregs->hold;
-	  sregs->icntt += sregs->icnt;
-#endif
 	  sregs->simtime += sregs->icnt + sregs->hold + sregs->fhold;
 	}
       if (sregs->simtime >= ebase.evtime)
@@ -1352,11 +1321,6 @@ run_sim_core (struct pstate *sregs, uint64 ntime, int deb, int dis)
 		break;
 	      }
 	  }
-#ifdef STAT
-	sregs->fholdt += sregs->fhold;
-	sregs->holdt += sregs->hold;
-	sregs->icntt += sregs->icnt;
-#endif
 	sregs->simtime += sregs->icnt + sregs->hold + sregs->fhold;
       }
   else

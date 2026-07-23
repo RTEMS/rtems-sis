@@ -345,9 +345,6 @@ main (int argc, char **argv)
       last_load_addr = elf_load (argv[lfile], 1);
       daddr = last_load_addr;
     }
-#ifdef STAT
-  reset_stat (&sregs);
-#endif
 
   if (copt)
     {

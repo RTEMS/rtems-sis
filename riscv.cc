@@ -389,9 +389,6 @@ riscv_dispatch_instruction (struct pstate *sregs)
 	      break;
 	    case CJAL: /* jal x1, offset[11:1] */
 	    case CJNL: /* jal x0, offset[11:1] */
-#ifdef STAT
-	      sregs->nbranch++;
-#endif
 	      offset = EXTRACT_RVC_J_IMM (sregs->inst);
 	      if (funct3 == CJAL)
 		sregs->r[1] = npc;
@@ -584,9 +581,6 @@ riscv_dispatch_instruction (struct pstate *sregs)
 			}
 		      else
 			{ /* jalr x1, rs1, 0 */
-#ifdef STAT
-			  sregs->nbranch++;
-#endif
 			  sregs->r[1] = npc;
 			  npc = sregs->r[rs1];
 			  npc &= ~1;
@@ -707,9 +701,6 @@ riscv_dispatch_instruction (struct pstate *sregs)
 	  sregs->r[rd] = ((sop1 >> 12) << 12);
 	  break;
 	case OP_BRANCH:
-#ifdef STAT
-	  sregs->nbranch++;
-#endif
 	  btrue = 0;
 	  offset = EXTRACT_SBTYPE_IMM (sregs->inst);
 	  sop1 = op1;
@@ -764,9 +755,6 @@ riscv_dispatch_instruction (struct pstate *sregs)
 	  npc &= ~1;
 	  break;
 	case OP_JAL: /* JAL */
-#ifdef STAT
-	  sregs->nbranch++;
-#endif
 	  offset = EXTRACT_UJTYPE_IMM (sregs->inst);
 	  sregs->r[rd] = npc;
 	  npc = sregs->pc + offset;
@@ -778,9 +766,6 @@ riscv_dispatch_instruction (struct pstate *sregs)
 	  break;
 
 	case OP_JALR: /* JALR */
-#ifdef STAT
-	  sregs->nbranch++;
-#endif
 	  offset = EXTRACT_ITYPE_IMM (sregs->inst);
 	  sregs->r[rd] = npc;
 	  npc = op1 + offset;
@@ -1246,11 +1231,6 @@ riscv_dispatch_instruction (struct pstate *sregs)
 		  sregs->r[rd] = op1;
 		  sregs->lrqa = address;
 		  sregs->lrq = 1;
-#ifdef DEBUG
-		  if (sis_verbose)
-		    printf (" %8" PRIu64 " cpu %d: LRQ at address 0x%08x\n",
-			    sregs->simtime, sregs->cpu, address);
-#endif
 		}
 	      break;
 	    case SCQ:
@@ -1272,23 +1252,11 @@ riscv_dispatch_instruction (struct pstate *sregs)
 		  else
 		    {
 		      sregs->r[rd] = 0;
-#ifdef DEBUG
-		      if (sis_verbose)
-			printf (" %8" PRIu64
-				" cpu %d: SCQ at address 0x%08x\n",
-				sregs->simtime, sregs->cpu, address);
-#endif
 		    }
 		}
 	      else
 		{
 		  sregs->r[rd] = 1;
-#ifdef DEBUG
-		  if (sis_verbose)
-		    printf (" %8" PRIu64
-			    " cpu %d: failed SCQ at address 0x%08x\n",
-			    sregs->simtime, sregs->cpu, address);
-#endif
 		}
 	      sregs->lrq = 0;
 	      break;

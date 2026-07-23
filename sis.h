@@ -129,16 +129,12 @@ struct pstate
   struct histype *histbuf;
 
   uint64 ninst;
-  uint64 fholdt;
-  uint64 holdt;
-  uint64 icntt;
   uint64 finst;
   uint64 pwdtime;  /* Cycles in power-down mode */
   uint64 pwdstart; /* Start of power-down mode */
   uint64 nstore;   /* Number of store instructions */
   uint64 nload;	   /* Number of load instructions */
   uint64 nannul;   /* Number of annuled instructions */
-  uint64 nbranch;  /* Number of branch instructions */
   uint32 ildreg;   /* Destination of last load instruction */
   uint64 ildtime;  /* Last time point for load dependency */
 
