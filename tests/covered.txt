@@ -7,3 +7,4 @@
 # delisted.
 #
 # Keep sorted.
+exec.cc
