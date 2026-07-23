@@ -28,15 +28,21 @@
 
 #include "config.h"
 #include <errno.h>
+#ifndef _WIN32
 #include <sys/types.h>
+#endif
 #include <stdio.h>
 #include <string.h>
 #include <inttypes.h>
 #ifdef HAVE_TERMIOS_H
 #include <termios.h>
 #endif
+#ifndef _WIN32
 #include <sys/file.h>
+#endif
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 #include "sis.h"
 #include "grlib.h"
 

@@ -21,13 +21,15 @@
 #include <chrono>
 #include <string>
 #include <thread>
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 #include <signal.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <ctype.h>
-#ifdef WIN32
+#ifdef _WIN32
 #include <winsock.h>
 #else
 #include <sys/socket.h>
@@ -37,6 +39,7 @@
 #endif
 #include <fcntl.h>
 #include "sis.h"
+#include "sisio.h"
 #include <inttypes.h>
 
 /* set if UART device cannot handle attributes, terminal oriented IO by default
@@ -772,7 +775,7 @@ init_bpt (struct pstate *sregs)
 
 /* support for catching ctrl-c */
 
-#ifdef WIN32
+#ifdef _WIN32
 
 BOOL WINAPI ConsoleHandler (DWORD);
 
@@ -815,7 +818,7 @@ int_handler (int sig)
       if (!sim_run)
 	{
 	  if (new_socket > 0)
-	    close (new_socket);
+	    sis_socket_close (new_socket);
 	  else
 	    exit (0);
 	}

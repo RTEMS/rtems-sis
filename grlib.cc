@@ -25,12 +25,19 @@
 #ifdef HAVE_TERMIOS_H
 #include <termios.h>
 #endif
+#ifndef _WIN32
 #include <sys/file.h>
+#endif
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 #include <errno.h>
+#ifndef _WIN32
 #include <sys/types.h>
+#endif
 #include <string.h>
 #include "grlib.h"
+#include "sisio.h"
 
 /* APB PNP */
 
@@ -1007,6 +1014,7 @@ apbuart_init_stdio (void)
 {
   if (dumbio)
     return;
+  sis_console_raw (1);
 #ifdef HAVE_TERMIOS_H
   if (ifd1 == 0 && f1open)
     {
@@ -1021,6 +1029,7 @@ apbuart_restore_stdio (void)
 {
   if (dumbio)
     return;
+  sis_console_raw (0);
 #ifdef HAVE_TERMIOS_H
   if (ifd1 == 0 && f1open && tty_setup)
     tcsetattr (0, TCSANOW, &iocold1);
@@ -1028,7 +1037,7 @@ apbuart_restore_stdio (void)
 }
 
 #define DO_STDIO_READ(_fd_, _buf_, _len_)                                     \
-  (dumbio || nouartrx ? (0) : read (_fd_, _buf_, _len_))
+  (dumbio || nouartrx ? (0) : sis_uart_read (_fd_, (char *) (_buf_), _len_))
 
 static void
 apbuart_init (void)
@@ -1037,7 +1046,7 @@ apbuart_init (void)
   f1out = stdout;
   if (uart_dev1[0] != 0)
     {
-      if ((fd1 = open (uart_dev1, O_RDWR | O_NONBLOCK)) < 0)
+      if ((fd1 = sis_uart_open (uart_dev1)) < 0)
 	{
 	  printf ("Warning, couldn't open output device %s\n", uart_dev1);
 	}

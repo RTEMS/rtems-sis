@@ -39,6 +39,7 @@ SOURCES = [
     'tap.cc',
     'gr740.cc',
     'rv32.cc',
+    'sisio.cc',
 ]
 
 HEADERS = ['fcntl.h', 'stdlib.h', 'termios.h']
@@ -61,9 +62,13 @@ def configure(conf):
     conf.load('compiler_c compiler_cxx')
 
     # compiler_c is loaded only for check_endianness, which is a C test.
-    conf.env.append_value(
-        'CXXFLAGS',
-        ['-O' + conf.options.enable_optimization, '-g', '-std=c++17'])
+    level = conf.options.enable_optimization
+    if conf.env.CXX_NAME == 'msvc':
+        conf.env.append_value(
+            'CXXFLAGS',
+            ['/Od' if level == '0' else '/O2', '/Zi', '/EHsc', '/std:c++17'])
+    else:
+        conf.env.append_value('CXXFLAGS', ['-O' + level, '-g', '-std=c++17'])
     conf.env.append_value('DEFINES', ['FAST_UART'])
 
     for header in HEADERS:
@@ -79,16 +84,23 @@ def configure(conf):
 
     if conf.env.DEST_OS == 'win32':
         conf.env.append_value('LIB', ['ws2_32', 'kernel32'])
+        if conf.env.CXX_NAME == 'msvc':
+            # POSIX names the CRT still provides, and the deprecation
+            # warnings it raises for them.
+            conf.env.append_value('DEFINES', ['_CRT_SECURE_NO_WARNINGS',
+                                              '_WINSOCK_DEPRECATED_NO_WARNINGS'])
 
     conf.write_config_header('config.h', remove=False)
 
 
 def build(bld):
+    lib = [] if bld.env.DEST_OS == 'win32' else ['m']
+
     bld.program(source=SOURCES,
                 features='cxx cxxprogram',
                 target='sis',
                 includes=['.'],
-                lib=['m'])
+                lib=lib)
 
 
 def dtb(ctx):

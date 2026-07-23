@@ -25,7 +25,9 @@
 #include <string.h>
 #include <errno.h>
 #include <stdlib.h>
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 #include "sis.h"
 #ifdef __linux__
 #include <sys/socket.h>

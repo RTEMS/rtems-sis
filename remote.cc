@@ -22,9 +22,11 @@
  * and on sparc-stub.c from gdb.
  */
 
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 #include <stdio.h>
-#ifdef WIN32
+#ifdef _WIN32
 #include <winsock2.h>
 #else
 #define WSAPOLLFD struct pollfd
@@ -40,6 +42,7 @@
 #include <string.h>
 #include <signal.h>
 #include "sis.h"
+#include "sisio.h"
 
 #define EBREAK	0x00100073
 #define CEBREAK 0x90002
@@ -47,7 +50,7 @@
 #ifndef SIGTRAP
 #define SIGTRAP 5
 #endif
-#ifndef WIN32
+#ifndef _WIN32
 #define closesocket close
 #endif
 
@@ -65,7 +68,7 @@ create_socket (int port)
   int addrlen = sizeof (address);
   struct protoent *proto;
 
-#ifdef WIN32
+#ifdef _WIN32
   WORD wver;
   WSADATA wsaData;
   wver = MAKEWORD (2, 0);
@@ -114,7 +117,7 @@ create_socket (int port)
   proto = getprotobyname ("tcp");
   setsockopt (new_socket, proto->p_proto, TCP_NODELAY, (char *) &opt,
 	      sizeof (opt));
-#ifndef WIN32
+#ifndef _WIN32
   fcntl (new_socket, F_SETOWN, getpid ());
 #endif
 
@@ -467,13 +470,9 @@ gdb_remote (int port)
 	{
 	  do
 	    {
-#ifdef WIN32
-	      len = recv (new_socket, buffer, 2048, 0);
+	      len = sis_socket_read (new_socket, (char *) buffer, 2048);
 	      if (len < 0)
 		len = 0;
-#else
-	      len = read (new_socket, buffer, 2048);
-#endif
 	      buffer[len] = 0;
 	      if (sis_verbose > 1)
 		printf ("%s (%d)\n", buffer, len);

@@ -27,15 +27,22 @@
 
 #include "config.h"
 #include <errno.h>
+#ifndef _WIN32
 #include <sys/types.h>
+#endif
 #include <stdio.h>
 #include <string.h>
 #ifdef HAVE_TERMIOS_H
 #include <termios.h>
 #endif
+#ifndef _WIN32
 #include <sys/file.h>
+#endif
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 #include "sis.h"
+#include "sisio.h"
 #include "grlib.h"
 
 /* APB registers */
@@ -464,7 +471,7 @@ restore_stdio (void)
 }
 
 #define DO_STDIO_READ(_fd_, _buf_, _len_)                                     \
-  (dumbio || nouartrx ? (0) : read (_fd_, _buf_, _len_))
+  (dumbio || nouartrx ? (0) : sis_uart_read (_fd_, (char *) (_buf_), _len_))
 
 static void
 port_init (void)
@@ -472,7 +479,7 @@ port_init (void)
   f1in = stdin;
   f1out = stdout;
   if (uart_dev1[0] != 0)
-    if ((fd1 = open (uart_dev1, O_RDWR | O_NONBLOCK)) < 0)
+    if ((fd1 = sis_uart_open (uart_dev1)) < 0)
       printf ("Warning, couldn't open output device %s\n", uart_dev1);
     else
       {

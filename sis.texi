@@ -187,6 +187,7 @@ Enable the number of @var{cores} (2 - 4) in a leon3 or RISC-V multi-processor sy
 
 @item -uart1 @var{device}
 Connect UART1 (console) of the simulator to @var{device}. stdin/stdout is default.
+Character devices are a POSIX feature; on Windows the console is the only UART.
 
 @item -uart2 @var{device}
 Connect UART2 (console) of the simulator to @var{device}. Disabled by default.
