@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: BSD-2-Clause -->
 <!-- SPDX-FileCopyrightText: 2024 Amar Takhar -->
+
 SIS - Simple Instruction Simulator
 ==================================
 
@@ -30,9 +31,5 @@ option only improves timing accuracy, it does not affect simulation behaviour.
 The optimization level defaults to -O2 and can be changed with
 --enable-optimization=LEVEL.
 
-The manual is `sis.texi`. It is not built by waf; render it with
-
-  ```shell
-  makeinfo sis.texi
-  texi2pdf sis.texi
-  ```
+The manual is in [doc/](doc/README.md). It is Markdown and needs no rendering
+step.

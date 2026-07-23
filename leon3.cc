@@ -3,6 +3,7 @@
  * This file is part of SIS.
  *
  * SIS, SPARC instruction simulator V2.5 Copyright (C) 1995 Jiri Gaisler,
+ *
  * European Space Agency
  *
  * This program is free software; you can redistribute it and/or modify it

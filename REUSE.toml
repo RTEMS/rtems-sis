@@ -24,11 +24,6 @@ path = ["rv32.dts", "rv32dtb.h"]
 SPDX-FileCopyrightText = "2020 Jiri Gaisler"
 SPDX-License-Identifier = "GPL-3.0-or-later"
 
-[[annotations]]
-path = ["fdl.texi", "sis.texi"]
-SPDX-FileCopyrightText = "2020 Free Software Foundation, Inc."
-SPDX-License-Identifier = "GFDL-1.3-no-invariants-or-later"
-
 # Vendored files tracking an upstream. Annotate them here rather than editing
 # them, so that syncing with upstream stays a clean copy.
 
