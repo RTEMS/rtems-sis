@@ -3,23 +3,36 @@
 SIS - Simple Instruction Simulator
 ==================================
 
-SIS uses the GNU autoconf system, and can simply be build using:
+SIS uses the waf build system, and can simply be built using:
 
   ```shell
-    ./configure 
+  ./waf configure
   ```
 
-followed by 
+followed by
 
   ```shell
-  make
+  ./waf
   ```
 
-To build a PDF version of the manual, do
+The simulator is placed in `build/sis`. Install it with
 
   ```shell
-  make sis.pdf.
+  ./waf install --prefix=/usr/local
   ```
 
-To enable emulation of an L1 cache, run configure with --enable-l1cache. This option
-only improves timing accuracy, it does not affect simulation behaviour.
+Building requires Python 3 for waf itself. The bundled `waf` script needs no
+separate installation.
+
+To enable emulation of an L1 cache, run configure with --enable-l1cache. This
+option only improves timing accuracy, it does not affect simulation behaviour.
+
+The optimization level defaults to -O2 and can be changed with
+--enable-optimization=LEVEL.
+
+The manual is `sis.texi`. It is not built by waf; render it with
+
+  ```shell
+  makeinfo sis.texi
+  texi2pdf sis.texi
+  ```

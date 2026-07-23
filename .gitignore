@@ -1,11 +1,5 @@
-.deps
-*.o
-autom4te.cache
-config.h
-config.log
-config.status
-Makefile
-sis
-stamp-h1
-stamp-vti
+build
+.lock-waf*
+.waf-*
+.waf3-*
 tmp

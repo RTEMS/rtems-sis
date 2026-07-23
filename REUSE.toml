@@ -25,17 +25,7 @@ SPDX-FileCopyrightText = "2020 Jiri Gaisler"
 SPDX-License-Identifier = "GPL-3.0-or-later"
 
 [[annotations]]
-path = ["Makefile.am", "config.h.in", "configure.ac"]
-SPDX-FileCopyrightText = "1995-2019 Jiri Gaisler"
-SPDX-License-Identifier = "GPL-3.0-or-later"
-
-[[annotations]]
-path = ["Makefile.in", "aclocal.m4", "configure"]
-SPDX-FileCopyrightText = "1994-2012 Free Software Foundation, Inc."
-SPDX-License-Identifier = "FSFAP"
-
-[[annotations]]
-path = ["fdl.texi", "sis.info", "sis.texi", "version.texi"]
+path = ["fdl.texi", "sis.texi"]
 SPDX-FileCopyrightText = "2020 Free Software Foundation, Inc."
 SPDX-License-Identifier = "GFDL-1.3-no-invariants-or-later"
 
@@ -43,21 +33,11 @@ SPDX-License-Identifier = "GFDL-1.3-no-invariants-or-later"
 # them, so that syncing with upstream stays a clean copy.
 
 [[annotations]]
-path = ["build-aux/compile", "build-aux/config.guess", "build-aux/config.sub", "build-aux/depcomp", "build-aux/mdate-sh", "build-aux/missing"]
-SPDX-FileCopyrightText = "1992-2012 Free Software Foundation, Inc."
-SPDX-License-Identifier = "GPL-2.0-or-later"
-
-[[annotations]]
-path = "build-aux/install-sh"
-SPDX-FileCopyrightText = "1994 X Consortium"
-SPDX-License-Identifier = "MIT"
-
-[[annotations]]
-path = "build-aux/texinfo.tex"
-SPDX-FileCopyrightText = "1985-2012 Free Software Foundation, Inc."
-SPDX-License-Identifier = "GPL-3.0-or-later"
-
-[[annotations]]
 path = ["linenoise.c", "linenoise.h"]
 SPDX-FileCopyrightText = ["2010-2016 Salvatore Sanfilippo", "2010-2013 Pieter Noordhuis"]
 SPDX-License-Identifier = "BSD-2-Clause"
+
+[[annotations]]
+path = "waf"
+SPDX-FileCopyrightText = "2005-2018 Thomas Nagy"
+SPDX-License-Identifier = "BSD-3-Clause"

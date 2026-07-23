@@ -2,7 +2,10 @@
 @setfilename sis.info
 @comment $Id@w{$}
 @comment %**start of header
-@include version.texi
+@set UPDATED 30 July 2021
+@set UPDATED-MONTH July 2021
+@set EDITION 2.30
+@set VERSION 2.30
 @settitle SIS - Simple Instruction Simulator @value{VERSION}
 @syncodeindex pg cp
 @comment %**end of header
