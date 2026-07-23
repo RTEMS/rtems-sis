@@ -25,19 +25,17 @@
 #endif
 #include <stdio.h>
 #include <fcntl.h>
+/* cpp-linenoise as a readline library replacement
+   https://github.com/yhirose/cpp-linenoise
+
+   Included before sis.h, whose CTRL_C stop reason would otherwise replace
+   the KEY_ACTION enumerator of the same name.  */
+#include "linenoise.hpp"
+
 #include "sis.h"
 #include <inttypes.h>
 #include <filesystem>
 #include <string>
-
-#if HAVE_READLINE
-#include "readline/readline.h"
-#include "readline/history.h"
-#else
-/* Linenoise as a readline library replacement
-   https://github.com/antirez/linenoise */
-#include "linenoise.h"
-#endif
 
 /* Command history buffer length - MUST be binary */
 #define HIST_LEN 256
@@ -52,7 +50,7 @@ main (int argc, char **argv)
   int copt = 0;
 
   char *cfile, *bacmd;
-  char *cmdq[HIST_LEN];
+  std::string cmdq[HIST_LEN];
   int cmdi = 0;
   int i;
   int lfile = 0;
@@ -65,10 +63,6 @@ main (int argc, char **argv)
 	  "Gaisler 2020\n",
 	  sis_version);
   printf (" Bug-reports to jiri@gaisler.se\n\n");
-
-  /* initialize history buffer */
-  for (i = 0; i < HIST_LEN; i++)
-    cmdq[i] = 0;
 
   /* if binary name starts with riscv, force RISCV emulation */
   std::string progname = std::filesystem::path (argv[0]).filename ().string ();
@@ -339,11 +333,7 @@ main (int argc, char **argv)
 #ifdef F_GETFL
   termsave = fcntl (0, F_GETFL, 0);
 #endif
-#if HAVE_READLINE
-  using_history ();
-#else
-  linenoiseHistorySetMaxLen (HIST_LEN);
-#endif
+  linenoise::SetHistoryMaxLen (HIST_LEN);
   init_signals ();
   ebase.simtime = 0;
   ebase.simstart = 0;
@@ -380,15 +370,6 @@ main (int argc, char **argv)
   while (cont)
     {
 
-      if (cmdq[cmdi] != 0)
-	{
-#if HAVE_READLINE
-	  free (cmdq[cmdi]);
-#else
-	  linenoiseFree (cmdq[cmdi]);
-#endif
-	  cmdq[cmdi] = 0;
-	}
       if (run)
 	{
 	  stat = exec_cmd ("run");
@@ -400,24 +381,14 @@ main (int argc, char **argv)
 	    sprintf (prompt, "cpu%d> ", cpu);
 	  else
 	    sprintf (prompt, "sis> ");
-#if HAVE_READLINE
-	  cmdq[cmdi] = readline (prompt);
-#else
-	  cmdq[cmdi] = linenoise (prompt);
-#endif
-	  if (cmdq[cmdi] && *cmdq[cmdi])
-#if HAVE_READLINE
-	    add_history (cmdq[cmdi]);
-#else
-	    linenoiseHistoryAdd (cmdq[cmdi]);
-#endif
-	  if (cmdq[cmdi])
-	    stat = exec_cmd (cmdq[cmdi]);
-	  else
+	  if (linenoise::Readline (prompt, cmdq[cmdi]))
 	    {
 	      puts ("\n");
 	      exit (0);
 	    }
+	  if (!cmdq[cmdi].empty ())
+	    linenoise::AddHistory (cmdq[cmdi].c_str ());
+	  stat = exec_cmd (cmdq[cmdi].c_str ());
 	}
       switch (stat)
 	{

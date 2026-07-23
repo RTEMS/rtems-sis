@@ -55,22 +55,19 @@ def options(opt):
                    default='2',
                    metavar='LEVEL',
                    help='optimization level passed to -O [default: 2]')
-    opt.add_option('--without-readline',
-                   action='store_true',
-                   default=False,
-                   help='use the bundled line editor even if readline exists')
 
 
 def configure(conf):
     conf.load('compiler_c compiler_cxx')
 
-    flags = ['-O' + conf.options.enable_optimization, '-g']
-    conf.env.append_value('CFLAGS', flags)
-    conf.env.append_value('CXXFLAGS', flags + ['-std=c++17'])
+    # compiler_c is loaded only for check_endianness, which is a C test.
+    conf.env.append_value(
+        'CXXFLAGS',
+        ['-O' + conf.options.enable_optimization, '-g', '-std=c++17'])
     conf.env.append_value('DEFINES', ['FAST_UART'])
 
     for header in HEADERS:
-        conf.check_cc(header_name=header, mandatory=False)
+        conf.check_cxx(header_name=header, mandatory=False)
 
     if conf.check_endianness() == 'big':
         conf.define('WORDS_BIGENDIAN', 1)
@@ -80,21 +77,6 @@ def configure(conf):
 
     conf.define('PACKAGE_VERSION', VERSION)
 
-    conf.env.LINENOISE = True
-    if not conf.options.without_readline:
-        for libs in [['readline'], ['readline', 'tinfo'],
-                     ['readline', 'ncurses']]:
-            if conf.check_cc(header_name='readline/readline.h',
-                             lib=libs,
-                             uselib_store='READLINE',
-                             define_name='',
-                             msg='Checking for readline (-l%s)' %
-                             ' -l'.join(libs),
-                             mandatory=False):
-                conf.define('HAVE_READLINE', 1)
-                conf.env.LINENOISE = False
-                break
-
     if conf.env.DEST_OS == 'win32':
         conf.env.append_value('LIB', ['ws2_32', 'kernel32'])
 
@@ -102,15 +84,10 @@ def configure(conf):
 
 
 def build(bld):
-    sources = list(SOURCES)
-    if bld.env.LINENOISE:
-        sources.append('linenoise.c')
-
-    bld.program(source=sources,
-                features='c cxx cxxprogram',
+    bld.program(source=SOURCES,
+                features='cxx cxxprogram',
                 target='sis',
                 includes=['.'],
-                use='READLINE',
                 lib=['m'])
 
 

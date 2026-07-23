@@ -33,8 +33,8 @@ SPDX-License-Identifier = "GFDL-1.3-no-invariants-or-later"
 # them, so that syncing with upstream stays a clean copy.
 
 [[annotations]]
-path = ["linenoise.c", "linenoise.h"]
-SPDX-FileCopyrightText = ["2010-2016 Salvatore Sanfilippo", "2010-2013 Pieter Noordhuis"]
+path = "linenoise.hpp"
+SPDX-FileCopyrightText = ["2015-2026 yhirose", "2010-2023 Salvatore Sanfilippo", "2010-2013 Pieter Noordhuis"]
 SPDX-License-Identifier = "BSD-2-Clause"
 
 [[annotations]]

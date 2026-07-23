@@ -220,9 +220,9 @@ On start-up, the file is loaded into the simulated memory.
 @cindex Commands
 
 Below is the description of commands that are recognized by the simulator.
-The command-line is parsed using GNU readline. A command
+The command-line is parsed using cpp-linenoise. A command
 history of 64 commands is maintained. Use the up/down arrows to recall
-previous commands. For more details, see the readline documentation.
+previous commands. For more details, see the cpp-linenoise documentation.
 
 @table @code
 @item batch @var{file}

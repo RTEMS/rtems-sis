@@ -1,4 +1,3 @@
-linenoise.c
-linenoise.h
+linenoise.hpp
 rv32dtb.h
 elf.h
