@@ -28,7 +28,9 @@
 int sis_uart_open (const char *dev);
 
 /* Read up to LEN bytes from FD without blocking.  Returns the number of
-   bytes read, which is zero when none are available.  */
+   bytes read, which is zero when none are available and also zero on error:
+   every caller gates on a positive count, and a UART has nowhere to report
+   a failed read to.  */
 int sis_uart_read (int fd, char *buf, int len);
 
 /* Put the console in character-at-a-time mode, or restore it.  On POSIX the

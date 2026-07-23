@@ -16,6 +16,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+import shutil
+
 from waflib import Context
 
 APPNAME = 'sis'
@@ -55,7 +57,8 @@ def options(opt):
                    action='store',
                    default='2',
                    metavar='LEVEL',
-                   help='optimization level passed to -O [default: 2]')
+                   help='optimization level, -O<level> or the MSVC equivalent '
+                   '[default: 2]')
 
 
 def configure(conf):
@@ -64,9 +67,9 @@ def configure(conf):
     # compiler_c is loaded only for check_endianness, which is a C test.
     level = conf.options.enable_optimization
     if conf.env.CXX_NAME == 'msvc':
-        conf.env.append_value(
-            'CXXFLAGS',
-            ['/Od' if level == '0' else '/O2', '/Zi', '/EHsc', '/std:c++17'])
+        msvc_opt = {'0': '/Od', '1': '/O1', 's': '/Os'}.get(level, '/O2')
+        conf.env.append_value('CXXFLAGS',
+                              [msvc_opt, '/Zi', '/EHsc', '/std:c++17'])
     else:
         conf.env.append_value('CXXFLAGS', ['-O' + level, '-g', '-std=c++17'])
     conf.env.append_value('DEFINES', ['FAST_UART'])
@@ -104,13 +107,14 @@ def build(bld):
 
 
 def dtb(ctx):
-    """regenerate rv32dtb.h from rv32.dts"""
+    """regenerate rv32dtb.h from rv32.dts, run from the top of the tree"""
     for tool in ['dtc', 'xxd']:
-        if not ctx.cmd_and_log(['which', tool], quiet=Context.BOTH,
-                               output=Context.STDOUT).strip():
+        if shutil.which(tool) is None:
             ctx.fatal('%s is required to regenerate rv32dtb.h' % tool)
-    ctx.exec_command('dtc -O dtb rv32.dts -o rv32.dtb')
-    ctx.exec_command('xxd --include rv32.dtb > rv32dtb.h')
+    for cmd in ['dtc -O dtb rv32.dts -o rv32.dtb',
+                'xxd --include rv32.dtb > rv32dtb.h']:
+        if ctx.exec_command(cmd):
+            ctx.fatal('failed: %s' % cmd)
 
 
 class DtbContext(Context.Context):
