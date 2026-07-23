@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
 /* Copyright (C) 1995-2017 Free Software Foundation, Inc.
 
    This program is free software; you can redistribute it and/or modify

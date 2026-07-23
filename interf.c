@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
 /* This file is part of SIS (SPARC instruction simulator)
 
    Copyright (C) 1995-2017 Free Software Foundation, Inc.

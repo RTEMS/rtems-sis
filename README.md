@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: BSD-2-Clause -->
+<!-- SPDX-FileCopyrightText: 2024 Amar Takhar -->
 SIS - Simple Instruction Simulator
 ==================================
 
