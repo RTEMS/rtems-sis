@@ -1,6 +1,8 @@
 <!-- SPDX-License-Identifier: GFDL-1.3-no-invariants-or-later -->
 <!-- SPDX-FileCopyrightText: 2020 Free Software Foundation, Inc. -->
 
+[SIS manual](README.md)
+
 # Introduction
 
 SIS is a SPARC V7/V8 and RISC-V RV32IMACFD architecture simulator. It consist

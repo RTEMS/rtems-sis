@@ -1,6 +1,8 @@
 <!-- SPDX-License-Identifier: GFDL-1.3-no-invariants-or-later -->
 <!-- SPDX-FileCopyrightText: 2020 Free Software Foundation, Inc. -->
 
+[SIS manual](README.md) / [Emulated Systems](emulated-systems.md)
+
 # ERC32 SPARC V7 processor
 
 The radiation-hard ERC32 processor was developed by ESA in the mid-90's for

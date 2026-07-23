@@ -1,6 +1,8 @@
 <!-- SPDX-License-Identifier: GFDL-1.3-no-invariants-or-later -->
 <!-- SPDX-FileCopyrightText: 2020 Free Software Foundation, Inc. -->
 
+[SIS manual](README.md)
+
 # Code coverage
 
 Code coverage data will be produced if sis is started with the -cov switch. The

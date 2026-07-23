@@ -1,6 +1,8 @@
 <!-- SPDX-License-Identifier: GFDL-1.3-no-invariants-or-later -->
 <!-- SPDX-FileCopyrightText: 2020 Free Software Foundation, Inc. -->
 
+[SIS manual](README.md)
+
 # Invoking sis
 
 The simulator is started as follows:

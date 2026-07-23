@@ -1,6 +1,8 @@
 <!-- SPDX-License-Identifier: GFDL-1.3-no-invariants-or-later -->
 <!-- SPDX-FileCopyrightText: 2020 Free Software Foundation, Inc. -->
 
+[SIS manual](README.md) / [Emulated Systems](emulated-systems.md)
+
 # RISC-V emulation
 
 In RISC-V mode, SIS emulates a RV32IMACFD processor as defined in the RISC-V

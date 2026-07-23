@@ -1,6 +1,8 @@
 <!-- SPDX-License-Identifier: GFDL-1.3-no-invariants-or-later -->
 <!-- SPDX-FileCopyrightText: 2020 Free Software Foundation, Inc. -->
 
+[SIS manual](README.md) / [Emulated Systems](emulated-systems.md)
+
 # LEON3 emulation
 
 In LEON3 mode, SIS emulates a LEON3 system as defined in the GRLIB IP manual.
