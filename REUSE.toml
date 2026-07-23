@@ -28,6 +28,11 @@ SPDX-License-Identifier = "GPL-3.0-or-later"
 # them, so that syncing with upstream stays a clean copy.
 
 [[annotations]]
+path = "doctest.h"
+SPDX-FileCopyrightText = "2016-2023 Viktor Kirilov"
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
 path = "linenoise.hpp"
 SPDX-FileCopyrightText = ["2015-2026 yhirose", "2010-2023 Salvatore Sanfilippo", "2010-2013 Pieter Noordhuis"]
 SPDX-License-Identifier = "BSD-2-Clause"
