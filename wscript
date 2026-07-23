@@ -55,6 +55,10 @@ def options(opt):
                    action='store_true',
                    default=False,
                    help='enable L1 cache emulation')
+    opt.add_option('--enable-coverage',
+                   action='store_true',
+                   default=False,
+                   help='instrument for gcov and build without optimization')
     opt.add_option('--enable-optimization',
                    action='store',
                    default='2',
@@ -69,6 +73,16 @@ def configure(conf):
 
     # compiler_c is loaded only for check_endianness, which is a C test.
     level = conf.options.enable_optimization
+
+    # gcc changes the arc graph under optimization, so a coverage build is
+    # unoptimized to keep the branch count stable across compiler versions.
+    if conf.options.enable_coverage:
+        if conf.env.CXX_NAME == 'msvc':
+            conf.fatal('--enable-coverage needs a gcc compatible compiler')
+        level = '0'
+        conf.env.append_value('CXXFLAGS', ['--coverage'])
+        conf.env.append_value('LINKFLAGS', ['--coverage'])
+
     if conf.env.CXX_NAME == 'msvc':
         msvc_opt = {'0': '/Od', '1': '/O1', 's': '/Os'}.get(level, '/O2')
         conf.env.append_value('CXXFLAGS',
