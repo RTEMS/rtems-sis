@@ -208,6 +208,7 @@ rv32_check_lirq (int cpu)
 	  sregs[cpu].pwd_mode = 0;
 	}
     }
+  return 0;
 }
 
 static int

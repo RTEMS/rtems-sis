@@ -103,7 +103,7 @@ create_socket (int port)
       return 0;
     }
   if ((new_socket = accept (server_fd, (struct sockaddr *) &address,
-			    (int *) &addrlen)) < 0)
+			    (socklen_t *) &addrlen)) < 0)
     {
       perror ("accept");
       return 0;

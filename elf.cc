@@ -204,7 +204,7 @@ read_elf_body ()
 	  if (sis_verbose)
 	    printf ("section: %s at 0x%x, size %d bytes\n",
 		    &strtab[sh.sh_name], sh.sh_addr, sh.sh_size);
-	  mem = calloc (sh.sh_size / 4 + 1, 4);
+	  mem = (char *) calloc (sh.sh_size / 4 + 1, 4);
 	  if (mem != NULL)
 	    {
 	      if ((sh.sh_type == SHT_PROGBITS) ||

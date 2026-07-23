@@ -168,6 +168,7 @@ sis_tap_write (unsigned char *buffer, int len)
 	printf ("%02x", buffer[i]);
       printf ("\n");
     }
+  return nwrite;
 }
 
 static void

@@ -22,30 +22,30 @@ APPNAME = 'sis'
 VERSION = '2.30'
 
 SOURCES = [
-    'erc32.c',
-    'grlib.c',
-    'leon3.c',
-    'exec.c',
-    'func.c',
-    'help.c',
-    'sparc.c',
-    'riscv.c',
-    'leon2.c',
-    'sis.c',
-    'interf.c',
-    'remote.c',
-    'elf.c',
-    'greth.c',
-    'tap.c',
-    'gr740.c',
-    'rv32.c',
+    'erc32.cc',
+    'grlib.cc',
+    'leon3.cc',
+    'exec.cc',
+    'func.cc',
+    'help.cc',
+    'sparc.cc',
+    'riscv.cc',
+    'leon2.cc',
+    'sis.cc',
+    'interf.cc',
+    'remote.cc',
+    'elf.cc',
+    'greth.cc',
+    'tap.cc',
+    'gr740.cc',
+    'rv32.cc',
 ]
 
 HEADERS = ['fcntl.h', 'stdlib.h', 'termios.h']
 
 
 def options(opt):
-    opt.load('compiler_c')
+    opt.load('compiler_c compiler_cxx')
     opt.add_option('--enable-l1cache',
                    action='store_true',
                    default=False,
@@ -62,10 +62,11 @@ def options(opt):
 
 
 def configure(conf):
-    conf.load('compiler_c')
+    conf.load('compiler_c compiler_cxx')
 
-    conf.env.append_value('CFLAGS', ['-O' + conf.options.enable_optimization])
-    conf.env.append_value('CFLAGS', ['-g'])
+    flags = ['-O' + conf.options.enable_optimization, '-g']
+    conf.env.append_value('CFLAGS', flags)
+    conf.env.append_value('CXXFLAGS', flags + ['-std=c++17'])
     conf.env.append_value('DEFINES', ['FAST_UART'])
 
     for header in HEADERS:
@@ -106,6 +107,7 @@ def build(bld):
         sources.append('linenoise.c')
 
     bld.program(source=sources,
+                features='c cxx cxxprogram',
                 target='sis',
                 includes=['.'],
                 use='READLINE',

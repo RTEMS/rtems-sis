@@ -18,6 +18,9 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
 #include "config.h"
+#include <chrono>
+#include <string>
+#include <thread>
 #include <unistd.h>
 #include <signal.h>
 #include <string.h>
@@ -35,7 +38,6 @@
 #include <fcntl.h>
 #include "sis.h"
 #include <inttypes.h>
-#include <sys/time.h>
 
 /* set if UART device cannot handle attributes, terminal oriented IO by default
  */
@@ -164,14 +166,13 @@ exec_cmd (const char *cmd)
   char *cmd1, *cmd2;
   int32 stat, i;
   uint32 len, clen, j;
-  char *cmdsave, *cmdsave2 = NULL;
 
   stat = OK;
   if (!cmd)
     return stat;
-  cmdsave = strdup (cmd);
-  cmdsave2 = strdup (cmd);
-  if ((cmd1 = strtok (cmdsave2, " \t")) != NULL)
+  std::string cmdsave (cmd);
+  std::string cmdsave2 (cmd);
+  if ((cmd1 = strtok (&cmdsave2[0], " \t")) != NULL)
     {
       clen = strlen (cmd1);
       if (strncmp (cmd1, "bp", clen) == 0)
@@ -639,10 +640,6 @@ exec_cmd (const char *cmd)
       else
 	printf ("syntax error\n");
     }
-  if (cmdsave2 != NULL)
-    free (cmdsave2);
-  if (cmdsave != NULL)
-    free (cmdsave);
   return stat;
 }
 
@@ -1042,7 +1039,7 @@ rt_sync ()
     {
       if (dtime > 1.0)
 	dtime = 0.1;
-      usleep ((useconds_t) (dtime * 1E6));
+      std::this_thread::sleep_for (std::chrono::duration<double> (dtime));
     }
 }
 
@@ -1153,7 +1150,8 @@ run_sim_un (struct pstate *sregs, uint64 icount, int dis)
 	    irq = arch->check_interrupts (sregs);
 	  if (!irq)
 	    {
-	      mexc = ms->memory_iread (sregs->pc, &sregs->inst, &sregs->hold);
+	      mexc = ms->memory_iread (sregs->pc, &sregs->inst,
+				       (int32 *) &sregs->hold);
 	      if (mexc)
 		{
 		  sregs->trap = I_ACC_EXC;
@@ -1268,7 +1266,8 @@ run_sim_core (struct pstate *sregs, uint64 ntime, int deb, int dis)
 	else
 	  irq = 0;
 	sregs->icnt = 1;
-	mexc = ms->memory_iread (sregs->pc, &sregs->inst, &sregs->hold);
+	mexc =
+	    ms->memory_iread (sregs->pc, &sregs->inst, (int32 *) &sregs->hold);
 #ifdef ENABLE_L1CACHE
 	if (sregs->l1itags[(sregs->pc >> L1ILINEBITS) & L1IMASK] !=
 	    (sregs->pc >> L1ILINEBITS))
@@ -1457,13 +1456,9 @@ run_sim (uint64 icount, int dis)
 double
 get_time (void)
 {
-  double usec;
+  auto now = std::chrono::system_clock::now ().time_since_epoch ();
 
-  struct timeval tm;
-
-  gettimeofday (&tm, NULL);
-  usec = ((double) tm.tv_sec) * 1E6 + ((double) tm.tv_usec);
-  return usec / 1E6;
+  return std::chrono::duration<double> (now).count ();
 }
 
 /* Local version of getline() since not all systems supports it */
@@ -1483,7 +1478,7 @@ mygetdelim (char **lineptr, size_t *n, int delim, FILE *stream)
   /* Allocate the line the first time.  */
   if (*lineptr == NULL)
     {
-      *lineptr = malloc (line_size);
+      *lineptr = (char *) malloc (line_size);
       if (*lineptr == NULL)
 	return -1;
       *n = line_size;
@@ -1497,7 +1492,7 @@ mygetdelim (char **lineptr, size_t *n, int delim, FILE *stream)
       /* Check if more memory is needed.  */
       if (indx >= *n)
 	{
-	  *lineptr = realloc (*lineptr, *n + line_size);
+	  *lineptr = (char *) realloc (*lineptr, *n + line_size);
 	  if (*lineptr == NULL)
 	    {
 	      return -1;

@@ -27,7 +27,8 @@
 #include <fcntl.h>
 #include "sis.h"
 #include <inttypes.h>
-#include <libgen.h>
+#include <filesystem>
+#include <string>
 
 #if HAVE_READLINE
 #include "readline/readline.h"
@@ -70,11 +71,10 @@ main (int argc, char **argv)
     cmdq[i] = 0;
 
   /* if binary name starts with riscv, force RISCV emulation */
-  strncpy (uart_dev1, argv[0], 128);
-  cfile = basename (uart_dev1);
-  if (strncmp (cfile, "riscv", 5) == 0)
+  std::string progname = std::filesystem::path (argv[0]).filename ().string ();
+  if (progname.compare (0, 5, "riscv") == 0)
     archtype = CPU_RISCV;
-  if (strncmp (cfile, "sparc", 5) == 0)
+  if (progname.compare (0, 5, "sparc") == 0)
     archtype = CPU_SPARC;
 
   cfile = 0;

@@ -26,7 +26,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include <sys/file.h>
 #include <unistd.h>
 // #include <arpa/inet.h>
 
@@ -64,7 +63,8 @@ static uint32 greth_rxbuf;
 static unsigned char *greth_rxbufptr;
 static unsigned char greth_mac[6];
 static uint64 mac;
-static const char broadcast[] = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
+static const char broadcast[] = { (char) 0xff, (char) 0xff, (char) 0xff,
+				  (char) 0xff, (char) 0xff, (char) 0xff };
 int greth_irq;
 
 /* Simple emulation of Microchip KSZ8041NL/RNL PHY */
@@ -128,7 +128,8 @@ greth_tx (int32 arg)
       if (greth_txdesc & DESC_EN)
 	{
 	  ms->memory_read (greth_txbase + 4, &greth_txbuf, &ws);
-	  greth_txbufptr = ms->get_mem_ptr (greth_txbuf, 1536);
+	  greth_txbufptr =
+	      (unsigned char *) ms->get_mem_ptr (greth_txbuf, 1536);
 	  len = greth_txdesc & 0x7ff;
 	  /* endian swap on host/target endian mismatch */
 	  if (arch->bswap)
@@ -276,15 +277,16 @@ greth_rxready (unsigned char *buffer, int len)
       printf ("\n");
     }
   /* accept only unicast or broadcast packets */
-  if (((strncmp (greth_mac, buffer, 6) == 0) ||
-       (strncmp (buffer, broadcast, 6) == 0)) &&
+  if (((strncmp ((const char *) greth_mac, (const char *) buffer, 6) == 0) ||
+       (strncmp ((const char *) buffer, broadcast, 6) == 0)) &&
       (greth_ctrl & CTRL_RE))
     {
-      ms->memory_read (greth_rxbase, &greth_rxdesc, &ws);
+      ms->memory_read (greth_rxbase, &greth_rxdesc, (int32 *) &ws);
       if (greth_rxdesc & DESC_EN)
 	{
-	  ms->memory_read (greth_rxbase + 4, &greth_rxbuf, &ws);
-	  greth_rxbufptr = ms->get_mem_ptr (greth_rxbuf, 1536);
+	  ms->memory_read (greth_rxbase + 4, &greth_rxbuf, (int32 *) &ws);
+	  greth_rxbufptr =
+	      (unsigned char *) ms->get_mem_ptr (greth_rxbuf, 1536);
 	  /* endian swap on host/target endian mismatch */
 	  if (arch->bswap)
 	    {
@@ -295,7 +297,7 @@ greth_rxready (unsigned char *buffer, int len)
 	  else
 	    memcpy (greth_rxbufptr, buffer, len);
 	  tmpdesc = len & 0x7ff;
-	  ms->memory_write (greth_rxbase, &tmpdesc, 2, &ws);
+	  ms->memory_write (greth_rxbase, &tmpdesc, 2, (int32 *) &ws);
 	  greth_status |= STATUS_RI;
 	  if ((greth_rxdesc & DESC_WRAP) ||
 	      ((greth_rxbase & BASE_PNT) == BASE_PNT))

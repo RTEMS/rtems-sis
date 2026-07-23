@@ -226,12 +226,14 @@ static int
 grlib_greth_read (uint32 addr, uint32 *data)
 {
   *data = greth_read (addr);
+  return 1;
 }
 
 static int
 grlib_greth_write (uint32 addr, uint32 *data, uint32 size)
 {
   greth_write (addr, *data);
+  return 1;
 }
 
 static void
@@ -603,6 +605,7 @@ irqmp_read (uint32 addr, uint32 *data)
     default:
       *data = 0;
     }
+  return 1;
 }
 
 static int
@@ -690,6 +693,7 @@ irqmp_write (uint32 addr, uint32 *data, uint32 size)
       chk_irq ();
       break;
     }
+  return 1;
 }
 
 static void
@@ -899,6 +903,7 @@ gpt_read (uint32 addr, uint32 *data)
     default:
       *data = 0;
     }
+  return 1;
 }
 
 static int
@@ -940,6 +945,7 @@ gpt_write (uint32 addr, uint32 *data, uint32 sz)
       gpt_ctrl_write (*data, 1);
       break;
     }
+  return 1;
 }
 
 const struct grlib_ipcore gptimer = { gpt_init, gpt_reset, gpt_read, gpt_write,
@@ -1226,6 +1232,7 @@ apbuart_write (uint32 addr, uint32 *data, uint32 sz)
       if (sis_verbose)
 	printf ("Write to unimplemented UART register (%x)\n", addr);
     }
+  return 1;
 }
 
 void
