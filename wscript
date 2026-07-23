@@ -99,10 +99,20 @@ def configure(conf):
 def build(bld):
     lib = [] if bld.env.DEST_OS == 'win32' else ['m']
 
-    bld.program(source=SOURCES,
+    # The simulator is a static library so that the unit tests can link
+    # against it.  The executable is only an entry point.
+    bld.stlib(source=SOURCES,
+              features='cxx cxxstlib',
+              name='sislib',
+              target='sis',
+              includes=['.'],
+              lib=lib)
+
+    bld.program(source=['main.cc'],
                 features='cxx cxxprogram',
                 target='sis',
                 includes=['.'],
+                use='sislib',
                 lib=lib)
 
 

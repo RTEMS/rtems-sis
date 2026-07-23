@@ -41,7 +41,7 @@
 #define HIST_LEN 256
 
 int
-main (int argc, char **argv)
+sis_main (int argc, char **argv)
 {
 
   int cont = 1;

@@ -413,6 +413,10 @@ extern void greth_rxready (unsigned char *buffer, int len);
 extern int sis_tap_init (long unsigned emac);
 extern int sis_tap_write (unsigned char *buffer, int len);
 
+/* sis.c */
+
+extern int sis_main (int argc, char **argv);
+
 /* FPU timing based on Meiko */
 
 #define T_FABSs	 2
