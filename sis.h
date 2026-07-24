@@ -14,6 +14,9 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
+#ifndef SIS_SIS_H
+#define SIS_SIS_H
+
 #include "config.h"
 #include <stdint.h>
 
@@ -441,3 +444,5 @@ extern int sis_main (int argc, char **argv);
 #define T_FiTOd	 6
 #define T_FsTOi	 6
 #define T_FsTOd	 2
+
+#endif
