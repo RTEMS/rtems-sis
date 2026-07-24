@@ -541,16 +541,14 @@ chk_irq ()
   ext_irl[0] = 0;
   if (itmp != 0)
     {
-      for (i = 15; i > 0; i--)
-	{
-	  if (((itmp >> i) & 1) != 0)
-	    {
-	      if ((sis_verbose) && (i > old_irl))
-		printf ("IU irl: %d\n", i);
-	      ext_irl[0] = i;
-	      break;
-	    }
-	}
+      /* itmp is masked to levels 1..15 and is non-zero, so a set bit is
+	 always found at or below 15 and the scan needs no lower bound.  */
+      i = 15;
+      while (((itmp >> i) & 1) == 0)
+	i--;
+      if ((sis_verbose) && (i > old_irl))
+	printf ("IU irl: %d\n", i);
+      ext_irl[0] = i;
     }
 }
 
