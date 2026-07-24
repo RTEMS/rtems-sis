@@ -61,13 +61,10 @@ read_elf_header (FILE *fp)
       return (-1);
     }
 #ifdef HOST_LITTLE_ENDIAN
-  if (ehdr.e_ident[EI_DATA] == ELFDATA2MSB)
+  efile.bswap = (ehdr.e_ident[EI_DATA] == ELFDATA2MSB);
 #else
-  if (ehdr.e_ident[EI_DATA] == ELFDATA2LSB)
+  efile.bswap = (ehdr.e_ident[EI_DATA] == ELFDATA2LSB);
 #endif
-    {
-      efile.bswap = 1;
-    }
   if (efile.bswap)
     {
       ehdr.e_entry = SWAP_UINT32 (ehdr.e_entry);

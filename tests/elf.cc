@@ -526,17 +526,15 @@ TEST_CASE_FIXTURE (elf_fixture,
   CHECK (text.find ("RISCV executable") != std::string::npos);
 }
 
-/* Marked as expected to fail: see BUGS.md, "The ELF byte order is remembered
-   across loads". read_elf_header sets efile.bswap for a big-endian file and
-   never clears it, and efile is static, so the little-endian file below is
-   swapped as though it were big-endian and its header reads as garbage.
+/* read_elf_header assigns efile.bswap on every load rather than only setting
+   it, so the flag from an earlier load does not carry over.  efile is static,
+   so a big-endian load leaves bswap set; the little-endian file below must
+   still load with its header read straight, not swapped as though big-endian.
 
    The big-endian load comes first inside the case rather than being left to
-   whatever ran before it, so the outcome does not depend on test order.
-   Fixing elf.cc makes this pass, and the decorator has to go with it.  */
+   whatever ran before it, so the outcome does not depend on test order.  */
 TEST_CASE_FIXTURE (
-    elf_fixture, "elf_load reads a little-endian file after a big-endian one" *
-		     doctest::should_fail ())
+    elf_fixture, "elf_load reads a little-endian file after a big-endian one")
 {
   elf_layout big;
   elf_on_disk big_endian (build_elf (&big));
