@@ -21,12 +21,21 @@
 
 #include "sis.h"
 
+#include <concepts>
 #include <cstdio>
 
 namespace erc32
 {
 
-template <class Env> class Mec
+/* What the MEC interrupt controller requires of its environment.  */
+template <class E>
+concept MecEnv = requires (E e) {
+  { e.Verbose () } -> std::convertible_to<bool>;
+  { e.Irl () } -> std::same_as<int &>;
+  { e.ReportError () };
+};
+
+template <MecEnv Env> class Mec
 {
 public:
   explicit Mec (Env &env) : env_ (env) { ResetInterrupts (); }
