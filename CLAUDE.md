@@ -182,6 +182,47 @@ Documentation source of truth for user-facing behavior (board peripheral maps, G
 usage, coverage, networking, invocation options) is `doc/`; update it alongside
 behavioral changes, matching `help.cc` output.
 
+## Refactoring for dependency injection
+
+`erc32_mec.h` is the model for making a subsystem testable without giving up
+performance. Follow it when moving another subsystem out of its board file. The
+tree is C++20 for this.
+
+- **Inject through a policy template.** Move the subsystem's state and its
+  dependencies into a class template on an environment policy. The board
+  instantiates it on a real environment that forwards to the simulator globals;
+  a test instantiates it on one holding its own state and drives the subsystem
+  with no globals. `erc32::Mec<Env>` reaches no global at all, verbose output
+  included: the environment provides `Verbose`, `Irl`, `ReportError` and `Log`.
+
+- **Constrain the policy with a concept.** The environment's required interface
+  is a C++20 concept (`MecEnv`), so a wrong environment fails at the call site
+  with a clear message rather than deep in the body.
+
+- **Refactor behind the tests.** The real environment aliases the exact globals
+  the old code used, so the board behaves identically and the existing tests
+  pass against the converted board unchanged. Only then rewrite the tests to
+  drive the subsystem through the test environment. Do one subsystem per change
+  and run `./waf test-run` after each, since the board is production code.
+
+- **Coverage follows the logic into the header.** A template body lives in a
+  header, so add the header to the `filter` in `gcovr.cfg` and graduate it in
+  `tests/covered.txt`. gcovr merges the real and test instantiations; the test
+  environment alone must reach 100%, so graduation never depends on the board
+  integration path.
+
+- **In a hot path, dispatch statically to a global function; never inline, never
+  indirect.** In `run_sim`, the instruction decoders and the per-access memory
+  path, a policy method must call a single out-of-line function, not carry the
+  body inline. Inlining the memory work into the interpreter loop raised
+  register and instruction-cache pressure and measured 10% slower on crypt01,
+  while the same work as an out-of-line function called statically through the
+  template matched the original. A monomorphic function-pointer call is already
+  predicted and costs nothing, so do not convert the `memsys`/`cpu_arch` vtables
+  for speed. Convert the hot path for testability only, and when you do, keep the
+  implementation in a global function reached by a static template call, not by a
+  pointer and not inlined.
+
 ## Reference documentation
 
 `ref/` holds offline reference manuals for the ISAs and peripherals SIS
