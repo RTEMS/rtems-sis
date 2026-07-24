@@ -199,6 +199,14 @@ tree is C++20 for this.
   is a C++20 concept (`MecEnv`), so a wrong environment fails at the call site
   with a clear message rather than deep in the body.
 
+- **Name the injected code Google style.** The policy templates, their
+  environments and their tests use Google C++ naming: `CamelCase` types and
+  methods, private members with a trailing underscore (`imr_`, `env_`), cheap
+  accessors named like the member they return (`imr ()`), all inside a
+  per-subsystem namespace (`erc32`). The GNU `.clang-format` layout still
+  applies, so only the identifiers differ. The legacy board C keeps its existing
+  `snake_case`; the naming split marks which code has been converted.
+
 - **Refactor behind the tests.** The real environment aliases the exact globals
   the old code used, so the board behaves identically and the existing tests
   pass against the converted board unchanged. Only then rewrite the tests to
