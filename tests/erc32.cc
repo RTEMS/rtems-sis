@@ -21,7 +21,10 @@
 #include "config.h"
 #include "sis.h"
 
+#include <stdio.h>
+#include <string.h>
 #include <string>
+#include <unistd.h>
 
 using sis_tests::stdout_capture;
 
@@ -58,6 +61,12 @@ const uint32 R_TIMER_CTRL = 0x098;
 const uint32 R_SFSR = 0x0a0;
 const uint32 R_FFAR = 0x0a4;
 const uint32 R_TCR = 0x0d0;
+const uint32 R_UARTA = 0x0e0;
+const uint32 R_UARTB = 0x0e4;
+const uint32 R_UART_CTRL = 0x0e8;
+
+/* The UART transmit buffer size, from erc32.cc.  */
+const int UARTBUF = 1024;
 
 /* MEC timer control register bits: RTC and GPT counter reload, counter load,
    scaler enable.  */
@@ -126,6 +135,45 @@ struct mec_fixture
     ms->memory_read (MEC + off, &d, &ws);
     return d;
   }
+};
+
+/* Redirect the UART input (file descriptor 0) to a temporary file holding a
+   fixed string, so a UART read returns known bytes instead of blocking on the
+   real stdin.  The descriptor is restored on destruction.  */
+class stdin_feed
+{
+public:
+  stdin_feed (const char *text) : file (tmpfile ()), saved (-1)
+  {
+    if (file != NULL)
+      {
+	fwrite (text, 1, strlen (text), file);
+	fflush (file);
+	rewind (file);
+      }
+    fflush (stdin);
+    saved = dup (0);
+    if (file != NULL)
+      dup2 (fileno (file), 0);
+  }
+
+  ~stdin_feed ()
+  {
+    if (saved >= 0)
+      {
+	dup2 (saved, 0);
+	close (saved);
+      }
+    if (file != NULL)
+      fclose (file);
+  }
+
+  stdin_feed (const stdin_feed &) = delete;
+  stdin_feed &operator= (const stdin_feed &) = delete;
+
+private:
+  FILE *file;
+  int saved;
 };
 
 } // namespace
@@ -890,4 +938,164 @@ TEST_CASE_FIXTURE (mec_fixture, "MEC byte pointers reject the ROM to RAM gap")
   /* An address above the ROM but below the RAM has no pointer.  */
   CHECK (ms->sis_memory_read (0x01800000, buf, 1) == 0);
   CHECK (ms->sis_memory_write (0x01800000, "z", 1) == 0);
+}
+
+TEST_CASE_FIXTURE (mec_fixture, "MEC UART A transmit buffers and interrupts")
+{
+  /* A byte written to UART A buffers for output and raises the transmit
+     interrupt on level 4.  */
+  wr (R_IMR, 0);
+  wr (R_UARTA, 'H');
+  CHECK ((rd (R_IPR) & (1u << 4)) != 0);
+}
+
+TEST_CASE_FIXTURE (mec_fixture, "MEC UART A transmit flushes a full buffer")
+{
+  /* Filling the transmit buffer past its size flushes it to the output.  */
+  stdout_capture cap;
+  for (int i = 0; i < UARTBUF + 1; i++)
+    wr (R_UARTA, 'x');
+  std::string out = cap.str ();
+  CHECK (out.size () >= (size_t) UARTBUF);
+}
+
+TEST_CASE_FIXTURE (mec_fixture,
+		   "MEC UART B transmit interrupts with no port open")
+{
+  /* With serial port B closed, a UART B write drops the byte but still raises
+     the transmit interrupt on level 5.  */
+  wr (R_IMR, 0);
+  wr (R_UARTB, 'x');
+  CHECK ((rd (R_IPR) & (1u << 5)) != 0);
+}
+
+TEST_CASE_FIXTURE (mec_fixture, "MEC UART control write is accepted")
+{
+  /* The UART control register write has no effect in fast mode but must be
+     accepted, and its reserved bits are rejected.  */
+  wr (R_UART_CTRL, 0);
+
+  wr (R_MCR, MCR_HWERR_IRQ);
+  wr (R_UARTA, 0x100); /* reserved data bits */
+  CHECK ((rd (R_IPR) & (1u << 1)) != 0);
+  wr (R_ICR, 1u << 1);
+
+  wr (R_UART_CTRL, 0x01000000); /* reserved control bits */
+  CHECK ((rd (R_IPR) & (1u << 1)) != 0);
+}
+
+TEST_CASE_FIXTURE (mec_fixture, "MEC UART A receives buffered input")
+{
+  /* Two fed bytes read back in order; the first read, with more to come,
+     raises the receive interrupt on level 4.  */
+  stdin_feed feed ("AB");
+  wr (R_IMR, 0);
+
+  uint32 d1 = rd (R_UARTA);
+  CHECK ((d1 & 0xff) == 'A');
+  CHECK ((d1 & 0x100) != 0); /* data valid */
+  CHECK ((rd (R_IPR) & (1u << 4)) != 0);
+
+  uint32 d2 = rd (R_UARTA);
+  CHECK ((d2 & 0xff) == 'B');
+
+  uint32 d3 = rd (R_UARTA); /* nothing left */
+  CHECK ((d3 & 0x100) == 0);
+}
+
+TEST_CASE_FIXTURE (mec_fixture, "MEC UART A receives a single byte")
+{
+  /* A lone fed byte reads back with no further interrupt.  */
+  stdin_feed feed ("Z");
+  uint32 d = rd (R_UARTA);
+  CHECK ((d & 0xff) == 'Z');
+  CHECK ((d & 0x100) != 0);
+}
+
+TEST_CASE_FIXTURE (mec_fixture, "MEC UART status reports pending input")
+{
+  /* The status register reports data ready for a port with input.  */
+  stdin_feed feed ("Q");
+  uint32 s = rd (R_UART_CTRL);
+  CHECK ((s & 0x1) != 0);
+  CHECK ((s & 0x00060006) == 0x00060006);
+}
+
+TEST_CASE_FIXTURE (mec_fixture, "MEC UART status reports no input")
+{
+  /* With empty input, the status register reports no data ready.  */
+  stdin_feed feed ("");
+  uint32 s = rd (R_UART_CTRL);
+  CHECK ((s & 0x1) == 0);
+  CHECK ((s & 0x00010000) == 0);
+}
+
+TEST_CASE_FIXTURE (mec_fixture,
+		   "MEC UART flush timer drains the transmit buffer")
+{
+  /* The periodic UART interrupt flushes buffered output and reschedules.  */
+  stdout_capture cap;
+  stdin_feed feed ("");
+  wr (R_UARTA, 'A');
+  wr (R_UARTA, 'B');
+  advance_time (3000); /* fires uart_intr at UART_FLUSH_TIME */
+  std::string out = cap.str ();
+  CHECK (out.find ("AB") != std::string::npos);
+}
+
+TEST_CASE_FIXTURE (mec_fixture,
+		   "MEC UART B input and output with the port open")
+{
+  /* Open serial port B by routing the console to it, then exercise its
+     transmit buffer, receive and status paths.  This is the last UART case
+     because it leaves port B open.  */
+  int saved_uben = uben;
+  uben = 1;
+  ms->init_sim (); /* re-open the ports with B on the console */
+
+  {
+    stdout_capture cap;
+    stdin_feed feed ("");
+    for (int i = 0; i < UARTBUF + 1; i++)
+      wr (R_UARTB, 'y');
+    std::string out = cap.str ();
+    CHECK (out.size () >= (size_t) UARTBUF);
+  }
+
+  {
+    stdin_feed feed ("CD");
+    uint32 d = rd (R_UARTB);
+    CHECK ((d & 0xff) == 'C');
+    uint32 d2 = rd (R_UARTB);
+    CHECK ((d2 & 0xff) == 'D');
+    uint32 d3 = rd (R_UARTB);
+    CHECK ((d3 & 0x100) == 0);
+  }
+
+  {
+    stdin_feed feed ("E");
+    uint32 d = rd (R_UARTB);
+    CHECK ((d & 0xff) == 'E');
+  }
+
+  {
+    /* Prime A with a spare byte so the status read does not refill and
+       consume B's input; then B's own refill reports its data.  */
+    stdin_feed feed ("XY");
+    rd (R_UARTA);
+  }
+  {
+    stdin_feed feed ("Q");
+    uint32 s = rd (R_UART_CTRL);
+    CHECK ((s & 0x00010000) != 0); /* UART B data ready */
+  }
+
+  {
+    stdout_capture cap;
+    stdin_feed feed ("");
+    wr (R_UARTB, 'A');
+    advance_time (3000); /* uart_intr flushes port B too */
+  }
+
+  uben = saved_uben;
 }
