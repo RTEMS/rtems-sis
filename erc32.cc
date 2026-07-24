@@ -642,7 +642,7 @@ mec_read (uint32 addr, uint32 asi, uint32 *data)
       break;
 
     case MEC_GPT_SCALER: /* 0x8c */
-      if (rtc_enabled)
+      if (gpt_enabled)
 	*data = gpt_scaler - (now () - gpt_scaler_start);
       else
 	*data = gpt_scaler;

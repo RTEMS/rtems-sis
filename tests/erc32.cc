@@ -37,7 +37,21 @@ const uint32 R_IPR = 0x048;
 const uint32 R_IMR = 0x04c;
 const uint32 R_ICR = 0x050;
 const uint32 R_IFR = 0x054;
+const uint32 R_RTC_COUNTER = 0x080;
+const uint32 R_RTC_SCALER = 0x084;
+const uint32 R_GPT_COUNTER = 0x088;
+const uint32 R_GPT_SCALER = 0x08c;
+const uint32 R_TIMER_CTRL = 0x098;
 const uint32 R_TCR = 0x0d0;
+
+/* MEC timer control register bits: RTC and GPT counter reload, counter load,
+   scaler enable.  */
+const uint32 TC_GPT_RELOAD = 0x001;
+const uint32 TC_GPT_LOAD = 0x002;
+const uint32 TC_GPT_SCALER_EN = 0x004;
+const uint32 TC_RTC_RELOAD = 0x100;
+const uint32 TC_RTC_LOAD = 0x200;
+const uint32 TC_RTC_SCALER_EN = 0x400;
 
 /* Store-size encoding for a word and the test-mode / IFR-enable bit of the
    MEC test control register.  */
@@ -243,4 +257,17 @@ TEST_CASE_FIXTURE (mec_fixture, "MEC narrates interrupt changes when verbose")
   std::string out = cap.str ();
   CHECK (out.find ("IU irl: 7") != std::string::npos);
   CHECK (out.find ("interrupt 7 acknowledged") != std::string::npos);
+}
+
+TEST_CASE_FIXTURE (mec_fixture, "MEC reads the running GPT scaler down")
+{
+  /* A running scaler reads back as its start value minus the elapsed time.
+     The GPT scaler read must follow the GPT's own enable, not the RTC's: with
+     the GPT running and the RTC stopped it still counts down.  */
+  ebase.simtime = 100;
+  wr (R_GPT_SCALER, 50);
+  wr (R_TIMER_CTRL, TC_GPT_SCALER_EN); /* start the GPT scaler only */
+
+  ebase.simtime = 110;
+  CHECK (rd (R_GPT_SCALER) == 40);
 }
