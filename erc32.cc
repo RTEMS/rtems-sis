@@ -1549,13 +1549,13 @@ static void
 timer_ctrl (uint32 val)
 {
 
+  /* The scaler-load bits (TCR_TCRSL, TCR_GASL) have no effect: the prescaler
+     is modelled as an elapsed-time delta, so there is no scaler register to
+     reload.  */
   rtc_cr = ((val & TCR_TCRCR) != 0);
   if (val & TCR_TCRCL)
     {
       rtc_counter = rtc_reload;
-    }
-  if (val & TCR_TCRSL)
-    {
     }
   rtc_se = ((val & TCR_TCRSE) != 0);
   if (rtc_se && (rtc_enabled == 0))
@@ -1565,9 +1565,6 @@ timer_ctrl (uint32 val)
   if (val & TCR_GACL)
     {
       gpt_counter = gpt_reload;
-    }
-  if (val & TCR_GACL)
-    {
     }
   gpt_se = (val & TCR_GASE) >> 2;
   if (gpt_se && (gpt_enabled == 0))
