@@ -6,7 +6,7 @@
 # Commands
 
 Below is the description of commands that are recognized by the simulator. The
-command-line is parsed using cpp-linenoise. A command history of 64 commands is
+command-line is parsed using cpp-linenoise. A command history of 256 commands is
 maintained. Use the up/down arrows to recall previous commands. For more
 details, see the cpp-linenoise documentation.
 
