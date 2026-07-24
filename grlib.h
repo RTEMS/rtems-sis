@@ -40,7 +40,9 @@
 #define GAISLER_IRQMP	0x00D
 #define GAISLER_GPTIMER 0x011
 #define GAISLER_GRETH	0x01D
+#define GAISLER_CLKGATE 0x02C
 #define GAISLER_L2C	0x04B
+#define GAISLER_GR1553B 0x04D
 #define ESA_MCTRL	0x00F
 #define CONTRIB_NS16550 0x050
 #define CONTRIB_CLINT	0x051
@@ -110,4 +112,5 @@ extern void apbuart_restore_stdio (void);
 extern void apbuart_close_port (void);
 extern void apbuart_flush (void);
 extern const struct grlib_ipcore gptimer, irqmp, apbuart, apbmst, dsu, greth,
-    l2c, leon3s, srctrl, ns16550, clint, plic, sdctrl, s5test, apbmst2;
+    l2c, leon3s, srctrl, ns16550, clint, plic, sdctrl, s5test, apbmst2,
+    clkgate, gr1553b;

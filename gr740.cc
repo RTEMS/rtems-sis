@@ -48,7 +48,8 @@
 #include "grlib.h"
 
 /* APB registers */
-#define APBSTART 0xFF900000
+#define APBSTART  0xFF900000
+#define APB2START 0xFFA00000
 
 /* Memory exception waitstates.  */
 #define MEM_EX_WS 1
@@ -73,11 +74,15 @@ init_sim (void)
   grlib_ahbs_add (&apbmst, 0, APBSTART, 0xFFF);
   grlib_ahbs_add (&sdctrl, 0, RAM_START, RAM_MASKPP);
   grlib_ahbs_add (&l2c, 0, 0xF0000000, 0xFFF);
+  grlib_ahbs_add (&apbmst2, 0, APB2START, 0xFFF);
 
   grlib_apb_add (&apbuart, 3, APBSTART + 0x00000, 0xFFF);
   grlib_apb_add (&irqmp, 0, APBSTART + 0x04000, 0xFFF);
   grlib_apb_add (&gptimer, 1, APBSTART + 0x08000, 0xFFF);
   grlib_apb_add (&greth, 6, APBSTART + 0x40000, 0xFFF);
+
+  grlib_apb_add (&clkgate, 0, APB2START + 0x04000, 0xFFF);
+  grlib_apb_add (&gr1553b, 26, APB2START + 0x05000, 0xFFF);
 
   grlib_init ();
   ebase.ramstart = RAM_START;

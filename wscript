@@ -42,6 +42,7 @@ SOURCES = [
     'tap.cc',
     'gr740.cc',
     'rv32.cc',
+    'gr1553.cc',
     'sisio.cc',
 ]
 

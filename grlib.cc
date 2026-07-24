@@ -1517,6 +1517,54 @@ srctrl_add (int irq, uint32 addr, uint32 mask)
 const struct grlib_ipcore srctrl = { NULL, NULL, srctrl_read, srctrl_write,
 				     srctrl_add };
 
+/* ------------------- GRCLKGATE -----------------------*/
+
+/* Clock gating unit.  The registers are modelled as a plain register file:
+   the emulated cores are always clocked, so enabling or resetting a clock
+   has no effect other than the value read back.  */
+
+#define GRCLKGATE_UNLOCK   0x00
+#define GRCLKGATE_CLKEN	   0x04
+#define GRCLKGATE_RESET	   0x08
+#define GRCLKGATE_OVERRIDE 0x0C
+
+static uint32 clkgate_regs[4];
+
+static void
+clkgate_reset (void)
+{
+  clkgate_regs[0] = 0;
+  clkgate_regs[1] = 0;
+  clkgate_regs[2] = 0;
+  clkgate_regs[3] = 0;
+}
+
+static int
+clkgate_read (uint32 addr, uint32 *data)
+{
+  *data = clkgate_regs[(addr & 0xF) >> 2];
+  return 1;
+}
+
+static int
+clkgate_write (uint32 addr, uint32 *data, uint32 sz)
+{
+  clkgate_regs[(addr & 0xF) >> 2] = *data;
+  return 1;
+}
+
+static void
+clkgate_add (int irq, uint32 addr, uint32 mask)
+{
+  grlib_apbpp_add (GRLIB_PP_ID (VENDOR_GAISLER, GAISLER_CLKGATE, 0, 0),
+		   GRLIB_PP_APBADDR (addr, mask));
+  if (sis_verbose)
+    printf (" Clock gating unit                  0x%08x\n", addr);
+}
+
+const struct grlib_ipcore clkgate = { NULL, clkgate_reset, clkgate_read,
+				      clkgate_write, clkgate_add };
+
 /* ------------------- boot init --------------------*/
 void
 grlib_boot_init (void)
