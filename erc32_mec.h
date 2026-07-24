@@ -9,9 +9,10 @@
 
    The environment must provide:
 
-     bool Verbose ();        whether to print progress, was sis_verbose
-     int &Irl ();            the external interrupt request level of the CPU
-     void ReportError ();    a parity or hardware error, was mecparerror ()
+     bool Verbose ();          whether to print progress, was sis_verbose
+     int &Irl ();              the external interrupt request level of the CPU
+     void ReportError ();      a parity or hardware error, was mecparerror ()
+     void Log (const char *);  a line of progress output, was printf
 
    This header currently models the MEC interrupt controller.  The remaining
    MEC subsystems move into it one at a time.  */
@@ -33,6 +34,7 @@ concept MecEnv = requires (E e) {
   { e.Verbose () } -> std::convertible_to<bool>;
   { e.Irl () } -> std::same_as<int &>;
   { e.ReportError () };
+  { e.Log ("") };
 };
 
 template <MecEnv Env> class Mec
@@ -145,7 +147,11 @@ public:
   Intack (int level)
   {
     if (env_.Verbose ())
-      printf ("interrupt %d acknowledged\n", level);
+      {
+	char msg[48];
+	snprintf (msg, sizeof msg, "interrupt %d acknowledged\n", level);
+	env_.Log (msg);
+      }
     if ((tcr_ & 0x80000u) && (ifr_ & (1u << level)))
       ifr_ &= ~(1u << level);
     else
@@ -171,7 +177,11 @@ public:
 	while (((itmp >> i) & 1) == 0)
 	  i--;
 	if (env_.Verbose () && i > old_irl)
-	  printf ("IU irl: %d\n", i);
+	  {
+	    char msg[32];
+	    snprintf (msg, sizeof msg, "IU irl: %d\n", i);
+	    env_.Log (msg);
+	  }
 	env_.Irl () = i;
       }
   }

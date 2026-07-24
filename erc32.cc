@@ -280,6 +280,11 @@ struct RealEnv
   {
     mecparerror ();
   }
+  void
+  Log (const char *msg)
+  {
+    fputs (msg, stdout);
+  }
 };
 
 static RealEnv real_env;

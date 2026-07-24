@@ -98,6 +98,7 @@ struct TestEnv
   int irl = 0;
   bool verbose = false;
   int errors = 0;
+  std::string log;
 
   bool
   Verbose ()
@@ -113,6 +114,11 @@ struct TestEnv
   ReportError ()
   {
     ++errors;
+  }
+  void
+  Log (const char *msg)
+  {
+    log += msg;
   }
 };
 
@@ -347,7 +353,6 @@ TEST_CASE ("Mec narrates interrupt changes when verbose")
   TestEnv env;
   env.verbose = true;
   erc32::Mec<TestEnv> mec (env);
-  stdout_capture cap;
 
   mec.WriteTcr (TCR_IFR_EN);
   mec.WriteImr (0);
@@ -356,9 +361,9 @@ TEST_CASE ("Mec narrates interrupt changes when verbose")
   mec.WriteImr (0);	  /* re-evaluates with the level already 7 */
   mec.Intack (7);
 
-  std::string out = cap.str ();
-  CHECK (out.find ("IU irl: 7") != std::string::npos);
-  CHECK (out.find ("interrupt 7 acknowledged") != std::string::npos);
+  /* The narration reaches the injected log, not the real stdout.  */
+  CHECK (env.log.find ("IU irl: 7") != std::string::npos);
+  CHECK (env.log.find ("interrupt 7 acknowledged") != std::string::npos);
 }
 
 TEST_CASE_FIXTURE (mec_fixture, "MEC dispatches the interrupt registers")
