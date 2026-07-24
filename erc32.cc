@@ -567,15 +567,11 @@ set_sfsr (uint32 fault, uint32 addr, uint32 asi, uint32 read)
       mec_ffar = addr;
       mec_sfsr = (fault << 3) | (!read << 15);
       mec_sfsr |= ((mec_sfsr & 1) ^ 1) | (mec_sfsr & 1);
-      switch (asi)
-	{
-	case 0xa:
-	  mec_sfsr |= 0x0004;
-	  break;
-	case 0xb:
-	  mec_sfsr |= 0x1004;
-	  break;
-	}
+      /* The guard leaves asi as 0xa or 0xb, so 0xb here means 0xa there.  */
+      if (asi == 0xb)
+	mec_sfsr |= 0x1004;
+      else
+	mec_sfsr |= 0x0004;
     }
 }
 
@@ -1581,30 +1577,33 @@ timer_ctrl (uint32 val)
 static void
 store_bytes (char *mem, uint32 waddr, uint32 *data, int32 sz, int32 *ws)
 {
-  switch (sz)
+  /* sz is the two-bit store size: 0 byte, 1 half-word, 2 word, 3 double, so
+     the final case needs no test of its own.  */
+  if (sz == 0)
     {
-    case 0:
 #ifdef HOST_LITTLE_ENDIAN
       waddr ^= 3;
 #endif
       mem[waddr] = *data & 0x0ff;
       *ws = mem_ramw_ws + 3;
-      break;
-    case 1:
+    }
+  else if (sz == 1)
+    {
 #ifdef HOST_LITTLE_ENDIAN
       waddr ^= 2;
 #endif
       *((uint16 *) &mem[waddr]) = *data & 0x0ffff;
       *ws = mem_ramw_ws + 3;
-      break;
-    case 2:
+    }
+  else if (sz == 2)
+    {
       memcpy (&mem[waddr], data, 4);
       *ws = mem_ramw_ws;
-      break;
-    case 3:
+    }
+  else
+    {
       memcpy (&mem[waddr], data, 8);
       *ws = 2 * mem_ramw_ws + STD_WS;
-      break;
     }
 }
 
