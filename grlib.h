@@ -64,12 +64,15 @@
 #define ROM_MASKPP ((~ROM_MASK >> 20) & 0xFFF)
 #define RAM_MASKPP ((~RAM_MASK >> 20) & 0xFFF)
 
+/* Number of AHB/APB bridges a board may instantiate. */
+
+#define GRLIB_APB_BUSES 2
+
 extern int grlib_apbpp_add (uint32 id, uint32 addr);
 extern int grlib_ahbmpp_add (uint32 id);
 extern int grlib_ahbspp_add (uint32 id, uint32 addr1, uint32 addr2,
 			     uint32 addr3, uint32 addr4);
 extern uint32 grlib_ahbpnp_read (uint32 addr);
-extern uint32 grlib_apbpnp_read (uint32 addr);
 extern void grlib_init ();
 extern uint32 rvtimer_read (int address, int cpu);
 
@@ -107,4 +110,4 @@ extern void apbuart_restore_stdio (void);
 extern void apbuart_close_port (void);
 extern void apbuart_flush (void);
 extern const struct grlib_ipcore gptimer, irqmp, apbuart, apbmst, dsu, greth,
-    l2c, leon3s, srctrl, ns16550, clint, plic, sdctrl, s5test;
+    l2c, leon3s, srctrl, ns16550, clint, plic, sdctrl, s5test, apbmst2;

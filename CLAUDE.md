@@ -120,16 +120,19 @@ controller, Ethernet, SDRAM controller, L2 cache, ...) with the shared bus model
 `grlib_read`/`grlib_write`). `erc32.cc` is self-contained and does not use `grlib.cc`
 (ERC32 predates the GRLIB peripheral set).
 
-Three properties of that bus model decide where a new peripheral can go:
+Four properties of that bus model decide where a new peripheral can go:
 
 - An AHB slave decodes at 1 M granularity: the mask is 12 bits shifted left by 20, so
   1 M is the smallest window. Two cores less than 1 M apart cannot both be AHB slaves.
 - An APB core decodes at 256 byte granularity, but only inside the 1 M window of its
-  bridge (`grlib_apb_add` masks to `0x0fffff`). A board has a single APB bridge, so
-  all of its APB cores must lie within one 1 M window.
+  bridge (`grlib_apb_add` masks to `0x0fffff`). Cores more than 1 M apart need a
+  second bridge; `GRLIB_APB_BUSES` in `grlib.h` caps how many a board may add, and a
+  board must register a bridge before the cores behind it.
 - `grlib_init`/`grlib_reset` walk only the AHB master and slave lists. APB cores get
   their `init`/`reset` from the bridge, so an APB core reached through no bridge is
   never initialised.
+- `struct grlib_ipcore` has no instance pointer. Several instances of one core need a
+  set of per-instance wrappers; see the `GRLIB_APBMST` macro in `grlib.cc`.
 
 A peripheral that moves data on its own (`greth.cc`) reads and writes emulated memory
 through `ms->memory_read`/`ms->memory_write` for words, and through `ms->get_mem_ptr`

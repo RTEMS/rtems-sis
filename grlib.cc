@@ -39,31 +39,6 @@
 #include "grlib.h"
 #include "sisio.h"
 
-/* APB PNP */
-
-static uint32 apbppmem[32 * 2]; /* 32-entry APB PP AREA */
-static int apbppindex;
-
-int
-grlib_apbpp_add (uint32 id, uint32 addr)
-{
-  apbppmem[apbppindex++] = id;
-  apbppmem[apbppindex++] = addr;
-  if (apbppindex >= (32 * 2))
-    apbppindex = 0; /* prevent overflow of area */
-  return apbppindex;
-}
-
-uint32
-grlib_apbpnp_read (uint32 addr)
-{
-  uint32 read_data;
-  addr &= 0xff;
-  read_data = apbppmem[addr >> 2];
-
-  return read_data;
-}
-
 /* AHB PNP */
 
 static uint32 ahbppmem[128 * 8]; /* 128-entry AHB PP AREA */
@@ -107,10 +82,51 @@ grlib_ahbpnp_read (uint32 addr)
 
 static struct grlib_buscore ahbmcores[16];
 static struct grlib_buscore ahbscores[16];
-static struct grlib_buscore apbcores[16];
 static int ahbmi;
 static int ahbsi;
-static int apbi;
+
+/* Each AHB/APB bridge decodes its own 1 M window and holds its own set of
+   cores.  Two bridges can carry a core at the same offset inside their
+   windows, so the sets cannot be shared.  */
+
+struct grlib_apbbus
+{
+  struct grlib_buscore cores[16];
+  int ncores;
+  uint32 base;
+  uint32 mask;
+  uint32 ppmem[32 * 2]; /* 32-entry APB PP AREA */
+  int ppindex;
+};
+
+static struct grlib_apbbus apbbus[GRLIB_APB_BUSES];
+
+/* APB PNP */
+
+/* The bridge whose core is being added.  A core reports its plug&play entry
+   from its add callback, which has no way to name the bridge it sits on. */
+
+static struct grlib_apbbus *apbbus_adding;
+
+int
+grlib_apbpp_add (uint32 id, uint32 addr)
+{
+  /* Some cores registered as AHB slaves report an APB entry as well.  Those
+     have no bridge, so keep them on the first one.  */
+  struct grlib_apbbus *bus = apbbus_adding ? apbbus_adding : &apbbus[0];
+
+  bus->ppmem[bus->ppindex++] = id;
+  bus->ppmem[bus->ppindex++] = addr;
+  if (bus->ppindex >= (32 * 2))
+    bus->ppindex = 0; /* prevent overflow of area */
+  return bus->ppindex;
+}
+
+static uint32
+grlib_apbpnp_read (struct grlib_apbbus *bus, uint32 addr)
+{
+  return bus->ppmem[(addr & 0xff) >> 2];
+}
 
 void
 grlib_init ()
@@ -209,20 +225,56 @@ grlib_write (uint32 addr, uint32 *data, uint32 sz)
   return !res;
 }
 
+/* Find the bridge whose window holds ADDR.  Bridges are registered as AHB
+   slaves, so a board must add a bridge before the cores behind it.  A mask
+   of zero marks an entry no bridge has claimed yet.  */
+
+static struct grlib_apbbus *
+grlib_apb_bus (uint32 addr)
+{
+  int i;
+
+  for (i = 0; i < GRLIB_APB_BUSES; i++)
+    if (apbbus[i].mask != 0 && (addr & apbbus[i].mask) == apbbus[i].base)
+      return &apbbus[i];
+
+  return NULL;
+}
+
 void
 grlib_apb_add (const struct grlib_ipcore *core, int irq, uint32 addr,
 	       uint32 mask)
 {
-  apbcores[apbi].core = core;
+  struct grlib_apbbus *bus = grlib_apb_bus (addr);
+  struct grlib_buscore *bc;
+
+  if (bus == NULL)
+    {
+      printf ("No AHB/APB bridge covers address 0x%08x\n", addr);
+      return;
+    }
+
+  if (bus->ncores >= (int) (sizeof (bus->cores) / sizeof (bus->cores[0])))
+    {
+      printf ("Too many cores on the AHB/APB bridge at 0x%08x\n", bus->base);
+      return;
+    }
+
+  bc = &bus->cores[bus->ncores];
+  bc->core = core;
   if (core->add)
     {
-      apbcores[apbi].start = addr & (mask << 8);
-      apbcores[apbi].end =
-	  (apbcores[apbi].start + ~(mask << 8) + 1) & 0x0fffff;
-      apbcores[apbi].mask = ~(mask << 8) & 0x0fffff;
+      bc->start = addr & (mask << 8);
+      bc->end = (bc->start + ~(mask << 8) + 1) & 0x0fffff;
+      bc->mask = ~(mask << 8) & 0x0fffff;
+
+      /* The add callback reports the plug&play entry of the core, which
+	 belongs in the area of this bridge.  */
+      apbbus_adding = bus;
       core->add (irq, addr, mask);
+      apbbus_adding = NULL;
     }
-  apbi++;
+  bus->ncores++;
 }
 
 /* ------------------- GRETH -----------------------*/
@@ -312,44 +364,47 @@ const struct grlib_ipcore leon3s = { NULL, NULL, NULL, NULL, leon3_add };
 /* ------------------- APBMST ----------------------*/
 
 static void
-apbmst_init ()
+apbbus_init (int n)
 {
+  struct grlib_apbbus *bus = &apbbus[n];
   int i;
 
-  for (i = 0; i < apbi; i++)
-    if (apbcores[i].core->init)
-      apbcores[i].core->init ();
+  for (i = 0; i < bus->ncores; i++)
+    if (bus->cores[i].core->init)
+      bus->cores[i].core->init ();
 }
 
 static void
-apbmst_reset ()
+apbbus_reset (int n)
 {
+  struct grlib_apbbus *bus = &apbbus[n];
   int i;
 
-  for (i = 0; i < apbi; i++)
-    if (apbcores[i].core->reset)
-      apbcores[i].core->reset ();
+  for (i = 0; i < bus->ncores; i++)
+    if (bus->cores[i].core->reset)
+      bus->cores[i].core->reset ();
 }
 
 static int
-apbmst_read (uint32 addr, uint32 *data)
+apbbus_read (int n, uint32 addr, uint32 *data)
 {
+  struct grlib_apbbus *bus = &apbbus[n];
   int i;
   int res = 0;
 
-  for (i = 0; i < apbi; i++)
+  for (i = 0; i < bus->ncores; i++)
     {
-      if ((addr >= apbcores[i].start) && (addr < apbcores[i].end))
+      if ((addr >= bus->cores[i].start) && (addr < bus->cores[i].end))
 	{
 	  res = 1;
-	  if (apbcores[i].core->read)
-	    apbcores[i].core->read (addr & apbcores[i].mask, data);
+	  if (bus->cores[i].core->read)
+	    bus->cores[i].core->read (addr & bus->cores[i].mask, data);
 	  break;
 	}
     }
   if (!res && (addr >= 0xFF000))
     {
-      *data = grlib_apbpnp_read (addr);
+      *data = grlib_apbpnp_read (bus, addr);
       if (sis_verbose > 1)
 	printf ("APB PP read a: %08x, d: %08x\n", addr, *data);
     }
@@ -357,31 +412,55 @@ apbmst_read (uint32 addr, uint32 *data)
 }
 
 static int
-apbmst_write (uint32 addr, uint32 *data, uint32 size)
+apbbus_write (int n, uint32 addr, uint32 *data, uint32 size)
 {
+  struct grlib_apbbus *bus = &apbbus[n];
   int i;
 
-  for (i = 0; i < apbi; i++)
-    if ((addr >= apbcores[i].start) && (addr < apbcores[i].end))
+  for (i = 0; i < bus->ncores; i++)
+    if ((addr >= bus->cores[i].start) && (addr < bus->cores[i].end))
       {
-	if (apbcores[i].core->write)
-	  apbcores[i].core->write (addr & apbcores[i].mask, data, size);
+	if (bus->cores[i].core->write)
+	  bus->cores[i].core->write (addr & bus->cores[i].mask, data, size);
 	break;
       }
   return 1;
 }
 
 static void
-apbmst_add (int irq, uint32 addr, uint32 mask)
+apbbus_add (int n, uint32 addr, uint32 mask)
 {
+  apbbus[n].base = addr & (mask << 20);
+  apbbus[n].mask = mask << 20;
   grlib_ahbspp_add (GRLIB_PP_ID (VENDOR_GAISLER, GAISLER_APBMST, 0, 0),
 		    GRLIB_PP_AHBADDR (addr, mask, 0, 0, 2), 0, 0, 0);
   if (sis_verbose)
     printf (" AHB/APB Bridge                     0x%08x\n", addr);
 }
 
-const struct grlib_ipcore apbmst = { apbmst_init, apbmst_reset, apbmst_read,
-				     apbmst_write, apbmst_add };
+/* The dispatch structure carries no instance pointer, so each bridge gets
+   its own set of thin wrappers.  */
+
+#define GRLIB_APBMST(name, n)                                                 \
+  static void name##_init (void) { apbbus_init (n); }                         \
+  static void name##_reset (void) { apbbus_reset (n); }                       \
+  static int name##_read (uint32 addr, uint32 *data)                          \
+  {                                                                           \
+    return apbbus_read (n, addr, data);                                       \
+  }                                                                           \
+  static int name##_write (uint32 addr, uint32 *data, uint32 size)            \
+  {                                                                           \
+    return apbbus_write (n, addr, data, size);                                \
+  }                                                                           \
+  static void name##_add (int irq, uint32 addr, uint32 mask)                  \
+  {                                                                           \
+    apbbus_add (n, addr, mask);                                               \
+  }                                                                           \
+  const struct grlib_ipcore name = { name##_init, name##_reset, name##_read,  \
+				     name##_write, name##_add };
+
+GRLIB_APBMST (apbmst, 0)
+GRLIB_APBMST (apbmst2, 1)
 
 /* ------------------- IRQMP -----------------------*/
 
