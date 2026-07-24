@@ -242,9 +242,11 @@ static void port_init (void);
 static uint32 read_uart (uint32 addr);
 static void write_uart (uint32 addr, uint32 data);
 static void flush_uart (void);
+#ifndef FAST_UART
 static void uarta_tx (int32);
 static void uartb_tx (int32);
 static void uart_rx (int32 arg);
+#endif
 static void uart_intr (int32 arg);
 static void uart_irq_start (void);
 static void wdog_intr (int32 arg);
@@ -1270,6 +1272,10 @@ flush_uart ()
     }
 }
 
+/* The interrupt-driven transmit and receive handlers are used only when the
+   UART is not in fast mode.  Fast mode moves the data in read_uart,
+   write_uart and uart_intr, so these are left out of the build.  */
+#ifndef FAST_UART
 static void
 uarta_tx (int32 arg)
 {
@@ -1362,6 +1368,7 @@ uart_rx (int32 arg)
     }
   event (uart_rx, 0, UART_RX_TIME);
 }
+#endif
 
 static void
 uart_intr (int32 arg)
