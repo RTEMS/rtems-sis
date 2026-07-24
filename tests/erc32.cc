@@ -590,3 +590,304 @@ TEST_CASE_FIXTURE (mec_fixture,
   std::string out = cap.str ();
   CHECK (out.find ("MEC write") != std::string::npos);
 }
+
+/* The ERC32 memory map: RAM at 0x02000000, ROM from 0, the MEC window, and
+   everything else unmapped.  */
+const uint32 RAM = 0x02000000;
+const uint32 ROM = 0x00000100;
+const uint32 UNMAPPED = 0x40000000;
+
+TEST_CASE_FIXTURE (mec_fixture, "MEC memory reads dispatch by region")
+{
+  uint32 d;
+  int32 ws;
+
+  /* A word written to RAM reads back; ROM and a MEC register read without
+     fault; an unmapped read faults and records the supervisor fault status. */
+  uint32 val = 0xdeadbeef;
+  CHECK (ms->memory_write (RAM, &val, SZ_WORD, &ws) == 0);
+  CHECK (ms->memory_read (RAM, &d, &ws) == 0);
+  CHECK (d == 0xdeadbeef);
+
+  CHECK (ms->memory_read (ROM, &d, &ws) == 0);
+  CHECK (ms->memory_read (MEC + R_IMR, &d, &ws) == 0);
+
+  CHECK (ms->memory_read (UNMAPPED, &d, &ws) == 1);
+  CHECK (rd (R_SFSR) != 0); /* the fault status register recorded it */
+}
+
+TEST_CASE_FIXTURE (mec_fixture, "MEC instruction reads dispatch by region")
+{
+  uint32 d;
+  int32 ws;
+
+  CHECK (ms->memory_iread (RAM, &d, &ws) == 0);
+  CHECK (ms->memory_iread (ROM, &d, &ws) == 0);
+
+  /* An unmapped fetch faults, in supervisor and in user mode, taking both
+     fault ASIs that skip the fault status register.  */
+  sregs[0].psr |= 0x80;
+  CHECK (ms->memory_iread (UNMAPPED, &d, &ws) == 1);
+  sregs[0].psr &= ~0x80;
+  CHECK (ms->memory_iread (UNMAPPED, &d, &ws) == 1);
+  sregs[0].psr |= 0x80;
+}
+
+TEST_CASE_FIXTURE (mec_fixture, "MEC fault status records access mode")
+{
+  uint32 d;
+  int32 ws;
+  uint32 v = 0;
+
+  /* A faulting MEC access records the fault status with the supervisor or the
+     user data ASI, and clears it as read or as write.  */
+  CHECK (ms->memory_read (MEC + 0x0c, &d, &ws) ==
+	 1);			       /* undefined, supervisor */
+  CHECK ((rd (R_SFSR) & 0x1000) != 0); /* ASI 0xb */
+
+  sregs[0].psr &= ~0x80;
+  CHECK (ms->memory_read (MEC + 0x0c, &d, &ws) == 1); /* undefined, user */
+  sregs[0].psr |= 0x80;
+
+  CHECK (ms->memory_write (MEC + 0x0c, &v, SZ_WORD, &ws) ==
+	 1); /* write fault */
+}
+
+TEST_CASE_FIXTURE (mec_fixture, "MEC rejects malformed MEC accesses")
+{
+  int32 ws;
+  uint32 v = 0;
+
+  /* A MEC register write must be a supervisor word.  A byte write and a
+     user-mode write both fault.  */
+  CHECK (ms->memory_write (MEC + R_IMR, &v, 0, &ws) == 1); /* not a word */
+
+  sregs[0].psr &= ~0x80;
+  CHECK (ms->memory_write (MEC + R_IMR, &v, SZ_WORD, &ws) ==
+	 1); /* not super */
+  sregs[0].psr |= 0x80;
+}
+
+TEST_CASE_FIXTURE (mec_fixture, "MEC stores every access size to RAM")
+{
+  uint32 d;
+  int32 ws;
+
+  /* Byte, half-word, word and double-word stores.  The word and double-word
+     round-trip exactly; the byte and half change the surrounding word.  */
+  uint32 word = 0x11223344;
+  CHECK (ms->memory_write (RAM + 8, &word, 2, &ws) == 0);
+  CHECK (ms->memory_read (RAM + 8, &d, &ws) == 0);
+  CHECK (d == 0x11223344);
+
+  uint32 dbl[2] = { 0x55667788, 0x99aabbcc };
+  CHECK (ms->memory_write (RAM + 16, dbl, 3, &ws) == 0);
+  CHECK (ms->memory_read (RAM + 16, &d, &ws) == 0);
+  CHECK (d == 0x55667788);
+  CHECK (ms->memory_read (RAM + 20, &d, &ws) == 0);
+  CHECK (d == 0x99aabbcc);
+
+  uint32 clear = 0;
+  ms->memory_write (RAM + 24, &clear, 2, &ws);
+  uint32 byte = 0xab;
+  CHECK (ms->memory_write (RAM + 24, &byte, 0, &ws) == 0);
+  uint32 half = 0xbeef;
+  CHECK (ms->memory_write (RAM + 26, &half, 1, &ws) == 0);
+  ms->memory_read (RAM + 24, &d, &ws);
+  CHECK (d != 0); /* the byte and half-word landed */
+}
+
+TEST_CASE_FIXTURE (mec_fixture, "MEC writes ROM only when write enable is set")
+{
+  int32 ws;
+  int saved_wrp = wrp;
+  wrp = 1;
+
+  /* With the ROM writable and the reset configuration (16-bit, so word sized
+     writes), a word and a double-word store to ROM succeed.  */
+  uint32 word = 0x12345678;
+  CHECK (ms->memory_write (ROM, &word, 2, &ws) == 0);
+  uint32 dbl[2] = { 1, 2 };
+  CHECK (ms->memory_write (ROM + 8, dbl, 3, &ws) == 0);
+
+  wrp = saved_wrp;
+}
+
+TEST_CASE_FIXTURE (mec_fixture, "MEC byte-writes an 8-bit ROM")
+{
+  int32 ws;
+  int saved_wrp = wrp;
+  int saved_rom8 = rom8;
+  wrp = 1;
+  rom8 = 1;
+
+  /* An 8-bit ROM clears the 16-bit configuration bit, so a byte store is the
+     accepted ROM write size.  */
+  wr (R_MEMCFG, 0x10000 | (3u << 18) | (4u << 10));
+  uint32 byte = 0x5a;
+  CHECK (ms->memory_write (ROM, &byte, 0, &ws) == 0);
+
+  rom8 = saved_rom8;
+  wrp = saved_wrp;
+}
+
+TEST_CASE_FIXTURE (mec_fixture, "MEC write protection whitelists the segment")
+{
+  int32 ws;
+  uint32 v = 0;
+
+  /* With block protection off, only the protected segment is writable and
+     everything else faults.  Segment 1 covers word addresses 0x100..0x200,
+     which is RAM byte offset 0x400..0x800.  */
+  wr (R_SSA1, (2u << 23) | 0x100);
+  wr (R_SEA1, 0x200);
+
+  CHECK (ms->memory_write (RAM + 0x600, &v, 2, &ws) ==
+	 0); /* inside, allowed */
+  CHECK (ms->memory_write (RAM + 0x140, &v, 2, &ws) == 1); /* below, faults */
+  CHECK (ms->memory_write (RAM + 0x940, &v, 2, &ws) == 1); /* above, faults */
+}
+
+TEST_CASE_FIXTURE (mec_fixture, "MEC block protection blacklists the segment")
+{
+  int32 ws;
+  uint32 v = 0;
+
+  wr (R_MCR, MCR_HWERR_IRQ);
+  wr (R_SSA1, (2u << 23) | 0x100);
+  wr (R_SEA1, 0x200);
+  wr (R_MCR, MCR_HWERR_IRQ | 0x08); /* block write protection on */
+
+  sis_verbose = 1;
+  stdout_capture cap;
+  CHECK (ms->memory_write (RAM + 0x600, &v, 2, &ws) == 1); /* inside, faults */
+  CHECK (ms->memory_write (RAM + 0x140, &v, 2, &ws) ==
+	 0); /* outside, allowed */
+  std::string out = cap.str ();
+  CHECK (out.find ("Memory access protection error") != std::string::npos);
+}
+
+TEST_CASE_FIXTURE (mec_fixture,
+		   "MEC user-mode write protection uses the user bit")
+{
+  int32 ws;
+  uint32 v = 0;
+
+  /* The segment's user write-protection bit gates a user-mode store.  */
+  wr (R_SSA1, (1u << 23) | 0x100); /* wpr bit for user writes */
+  wr (R_SEA1, 0x200);
+
+  sregs[0].psr &= ~0x80; /* user mode */
+  CHECK (ms->memory_write (RAM + 0x600, &v, 2, &ws) == 0);
+  CHECK (ms->memory_write (RAM + 0x140, &v, 2, &ws) == 1);
+  sregs[0].psr |= 0x80;
+}
+
+TEST_CASE_FIXTURE (mec_fixture,
+		   "MEC byte access reaches memory through pointers")
+{
+  char buf[8] = { 0 };
+
+  /* The byte-oriented helpers reach RAM and ROM through get_mem_ptr, and an
+     unmapped address returns nothing.  The word-sized read takes the
+     memory_read path instead.  */
+  CHECK (ms->sis_memory_write (RAM, "ABC", 3) == 3);
+  CHECK (ms->sis_memory_read (RAM, buf, 3) == 3);
+  CHECK (ms->sis_memory_read (RAM, buf, 4) == 4); /* length 4 path */
+
+  CHECK (ms->sis_memory_write (ROM, "abcd", 4) == 4);
+
+  CHECK (ms->sis_memory_write (UNMAPPED, "X", 1) == 0);
+  CHECK (ms->sis_memory_read (UNMAPPED, buf, 1) == 0);
+}
+
+TEST_CASE_FIXTURE (mec_fixture, "MEC reports illegal accesses across modes")
+{
+  uint32 d;
+  int32 ws;
+  uint32 v = 0;
+
+  /* Illegal reads, fetches and writes fault in both privilege modes.  */
+  sregs[0].psr &= ~0x80;
+  CHECK (ms->memory_read (UNMAPPED, &d, &ws) == 1);
+  CHECK (ms->memory_write (UNMAPPED, &v, 2, &ws) == 1);
+  sregs[0].psr |= 0x80;
+  CHECK (ms->memory_write (UNMAPPED, &v, 2, &ws) == 1);
+
+  sis_verbose = 1;
+  stdout_capture cap;
+  ms->memory_read (UNMAPPED, &d, &ws);
+  ms->memory_iread (UNMAPPED, &d, &ws);
+  std::string out = cap.str ();
+  CHECK (out.find ("Memory exception") != std::string::npos);
+}
+
+TEST_CASE_FIXTURE (mec_fixture, "MEC protects the second segment for doubles")
+{
+  int32 ws;
+  uint32 dbl[2] = { 0, 0 };
+
+  /* Segment 2 protection with a double-word store, which widens the checked
+     range by one word.  */
+  wr (R_SSA2, (2u << 23) | 0x100);
+  wr (R_SEA2, 0x200);
+
+  CHECK (ms->memory_write (RAM + 0x600, dbl, 3, &ws) == 0); /* inside */
+  CHECK (ms->memory_write (RAM + 0x140, dbl, 3, &ws) == 1); /* outside */
+}
+
+TEST_CASE_FIXTURE (mec_fixture,
+		   "MEC rejects disabled and mis-sized ROM writes")
+{
+  int32 ws;
+  uint32 word = 1;
+  uint32 byte = 1;
+
+  /* Without the write-enable, a ROM store faults.  */
+  CHECK (ms->memory_write (ROM, &word, 2, &ws) == 1);
+
+  int saved_wrp = wrp;
+  int saved_rom8 = rom8;
+  wrp = 1;
+
+  /* With write-enable but a 16-bit ROM, a byte-sized store is the wrong size
+     and faults.  */
+  CHECK (ms->memory_write (ROM, &byte, 0, &ws) == 1);
+
+  /* A configuration with the ROM write bit cleared is not writable.  */
+  wr (R_MEMCFG, (3u << 18) | (4u << 10));
+  CHECK (ms->memory_write (ROM, &word, 2, &ws) == 1);
+
+  /* An 8-bit ROM wants byte stores, so a word store is the wrong size.  */
+  rom8 = 1;
+  wr (R_MEMCFG, 0x10000 | (3u << 18) | (4u << 10));
+  CHECK (ms->memory_write (ROM, &word, 2, &ws) == 1);
+
+  rom8 = saved_rom8;
+  wrp = saved_wrp;
+}
+
+TEST_CASE_FIXTURE (mec_fixture,
+		   "MEC block protection covers the second segment")
+{
+  int32 ws;
+  uint32 v = 0;
+
+  /* Block protection with only segment 2 set faults a write that hits segment
+     2 while segment 1 is open.  */
+  wr (R_MCR, MCR_HWERR_IRQ);
+  wr (R_SSA2, (2u << 23) | 0x100);
+  wr (R_SEA2, 0x200);
+  wr (R_MCR, MCR_HWERR_IRQ | 0x08);
+
+  CHECK (ms->memory_write (RAM + 0x600, &v, 2, &ws) == 1);
+}
+
+TEST_CASE_FIXTURE (mec_fixture, "MEC byte pointers reject the ROM to RAM gap")
+{
+  char buf[4] = { 0 };
+
+  /* An address above the ROM but below the RAM has no pointer.  */
+  CHECK (ms->sis_memory_read (0x01800000, buf, 1) == 0);
+  CHECK (ms->sis_memory_write (0x01800000, "z", 1) == 0);
+}
