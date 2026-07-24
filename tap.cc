@@ -157,7 +157,7 @@ sis_tap_write (unsigned char *buffer, int len)
 {
   int i, nwrite;
   nwrite = write (tun_fd, buffer, len);
-  if (nread < 0)
+  if (nwrite < 0)
     {
       perror ("Writing from interface");
       close (tun_fd);
