@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# SPDX-FileCopyrightText: 2026 embedded brains GmbH & Co. KG
+#
+# Recorded performance fingerprints, read by tests/run-exe-tests.py under
+# --perf.  These are deterministic under SIS, so a change in the timing model
+# moves them.  They are reported, never gated: SIS timing work is expected to
+# shift them, and the diff is the signal.  Format:
+#
+#   <board> <exe> <label> <value>
+#
+# Captured on the tree at commit 6b2c667 with the default build.  Re-bless by
+# running ./waf test-run --perf and copying the current values here.
+
+# tmonetoone: cost of one task to task hand off per synchronisation primitive
+# (lower is faster), gr740.
+gr740 tmonetoone.exe yield 33022
+gr740 tmonetoone.exe event 17563
+gr740 tmonetoone.exe self-contained binary semaphore 17620
+gr740 tmonetoone.exe Classic binary semaphore (FIFO) 17043
+gr740 tmonetoone.exe Classic binary semaphore (priority) 16409
+
+# smpatomic01: atomic operations completed per fixed interval, per CPU (first
+# reported block), gr740 with four cores (higher is faster).
+gr740_smp smpatomic01.exe 0 1771949
+gr740_smp smpatomic01.exe 1 625056
+gr740_smp smpatomic01.exe 2 625058
+gr740_smp smpatomic01.exe 3 625009
+
+# smpmrsp01: thread migrations observed per CPU, gr740 with four cores.
+gr740_smp smpmrsp01.exe 0 175022
+gr740_smp smpmrsp01.exe 1 175021
+gr740_smp smpmrsp01.exe 2 175427
+gr740_smp smpmrsp01.exe 3 174610
+
+# smplock01: SMP lock acquisitions per section, sum over cores for the first
+# four measured sections, gr740 with four cores (higher is faster).
+gr740_smp smplock01.exe sum0 1384976
+gr740_smp smplock01.exe sum1 1995741
+gr740_smp smplock01.exe sum2 2994065
+gr740_smp smplock01.exe sum3 3991944

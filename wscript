@@ -16,9 +16,11 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+import os
 import shutil
+import sys
 
-from waflib import Context
+from waflib import Context, Options
 from waflib.Tools import waf_unit_test
 
 APPNAME = 'sis'
@@ -68,6 +70,14 @@ def options(opt):
                    metavar='LEVEL',
                    help='optimization level, -O<level> or the MSVC equivalent '
                    '[default: 2]')
+    opt.add_option('--perf',
+                   action='store_true',
+                   default=False,
+                   help='test-run: report performance numbers, never gates')
+    opt.add_option('--fast',
+                   action='store_true',
+                   default=False,
+                   help='test-run: skip the heavy compute tests (crypt01)')
 
 
 def configure(conf):
@@ -154,3 +164,27 @@ def dtb(ctx):
 class DtbContext(Context.Context):
     cmd = 'dtb'
     fun = 'dtb'
+
+
+def test_run(ctx):
+    """run the tests/exe executables and gate them on tests/exe/expected.txt"""
+    sis = os.path.join('build', 'sis')
+    if not os.path.exists(sis):
+        ctx.fatal('%s not found, run ./waf first' % sis)
+    cmd = [sys.executable, os.path.join('tests', 'run-exe-tests.py'),
+           '--sis', sis,
+           '--exedir', os.path.join('tests', 'exe'),
+           '--expected', os.path.join('tests', 'exe', 'expected.txt'),
+           '--perf-baseline', os.path.join('tests', 'exe', 'perf-baseline.txt'),
+           '--jobs', str(Options.options.jobs)]
+    if Options.options.perf:
+        cmd.append('--perf')
+    if Options.options.fast:
+        cmd.append('--fast')
+    if ctx.exec_command(cmd):
+        ctx.fatal('test-run found regressions')
+
+
+class TestRunContext(Context.Context):
+    cmd = 'test-run'
+    fun = 'test_run'
