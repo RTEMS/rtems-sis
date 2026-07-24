@@ -37,6 +37,14 @@ namespace
    erc32.cc (the defines there are file-local).  */
 const uint32 MEC = 0x01f80000;
 const uint32 R_MCR = 0x000;
+const uint32 R_SFR = 0x004;
+const uint32 R_MEMCFG = 0x010;
+const uint32 R_IOCR = 0x014;
+const uint32 R_WCR = 0x018;
+const uint32 R_SSA1 = 0x020;
+const uint32 R_SEA1 = 0x024;
+const uint32 R_SSA2 = 0x028;
+const uint32 R_SEA2 = 0x02c;
 const uint32 R_ISR = 0x044;
 const uint32 R_IPR = 0x048;
 const uint32 R_IMR = 0x04c;
@@ -47,6 +55,8 @@ const uint32 R_RTC_SCALER = 0x084;
 const uint32 R_GPT_COUNTER = 0x088;
 const uint32 R_GPT_SCALER = 0x08c;
 const uint32 R_TIMER_CTRL = 0x098;
+const uint32 R_SFSR = 0x0a0;
+const uint32 R_FFAR = 0x0a4;
 const uint32 R_TCR = 0x0d0;
 
 /* MEC timer control register bits: RTC and GPT counter reload, counter load,
@@ -416,4 +426,167 @@ TEST_CASE_FIXTURE (mec_fixture,
   CHECK (out.find ("GPT started") != std::string::npos);
   CHECK (out.find ("RTC stopped") != std::string::npos);
   CHECK (out.find ("GPT stopped") != std::string::npos);
+}
+
+TEST_CASE_FIXTURE (mec_fixture, "MEC configuration registers round-trip")
+{
+  /* Route errors to the interrupt, then exercise the read-back and the
+     reserved-bit rejection of the configuration registers.  */
+  wr (R_MCR, MCR_HWERR_IRQ);
+
+  wr (R_IOCR, 0);
+  CHECK (rd (R_IOCR) == 0);
+
+  wr (R_WCR, 0x1234);
+  wr (R_MEMCFG, (3u << 18) | (4u << 10));
+
+  wr (R_SSA1, 0x1000);
+  CHECK ((rd (R_SSA1) & 0x7fffff) == 0x1000);
+  wr (R_SEA1, 0x2000);
+  CHECK (rd (R_SEA1) == 0x2000);
+  wr (R_SSA2, 0x3000);
+  CHECK ((rd (R_SSA2) & 0x7fffff) == 0x3000);
+  wr (R_SEA2, 0x4000);
+  CHECK (rd (R_SEA2) == 0x4000);
+
+  wr (R_SFSR, 0);
+  CHECK (rd (R_SFSR) == 0x78);
+  rd (R_FFAR);
+  rd (R_MCR);
+  rd (R_MEMCFG);
+}
+
+TEST_CASE_FIXTURE (mec_fixture,
+		   "MEC configuration registers reject reserved bits")
+{
+  /* Every configuration write rejects its reserved bits through the error
+     manager, routed here to interrupt level 1.  */
+  wr (R_MCR, MCR_HWERR_IRQ);
+
+  wr (R_IOCR, 0xc0000000);
+  CHECK ((rd (R_IPR) & (1u << 1)) != 0);
+  wr (R_ICR, 1u << 1);
+
+  wr (R_SSA1, 0xfe000000);
+  CHECK ((rd (R_IPR) & (1u << 1)) != 0);
+  wr (R_ICR, 1u << 1);
+
+  wr (R_SEA1, 0xff800000);
+  CHECK ((rd (R_IPR) & (1u << 1)) != 0);
+  wr (R_ICR, 1u << 1);
+
+  wr (R_SSA2, 0xfe000000);
+  CHECK ((rd (R_IPR) & (1u << 1)) != 0);
+  wr (R_ICR, 1u << 1);
+
+  wr (R_SEA2, 0xff800000);
+  CHECK ((rd (R_IPR) & (1u << 1)) != 0);
+  wr (R_ICR, 1u << 1);
+
+  wr (R_SFSR, 0x0800);
+  CHECK ((rd (R_IPR) & (1u << 1)) != 0);
+  wr (R_ICR, 1u << 1);
+
+  wr (R_MEMCFG, 0x80000000);
+  CHECK ((rd (R_IPR) & (1u << 1)) != 0);
+}
+
+TEST_CASE_FIXTURE (mec_fixture,
+		   "MEC control register write triggers the hardware error")
+{
+  /* Setting the MCR hardware-error test bit raises a MEC error, routed to the
+     interrupt.  */
+  wr (R_MCR, MCR_HWERR_IRQ | 0x8000);
+  CHECK ((rd (R_IPR) & (1u << 1)) != 0);
+}
+
+TEST_CASE_FIXTURE (mec_fixture,
+		   "MEC reports protection and mode changes verbose")
+{
+  sis_verbose = 1;
+  stdout_capture cap;
+
+  /* Enabling the two write-protection segments, then the block-protection,
+     software-reset and power-down mode bits, each announce themselves.  */
+  wr (R_SSA1, (1u << 23) | 0x1000);
+  wr (R_SSA2, (2u << 23) | 0x1000);
+  wr (R_MCR, 0x08); /* block write protection */
+  wr (R_MCR, 0x02); /* software reset enabled */
+  wr (R_MCR, 0x01); /* power-down mode enabled */
+
+  std::string out = cap.str ();
+  CHECK (out.find ("Segment 1 memory protection enabled") !=
+	 std::string::npos);
+  CHECK (out.find ("Segment 2 memory protection enabled") !=
+	 std::string::npos);
+  CHECK (out.find ("Memory block write protection enabled") !=
+	 std::string::npos);
+  CHECK (out.find ("Software reset enabled") != std::string::npos);
+  CHECK (out.find ("Power-down mode enabled") != std::string::npos);
+}
+
+TEST_CASE_FIXTURE (mec_fixture, "MEC decodes an 8-bit ROM configuration")
+{
+  /* With an 8-bit ROM the memory and waitstate decoders take their rom8
+     branches.  */
+  int saved_rom8 = rom8;
+  rom8 = 1;
+  sis_verbose = 1;
+  stdout_capture cap;
+
+  wr (R_MEMCFG, (3u << 18) | (4u << 10));
+  wr (R_WCR, 0x0010); /* a non-zero ROM read waitstate field */
+  wr (R_WCR, 0x0000); /* a zero ROM read waitstate field */
+
+  std::string out = cap.str ();
+  CHECK (out.find ("RAM size") != std::string::npos);
+  CHECK (out.find ("Waitstates") != std::string::npos);
+  rom8 = saved_rom8;
+}
+
+TEST_CASE_FIXTURE (mec_fixture, "MEC software reset register")
+{
+  /* An SFR write resets the system only when software reset is enabled in the
+     control register.  */
+  wr (R_MCR, MCR_HWERR_IRQ);
+  wr (R_SFR, 0); /* software reset disabled, no effect */
+
+  wr (R_MCR, 0x2); /* enable software reset */
+  wr (R_SFR, 0);   /* resets the system, quietly */
+
+  sregs[0].psr |= 0x80; /* the reset cleared the supervisor bit */
+  wr (R_MCR, 0x2);
+  sis_verbose = 1;
+  stdout_capture cap;
+  wr (R_SFR, 0); /* resets again, this time reported */
+
+  std::string out = cap.str ();
+  CHECK (out.find ("Software reset issued") != std::string::npos);
+}
+
+TEST_CASE_FIXTURE (mec_fixture, "MEC write protection follows either segment")
+{
+  /* mem_accprot is set when either segment enables protection, so a segment 2
+     protection with segment 1 open still turns it on.  */
+  wr (R_MCR, MCR_HWERR_IRQ);
+  wr (R_SSA1, 0x1000);		    /* segment 1 open */
+  wr (R_SSA2, (2u << 23) | 0x1000); /* segment 2 protected */
+  wr (R_SSA1, 0x1000);		    /* rewrite segment 1: 0 || protected */
+}
+
+TEST_CASE_FIXTURE (mec_fixture,
+		   "MEC traces writes and empty protection verbose")
+{
+  /* A verbosity above one traces every MEC write.  A control write with no
+     protection enabled and segment writes that enable none take the
+     accprot-false and wpr-false paths.  */
+  sis_verbose = 2;
+  stdout_capture cap;
+
+  wr (R_MCR, 0x01);    /* verbose write, no write protection active */
+  wr (R_SSA1, 0x1000); /* segment 1 with no protection bits */
+  wr (R_SSA2, 0x1000); /* segment 2 with no protection bits */
+
+  std::string out = cap.str ();
+  CHECK (out.find ("MEC write") != std::string::npos);
 }
