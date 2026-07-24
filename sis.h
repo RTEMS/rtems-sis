@@ -407,6 +407,7 @@ extern int rv32_check_lirq (int cpu);
 extern uint32 greth_read (uint32 address);
 extern void greth_write (uint32 address, uint32 data);
 extern void greth_rxready (unsigned char *buffer, int len);
+extern void greth_mdio_reset (void);
 
 /* tap.c */
 

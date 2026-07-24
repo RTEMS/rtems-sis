@@ -65,21 +65,57 @@ static uint32 greth_rxbuf;
 static unsigned char *greth_rxbufptr;
 static unsigned char greth_mac[6];
 static uint64 mac;
-static const char broadcast[] = { (char) 0xff, (char) 0xff, (char) 0xff,
-				  (char) 0xff, (char) 0xff, (char) 0xff };
+static const unsigned char broadcast[] = {
+  0xff, 0xff, 0xff, 0xff, 0xff, 0xff
+};
 int greth_irq;
 
 /* Simple emulation of Microchip KSZ8041NL/RNL PHY */
 
+/* Reset values of the basic MII registers. */
+
+#define MDIO_BMCR_RESET 0x3100
+#define MDIO_ANAR_RESET 0x01ef
+
+/* Self-clearing bits of the basic mode control register. */
+
+#define MDIO_BMCR_RESET_BIT   (1 << 15)
+#define MDIO_BMCR_RESTART_ANE (1 << 9)
+
+/* The basic mode control and auto-negotiation advertisement registers are
+   writable, so their values are held per PHY address.  The remaining
+   registers are read only and are returned from constants. */
+
+struct mdio_phy
+{
+  uint32 bmcr;
+  uint32 anar;
+};
+
+static struct mdio_phy mdio_phys[32];
+
+void
+greth_mdio_reset (void)
+{
+  int i;
+
+  for (i = 0; i < 32; i++)
+    {
+      mdio_phys[i].bmcr = MDIO_BMCR_RESET;
+      mdio_phys[i].anar = MDIO_ANAR_RESET;
+    }
+}
+
 static uint32
 mdio_read (uint32 address)
 {
+  struct mdio_phy *phy = &mdio_phys[address & 0x1F];
   uint32 res;
 
   switch (address & 0x1F)
     {
     case 0:
-      res = 0x3100;
+      res = phy->bmcr;
       break;
     case 1:
       res = 0x7865;
@@ -91,7 +127,7 @@ mdio_read (uint32 address)
       res = 0x1512;
       break;
     case 4:
-      res = 0x01ef;
+      res = phy->anar;
       break;
     case 5:
       res = 0x41e1;
@@ -109,6 +145,25 @@ mdio_read (uint32 address)
 static void
 mdio_write (uint32 address, uint32 data)
 {
+  struct mdio_phy *phy = &mdio_phys[address & 0x1F];
+
+  switch (address & 0x1F)
+    {
+    case 0:
+      /* The reset and restart auto-negotiation bits clear themselves once
+	 the operation has completed. */
+      phy->bmcr =
+	  data & 0xFFFF & ~(MDIO_BMCR_RESET_BIT | MDIO_BMCR_RESTART_ANE);
+      break;
+
+    case 4:
+      phy->anar = data & 0xFFFF;
+      break;
+
+    default:
+      break;
+    }
+
   if (sis_verbose > 1)
     printf ("%8lu cpu %d MDIO write a: %02x, d: %04x\n", ebase.simtime, cpu,
 	    address, data);
@@ -279,8 +334,8 @@ greth_rxready (unsigned char *buffer, int len)
       printf ("\n");
     }
   /* accept only unicast or broadcast packets */
-  if (((strncmp ((const char *) greth_mac, (const char *) buffer, 6) == 0) ||
-       (strncmp ((const char *) buffer, broadcast, 6) == 0)) &&
+  if (((memcmp (greth_mac, buffer, 6) == 0) ||
+       (memcmp (buffer, broadcast, 6) == 0)) &&
       (greth_ctrl & CTRL_RE))
     {
       ms->memory_read (greth_rxbase, &greth_rxdesc, (int32 *) &ws);

@@ -306,7 +306,7 @@ greth_add (int irq, uint32 addr, uint32 mask)
     printf (" GRETH 10/100 Mbit Ethernet core    0x%08x   %d\n", addr, irq);
 }
 
-const struct grlib_ipcore greth = { NULL, NULL, grlib_greth_read,
+const struct grlib_ipcore greth = { NULL, greth_mdio_reset, grlib_greth_read,
 				    grlib_greth_write, greth_add };
 
 /* ------------------- L2C -----------------------*/
