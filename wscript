@@ -43,6 +43,7 @@ SOURCES = [
     'gr740.cc',
     'rv32.cc',
     'gr1553.cc',
+    'grspw.cc',
     'sisio.cc',
 ]
 

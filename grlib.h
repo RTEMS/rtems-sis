@@ -31,23 +31,26 @@
 
 /* Devices */
 
-#define GAISLER_LEON3	0x003
-#define GAISLER_DSU	0x004
-#define GAISLER_APBMST	0x006
-#define GAISLER_SRCTRL	0x008
-#define GAISLER_SDCTRL	0x009
-#define GAISLER_APBUART 0x00C
-#define GAISLER_IRQMP	0x00D
-#define GAISLER_GPTIMER 0x011
-#define GAISLER_GRETH	0x01D
-#define GAISLER_CLKGATE 0x02C
-#define GAISLER_L2C	0x04B
-#define GAISLER_GR1553B 0x04D
-#define ESA_MCTRL	0x00F
-#define CONTRIB_NS16550 0x050
-#define CONTRIB_CLINT	0x051
-#define CONTRIB_PLIC	0x052
-#define CONTRIB_S5TEST	0x053
+#define GAISLER_LEON3	  0x003
+#define GAISLER_DSU	  0x004
+#define GAISLER_APBMST	  0x006
+#define GAISLER_SRCTRL	  0x008
+#define GAISLER_SDCTRL	  0x009
+#define GAISLER_APBUART	  0x00C
+#define GAISLER_IRQMP	  0x00D
+#define GAISLER_GPTIMER	  0x011
+#define GAISLER_GRETH	  0x01D
+#define GAISLER_SPW2	  0x029
+#define GAISLER_CLKGATE	  0x02C
+#define GAISLER_L2C	  0x04B
+#define GAISLER_GR1553B	  0x04D
+#define GAISLER_SPW2_DMA  0x08A
+#define GAISLER_SPWROUTER 0x08B
+#define ESA_MCTRL	  0x00F
+#define CONTRIB_NS16550	  0x050
+#define CONTRIB_CLINT	  0x051
+#define CONTRIB_PLIC	  0x052
+#define CONTRIB_S5TEST	  0x053
 
 /* How to build entries in the plug&play area */
 
@@ -113,4 +116,4 @@ extern void apbuart_close_port (void);
 extern void apbuart_flush (void);
 extern const struct grlib_ipcore gptimer, irqmp, apbuart, apbmst, dsu, greth,
     l2c, leon3s, srctrl, ns16550, clint, plic, sdctrl, s5test, apbmst2,
-    clkgate, gr1553b;
+    clkgate, gr1553b, spwrouter, spwpkt0, spwpkt1, spwpkt2, spwpkt3;

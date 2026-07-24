@@ -132,11 +132,12 @@ Four properties of that bus model decide where a new peripheral can go:
   their `init`/`reset` from the bridge, so an APB core reached through no bridge is
   never initialised.
 - `struct grlib_ipcore` has no instance pointer. Several instances of one core need a
-  set of per-instance wrappers; see the `GRLIB_APBMST` macro in `grlib.cc`.
+  set of per-instance wrappers; see the `GRLIB_APBMST` macro in `grlib.cc` and
+  `SPW_CORE` in `grspw.cc`.
 
-A peripheral that moves data on its own (`greth.cc`, `gr1553.cc`) reads and writes
-emulated memory through `ms->memory_read`/`ms->memory_write` for words, and through
-`ms->get_mem_ptr` with the index XORed by `arch->bswap` for byte buffers.
+A peripheral that moves data on its own (`greth.cc`, `grspw.cc`, `gr1553.cc`) reads and
+writes emulated memory through `ms->memory_read`/`ms->memory_write` for words, and
+through `ms->get_mem_ptr` with the index XORed by `arch->bswap` for byte buffers.
 Register writes should only arm the transfer: schedule the data movement and the
 following `grlib_set_irq` from an `event()` callback, so that a driver is never
 re-entered from inside its own store.
@@ -156,9 +157,10 @@ Other core pieces:
 - `remote.cc` — GDB remote serial protocol server (`gdb_remote`), socket-based.
 - `greth.cc` / `tap.cc` — emulated GRETH Ethernet device backed by a host tap device
   (networking; requires root/sudo for bridging, see `-bridge`).
-- `gr1553.cc` — GR740 MIL-STD-1553B. It models only what the GRLIB example
-  applications exercise, and carries an emulated peer so a single simulated node has
-  something to talk to. See the file header and `doc/gr740.md` for what is left out.
+- `grspw.cc` / `gr1553.cc` — GR740 SpaceWire (router plus GRSPW2 AMBA ports) and
+  MIL-STD-1553B. Both model only what the GRLIB example applications exercise, and
+  both carry an emulated peer so a single simulated node has something to talk to.
+  See the file headers and `doc/gr740.md` for what is left out.
 - `linenoise.hpp` — vendored cpp-linenoise, the only line editor; GNU readline is
   not used. Header only, works on POSIX and the native Windows console. Included
   before `sis.h` in `sis.cc` because `sis.h`'s `CTRL_C` macro would otherwise

@@ -80,9 +80,15 @@ init_sim (void)
   grlib_apb_add (&irqmp, 0, APBSTART + 0x04000, 0xFFF);
   grlib_apb_add (&gptimer, 1, APBSTART + 0x08000, 0xFFF);
   grlib_apb_add (&greth, 6, APBSTART + 0x40000, 0xFFF);
+  grlib_apb_add (&spwpkt0, 20, APBSTART + 0x0D000, 0xFFF);
+  grlib_apb_add (&spwpkt1, 21, APBSTART + 0x0E000, 0xFFF);
+  grlib_apb_add (&spwpkt2, 22, APBSTART + 0x0F000, 0xFFF);
+  grlib_apb_add (&spwpkt3, 23, APBSTART + 0x10000, 0xFFF);
 
   grlib_apb_add (&clkgate, 0, APB2START + 0x04000, 0xFFF);
   grlib_apb_add (&gr1553b, 26, APB2START + 0x05000, 0xFFF);
+
+  grlib_ahbs_add (&spwrouter, 0, 0xFF880000, 0xFFF);
 
   grlib_init ();
   ebase.ramstart = RAM_START;
