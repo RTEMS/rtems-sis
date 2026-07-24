@@ -46,6 +46,7 @@
 #define GAISLER_GR1553B	  0x04D
 #define GAISLER_SPW2_DMA  0x08A
 #define GAISLER_SPWROUTER 0x08B
+#define GAISLER_MEMSCRUB  0x057
 #define ESA_MCTRL	  0x00F
 #define CONTRIB_NS16550	  0x050
 #define CONTRIB_CLINT	  0x051
@@ -116,4 +117,5 @@ extern void apbuart_close_port (void);
 extern void apbuart_flush (void);
 extern const struct grlib_ipcore gptimer, irqmp, apbuart, apbmst, dsu, greth,
     l2c, leon3s, srctrl, ns16550, clint, plic, sdctrl, s5test, apbmst2,
-    clkgate, gr1553b, spwrouter, spwpkt0, spwpkt1, spwpkt2, spwpkt3;
+    clkgate, gr1553b, spwrouter, spwpkt0, spwpkt1, spwpkt2, spwpkt3,
+    memscrub;

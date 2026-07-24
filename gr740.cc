@@ -89,6 +89,7 @@ init_sim (void)
   grlib_apb_add (&gr1553b, 26, APB2START + 0x05000, 0xFFF);
 
   grlib_ahbs_add (&spwrouter, 0, 0xFF880000, 0xFFF);
+  grlib_ahbs_add (&memscrub, 28, 0xFFE00000, 0xFFF);
 
   grlib_init ();
   ebase.ramstart = RAM_START;

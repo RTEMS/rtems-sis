@@ -44,6 +44,7 @@ SOURCES = [
     'rv32.cc',
     'gr1553.cc',
     'grspw.cc',
+    'memscrub.cc',
     'sisio.cc',
 ]
 
