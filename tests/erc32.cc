@@ -25,6 +25,11 @@
 
 using sis_tests::stdout_capture;
 
+/* Drains the event queue up to a simulator time, running each due callback.
+   Internal to func.cc, declared here to fire the timer interrupts a test
+   schedules.  */
+extern void advance_time (uint64 endtime);
+
 namespace
 {
 
@@ -270,4 +275,145 @@ TEST_CASE_FIXTURE (mec_fixture, "MEC reads the running GPT scaler down")
 
   ebase.simtime = 110;
   CHECK (rd (R_GPT_SCALER) == 40);
+}
+
+TEST_CASE_FIXTURE (mec_fixture, "MEC timer counters load from their reloads")
+{
+  /* A counter load copies the reload register into the counter, which then
+     reads back.  */
+  wr (R_RTC_COUNTER, 0x1234); /* the counter offset is the reload on write */
+  wr (R_TIMER_CTRL, TC_RTC_LOAD);
+  CHECK (rd (R_RTC_COUNTER) == 0x1234);
+
+  wr (R_GPT_COUNTER, 0x5678);
+  wr (R_TIMER_CTRL, TC_GPT_LOAD);
+  CHECK (rd (R_GPT_COUNTER) == 0x5678);
+}
+
+TEST_CASE_FIXTURE (mec_fixture, "MEC reads the RTC scaler down while running")
+{
+  /* The running RTC scaler reads down from its start; a stopped GPT scaler
+     reads its static value.  */
+  ebase.simtime = 200;
+  wr (R_RTC_SCALER, 100);
+  wr (R_TIMER_CTRL, TC_RTC_SCALER_EN);
+
+  ebase.simtime = 230;
+  CHECK (rd (R_RTC_SCALER) == 70);
+  CHECK (rd (R_GPT_SCALER) == 0xffff); /* GPT stopped, reset scaler value */
+}
+
+TEST_CASE_FIXTURE (mec_fixture, "MEC timer writes reject their reserved bits")
+{
+  /* The scaler and control writes route their reserved bits through the
+     error manager, which is set to raise level 1.  */
+  wr (R_MCR, MCR_HWERR_IRQ);
+
+  wr (R_GPT_SCALER, 0x10000); /* above the 16-bit scaler */
+  CHECK ((rd (R_IPR) & (1u << 1)) != 0);
+  wr (R_ICR, 1u << 1);
+
+  wr (R_RTC_SCALER, 0x100); /* above the 8-bit scaler */
+  CHECK ((rd (R_IPR) & (1u << 1)) != 0);
+  wr (R_ICR, 1u << 1);
+
+  wr (R_TIMER_CTRL, 0x10); /* not a control bit */
+  CHECK ((rd (R_IPR) & (1u << 1)) != 0);
+}
+
+TEST_CASE_FIXTURE (mec_fixture, "MEC RTC tick decrements a non-zero counter")
+{
+  /* A tick with a non-zero counter decrements it and, with the scaler still
+     enabled, re-arms.  */
+  wr (R_RTC_SCALER, 0); /* fire on the next tick */
+  wr (R_RTC_COUNTER, 5);
+  wr (R_TIMER_CTRL, TC_RTC_RELOAD | TC_RTC_LOAD | TC_RTC_SCALER_EN);
+
+  advance_time (1);
+  CHECK (rd (R_RTC_COUNTER) == 4);
+
+  /* Re-enabling while already running does not restart it.  */
+  wr (R_TIMER_CTRL, TC_RTC_SCALER_EN);
+}
+
+TEST_CASE_FIXTURE (mec_fixture, "MEC RTC underflow reloads and interrupts")
+{
+  /* A tick at zero raises interrupt 13, and with reload enabled the counter
+     reloads and the timer keeps running.  */
+  wr (R_RTC_SCALER, 0);
+  wr (R_RTC_COUNTER, 0);
+  wr (R_TIMER_CTRL, TC_RTC_RELOAD | TC_RTC_LOAD | TC_RTC_SCALER_EN);
+
+  advance_time (1);
+  CHECK ((rd (R_IPR) & (1u << 13)) != 0);
+}
+
+TEST_CASE_FIXTURE (mec_fixture, "MEC RTC underflow without reload stops")
+{
+  /* A tick at zero with reload disabled raises the interrupt and stops the
+     timer.  */
+  wr (R_RTC_SCALER, 0);
+  wr (R_RTC_COUNTER, 0);
+  wr (R_TIMER_CTRL, TC_RTC_LOAD | TC_RTC_SCALER_EN); /* no reload bit */
+
+  advance_time (1);
+  CHECK ((rd (R_IPR) & (1u << 13)) != 0);
+  /* Stopped: the scaler now reads its static value, not a running-down one. */
+  CHECK (rd (R_RTC_SCALER) == 0);
+}
+
+TEST_CASE_FIXTURE (mec_fixture, "MEC GPT tick decrements a non-zero counter")
+{
+  wr (R_GPT_SCALER, 0);
+  wr (R_GPT_COUNTER, 5);
+  wr (R_TIMER_CTRL, TC_GPT_RELOAD | TC_GPT_LOAD | TC_GPT_SCALER_EN);
+
+  advance_time (1);
+  CHECK (rd (R_GPT_COUNTER) == 4);
+
+  wr (R_TIMER_CTRL, TC_GPT_SCALER_EN); /* already running, no restart */
+}
+
+TEST_CASE_FIXTURE (mec_fixture, "MEC GPT underflow reloads and interrupts")
+{
+  wr (R_GPT_SCALER, 0);
+  wr (R_GPT_COUNTER, 0);
+  wr (R_TIMER_CTRL, TC_GPT_RELOAD | TC_GPT_LOAD | TC_GPT_SCALER_EN);
+
+  advance_time (1);
+  CHECK ((rd (R_IPR) & (1u << 12)) != 0);
+}
+
+TEST_CASE_FIXTURE (mec_fixture, "MEC GPT underflow without reload stops")
+{
+  wr (R_GPT_SCALER, 0);
+  wr (R_GPT_COUNTER, 0);
+  wr (R_TIMER_CTRL, TC_GPT_LOAD | TC_GPT_SCALER_EN);
+
+  advance_time (1);
+  CHECK ((rd (R_IPR) & (1u << 12)) != 0);
+  CHECK (rd (R_GPT_SCALER) == 0);
+}
+
+TEST_CASE_FIXTURE (mec_fixture,
+		   "MEC narrates timer starts and stops when verbose")
+{
+  sis_verbose = 1;
+  stdout_capture cap;
+
+  /* Start both timers with a zero counter and no reload, then let each tick
+     once so it stops.  */
+  wr (R_RTC_SCALER, 0);
+  wr (R_RTC_COUNTER, 0);
+  wr (R_TIMER_CTRL, TC_RTC_LOAD | TC_RTC_SCALER_EN);
+  wr (R_GPT_SCALER, 0);
+  wr (R_GPT_COUNTER, 0);
+  wr (R_TIMER_CTRL, TC_GPT_LOAD | TC_GPT_SCALER_EN);
+  advance_time (1);
+
+  std::string out = cap.str ();
+  CHECK (out.find ("RTC started") != std::string::npos);
+  CHECK (out.find ("GPT started") != std::string::npos);
+  CHECK (out.find ("RTC stopped") != std::string::npos);
+  CHECK (out.find ("GPT stopped") != std::string::npos);
 }
