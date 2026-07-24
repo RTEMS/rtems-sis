@@ -41,6 +41,8 @@
 #include "sis.h"
 #include "sisio.h"
 
+#include "erc32_mec.h"
+
 /* MEC registers */
 #define MEC_START 0x01f80000
 #define MEC_END	  0x01f80100
@@ -141,18 +143,12 @@ static uint32 mec_sea[2]; /* Write protection end address */
 static uint32 mec_wpr[2]; /* Write protection control fields */
 static uint32 mec_sfsr;
 static uint32 mec_ffar;
-static uint32 mec_ipr;
-static uint32 mec_imr;
-static uint32 mec_isr;
-static uint32 mec_icr;
-static uint32 mec_ifr;
 static uint32 mec_mcr;	  /* MEC control register */
 static uint32 mec_memcfg; /* Memory control register */
 static uint32 mec_wcr;	  /* MEC waitstate register */
 static uint32 mec_iocr;	  /* MEC IO control register */
 static uint32 posted_irq;
 static uint32 mec_ersr; /* MEC error and status register */
-static uint32 mec_tcr;	/* MEC test comtrol register */
 
 static uint32 rtc_counter;
 static uint32 rtc_reload;
@@ -233,7 +229,6 @@ static void decode_mcr (void);
 static void close_port (void);
 static void mec_reset (void);
 static void mec_intack (int32 level, int32 cpu);
-static void chk_irq (void);
 static void mec_irq (int32 level);
 static void set_sfsr (uint32 fault, uint32 addr, uint32 asi, uint32 read);
 static int32 mec_read (uint32 addr, uint32 asi, uint32 *data);
@@ -265,6 +260,30 @@ static void timer_ctrl (uint32 val);
 static char *get_mem_ptr (uint32 addr, uint32 size);
 static void store_bytes (char *mem, uint32 waddr, uint32 *data, int sz,
 			 int32 *ws);
+
+/* The environment the MEC runs against in the real board: its dependencies
+   are the simulator globals.  */
+struct RealEnv
+{
+  bool
+  Verbose ()
+  {
+    return sis_verbose != 0;
+  }
+  int &
+  Irl ()
+  {
+    return ext_irl[0];
+  }
+  void
+  ReportError ()
+  {
+    mecparerror ();
+  }
+};
+
+static RealEnv real_env;
+static erc32::Mec<RealEnv> mec (real_env);
 
 /* One-time init */
 
@@ -469,15 +488,10 @@ mec_reset ()
   mec_iocr = 0;
   mec_sfsr = 0x078;
   mec_ffar = 0;
-  mec_ipr = 0;
-  mec_imr = 0x7ffe;
-  mec_isr = 0;
-  mec_icr = 0;
-  mec_ifr = 0;
+  mec.ResetInterrupts ();
   mec_memcfg = 0x10000;
   mec_wcr = -1;
   mec_ersr = 0; /* MEC error and status register */
-  mec_tcr = 0;	/* MEC test comtrol register */
 
   decode_memcfg ();
   decode_wcr ();
@@ -514,51 +528,14 @@ mec_reset ()
 static void
 mec_intack (int32 level, int cpu)
 {
-  int irq_test;
   (void) cpu;
-
-  if (sis_verbose)
-    printf ("interrupt %d acknowledged\n", level);
-  irq_test = mec_tcr & 0x80000;
-  if ((irq_test) && (mec_ifr & (1 << level)))
-    mec_ifr &= ~(1 << level);
-  else
-    mec_ipr &= ~(1 << level);
-  chk_irq ();
-}
-
-static void
-chk_irq ()
-{
-  int32 i;
-  uint32 itmp;
-  int old_irl;
-
-  old_irl = ext_irl[0];
-  if (mec_tcr & 0x80000)
-    itmp = mec_ifr;
-  else
-    itmp = 0;
-  itmp = ((mec_ipr | itmp) & ~mec_imr) & 0x0fffe;
-  ext_irl[0] = 0;
-  if (itmp != 0)
-    {
-      /* itmp is masked to levels 1..15 and is non-zero, so a set bit is
-	 always found at or below 15 and the scan needs no lower bound.  */
-      i = 15;
-      while (((itmp >> i) & 1) == 0)
-	i--;
-      if ((sis_verbose) && (i > old_irl))
-	printf ("IU irl: %d\n", i);
-      ext_irl[0] = i;
-    }
+  mec.Intack (level);
 }
 
 static void
 mec_irq (int32 level)
 {
-  mec_ipr |= (1 << level);
-  chk_irq ();
+  mec.Irq (level);
 }
 
 static void
@@ -610,19 +587,19 @@ mec_read (uint32 addr, uint32 asi, uint32 *data)
       break;
 
     case MEC_ISR: /* 0x44 */
-      *data = mec_isr;
+      *data = mec.isr ();
       break;
 
     case MEC_IPR: /* 0x48 */
-      *data = mec_ipr;
+      *data = mec.ipr ();
       break;
 
     case MEC_IMR: /* 0x4c */
-      *data = mec_imr;
+      *data = mec.imr ();
       break;
 
     case MEC_IFR: /* 0x54 */
-      *data = mec_ifr;
+      *data = mec.ifr ();
       break;
 
     case MEC_RTC_COUNTER: /* 0x80 */
@@ -659,7 +636,7 @@ mec_read (uint32 addr, uint32 asi, uint32 *data)
       break;
 
     case MEC_TCR: /* 0xD0 */
-      *data = mec_tcr;
+      *data = mec.tcr ();
       break;
 
     case MEC_UARTA: /* 0xE0 */
@@ -790,36 +767,19 @@ mec_write (uint32 addr, uint32 data)
       break;
 
     case MEC_ISR:
-      if (data & 0xFFFFE000)
-	mecparerror ();
-      mec_isr = data;
+      mec.WriteIsr (data);
       break;
 
     case MEC_IMR: /* 0x4c */
-
-      if (data & 0xFFFF8001)
-	mecparerror ();
-      mec_imr = data & 0x7ffe;
-      chk_irq ();
+      mec.WriteImr (data);
       break;
 
     case MEC_ICR: /* 0x50 */
-
-      if (data & 0xFFFF0001)
-	mecparerror ();
-      mec_ipr &= ~data & 0x0fffe;
-      chk_irq ();
+      mec.WriteIcr (data);
       break;
 
     case MEC_IFR: /* 0x54 */
-
-      if (mec_tcr & 0x080000)
-	{
-	  if (data & 0xFFFF0001)
-	    mecparerror ();
-	  mec_ifr = data & 0xfffe;
-	  chk_irq ();
-	}
+      mec.WriteIfr (data);
       break;
 
     case MEC_MEMCFG: /* 0x10 */
@@ -837,16 +797,14 @@ mec_write (uint32 addr, uint32 data)
       break;
 
     case MEC_ERSR: /* 0xB0 */
-      if (mec_tcr & 0x100000)
+      if (mec.tcr () & 0x100000)
 	if (data & 0xFFFFEFC0)
 	  mecparerror ();
       mec_ersr = data & 0x103f;
       break;
 
     case MEC_TCR: /* 0xD0 */
-      if (data & 0xFFE1FFC0)
-	mecparerror ();
-      mec_tcr = data & 0x1e003f;
+      mec.WriteTcr (data);
       break;
 
     case MEC_WDOG: /* 0x60 */

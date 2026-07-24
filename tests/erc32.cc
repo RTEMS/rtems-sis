@@ -21,6 +21,8 @@
 #include "config.h"
 #include "sis.h"
 
+#include "erc32_mec.h"
+
 #include <stdio.h>
 #include <string.h>
 #include <string>
@@ -88,6 +90,32 @@ const uint32 TCR_IFR_EN = 0x80000;
    stopping the simulator.  */
 const uint32 MCR_HWERR_IRQ = 0x2000;
 
+/* A test environment for the MEC template: it owns the interrupt request
+   level, the verbosity and an error count, so a case drives erc32::Mec in
+   isolation with no simulator globals.  */
+struct TestEnv
+{
+  int irl = 0;
+  bool verbose = false;
+  int errors = 0;
+
+  bool
+  Verbose ()
+  {
+    return verbose;
+  }
+  int &
+  Irl ()
+  {
+    return irl;
+  }
+  void
+  ReportError ()
+  {
+    ++errors;
+  }
+};
+
 struct mec_fixture
 {
   int saved_verbose;
@@ -110,6 +138,13 @@ struct mec_fixture
     sis_verbose = 0;
     sregs[0].psr |= 0x80; /* supervisor, so a MEC access uses ASI 0xb */
     ext_irl[0] = 0;
+
+    /* The safe default the cases build on: reset masks every maskable level
+       and leaves the interrupt controller idle.  */
+    REQUIRE (rd (R_IMR) == 0x7ffe);
+    REQUIRE (rd (R_IPR) == 0);
+    REQUIRE (rd (R_ISR) == 0);
+    REQUIRE (rd (R_IFR) == 0);
   }
 
   ~mec_fixture ()
@@ -178,148 +213,174 @@ private:
 
 } // namespace
 
-TEST_CASE_FIXTURE (mec_fixture,
-		   "MEC interrupt registers reset masked and idle")
+/* The interrupt controller is tested through erc32::Mec on a TestEnv, with no
+   simulator globals: the environment owns the request level, the verbosity
+   and the error count.  */
+
+TEST_CASE ("Mec resets the interrupt controller masked and idle")
 {
-  /* Reset masks every maskable level (bits 1..14) and leaves nothing
-     pending, forced or in service.  */
-  CHECK (rd (R_IMR) == 0x7ffe);
-  CHECK (rd (R_IPR) == 0);
-  CHECK (rd (R_IFR) == 0);
-  CHECK (rd (R_ISR) == 0);
-  CHECK (ext_irl[0] == 0);
+  TestEnv env;
+  erc32::Mec<TestEnv> mec (env);
+
+  /* Reset masks every maskable level and leaves nothing pending, forced or in
+     service.  */
+  CHECK (mec.imr () == 0x7ffe);
+  CHECK (mec.ipr () == 0);
+  CHECK (mec.ifr () == 0);
+  CHECK (mec.isr () == 0);
+  CHECK (mec.tcr () == 0);
+  CHECK (env.irl == 0);
 }
 
-TEST_CASE_FIXTURE (mec_fixture,
-		   "MEC drives the highest unmasked level onto the IU")
+TEST_CASE ("Mec drives the highest unmasked level onto the IU")
 {
+  TestEnv env;
+  erc32::Mec<TestEnv> mec (env);
+
   /* Force levels 5 and 13 with every level unmasked.  The IU sees the
      higher-priority level 13 (IU manual 3.8.3.1).  */
-  wr (R_TCR, TCR_IFR_EN);
-  wr (R_IMR, 0);
-  wr (R_IFR, (1u << 13) | (1u << 5));
-  CHECK (ext_irl[0] == 13);
+  mec.WriteTcr (TCR_IFR_EN);
+  mec.WriteImr (0);
+  mec.WriteIfr ((1u << 13) | (1u << 5));
+  CHECK (env.irl == 13);
 }
 
-TEST_CASE_FIXTURE (mec_fixture, "MEC leaves level 15 non-maskable")
+TEST_CASE ("Mec leaves level 15 non-maskable")
 {
+  TestEnv env;
+  erc32::Mec<TestEnv> mec (env);
+
   /* Level 15 is non-maskable: the mask register cannot hold its bit, so it
      reaches the IU even with the reset mask in place.  */
-  wr (R_TCR, TCR_IFR_EN);
-  wr (R_IMR, 0x7ffe);
-  wr (R_IFR, 1u << 15);
-  CHECK (ext_irl[0] == 15);
+  mec.WriteTcr (TCR_IFR_EN);
+  mec.WriteImr (0x7ffe);
+  mec.WriteIfr (1u << 15);
+  CHECK (env.irl == 15);
 }
 
-TEST_CASE_FIXTURE (mec_fixture, "MEC withholds a masked level from the IU")
+TEST_CASE ("Mec withholds a masked level from the IU")
 {
-  /* A masked level does not reach the IU; the request level stays at 0.  */
-  wr (R_TCR, TCR_IFR_EN);
-  wr (R_IMR, 0x7ffe);
-  wr (R_IFR, 1u << 5);
-  CHECK (ext_irl[0] == 0);
+  TestEnv env;
+  erc32::Mec<TestEnv> mec (env);
+
+  mec.WriteTcr (TCR_IFR_EN);
+  mec.WriteImr (0x7ffe);
+  mec.WriteIfr (1u << 5);
+  CHECK (env.irl == 0);
 }
 
-TEST_CASE_FIXTURE (mec_fixture, "MEC interrupt acknowledge clears the source")
+TEST_CASE ("Mec posts a pending interrupt and acknowledges it")
 {
-  /* Acknowledge of the top level (IU manual 3.8.3.3) clears its forced bit
-     and re-evaluates the request level down to the next pending one.  */
-  wr (R_TCR, TCR_IFR_EN);
-  wr (R_IMR, 0);
-  wr (R_IFR, (1u << 13) | (1u << 5));
-  REQUIRE (ext_irl[0] == 13);
+  TestEnv env;
+  erc32::Mec<TestEnv> mec (env);
 
-  sregs[0].intack (13, 0);
-  CHECK ((rd (R_IFR) & (1u << 13)) == 0);
-  CHECK (ext_irl[0] == 5);
+  mec.WriteImr (0);
+  mec.Irq (13);
+  CHECK (env.irl == 13);
 
-  /* Acknowledging a level that is not forced in test mode falls back to the
-     pending register, which has no such bit, so the forced level 5 stays.  */
-  sregs[0].intack (9, 0);
-  CHECK (ext_irl[0] == 5);
+  mec.Intack (13);
+  CHECK (env.irl == 0);
 }
 
-TEST_CASE_FIXTURE (
-    mec_fixture, "MEC error interrupt posts, drives and acknowledges level 1")
+TEST_CASE ("Mec acknowledge clears the forced source in test mode")
 {
-  /* Route a MEC error to the interrupt, then trigger one with a reserved-bit
-     ISR write.  The error posts pending level 1, which reaches the IU and is
-     cleared by an acknowledge.  */
-  wr (R_MCR, MCR_HWERR_IRQ);
-  wr (R_IMR, 0);
-  wr (R_ISR, 0x2000); /* reserved bit -> MEC hardware error */
+  TestEnv env;
+  erc32::Mec<TestEnv> mec (env);
 
-  CHECK ((rd (R_IPR) & (1u << 1)) != 0);
-  CHECK (ext_irl[0] == 1);
+  mec.WriteTcr (TCR_IFR_EN);
+  mec.WriteImr (0);
+  mec.WriteIfr ((1u << 13) | (1u << 5));
+  REQUIRE (env.irl == 13);
 
-  sregs[0].intack (1, 0);
-  CHECK ((rd (R_IPR) & (1u << 1)) == 0);
-  CHECK (ext_irl[0] == 0);
+  mec.Intack (13); /* forced bit set: cleared, next level shows */
+  CHECK ((mec.ifr () & (1u << 13)) == 0);
+  CHECK (env.irl == 5);
+
+  mec.Intack (9); /* not forced: falls back to the pending register */
+  CHECK (env.irl == 5);
 }
 
-TEST_CASE_FIXTURE (mec_fixture,
-		   "MEC accepts the valid interrupt register writes")
+TEST_CASE ("Mec keeps the valid interrupt register writes")
 {
-  /* The non-error write paths: a shape write with no reserved bits, a clear
-     that removes a pending level, and an IFR write that is ignored unless the
-     force mode is enabled.  */
-  wr (R_MCR, MCR_HWERR_IRQ);
-  wr (R_IMR, 0);
+  TestEnv env;
+  erc32::Mec<TestEnv> mec (env);
 
-  wr (R_ISR, 0x1000);
-  CHECK (rd (R_ISR) == 0x1000);
+  /* A shape write with no reserved bits, a clear that removes a pending
+     level, and an IFR write ignored unless force mode is on.  */
+  mec.WriteIsr (0x1000);
+  CHECK (mec.isr () == 0x1000);
+  CHECK (env.errors == 0);
 
-  /* Post pending level 1 through a MEC error, then clear it with a valid
-     ICR write (the clear register acts on the pending register).  */
-  wr (R_ISR, 0x2000);
-  REQUIRE ((rd (R_IPR) & (1u << 1)) != 0);
-  wr (R_ICR, 1u << 1);
-  CHECK ((rd (R_IPR) & (1u << 1)) == 0);
-  CHECK (ext_irl[0] == 0);
+  mec.WriteImr (0);
+  mec.Irq (5);
+  CHECK (env.irl == 5);
+  mec.WriteIcr (1u << 5);
+  CHECK (env.irl == 0);
 
-  /* With force mode off, an IFR write does not change the forced set.  */
-  wr (R_TCR, 0);
-  uint32 before = rd (R_IFR);
-  wr (R_IFR, 0xffff);
-  CHECK (rd (R_IFR) == before);
+  uint32 before = mec.ifr ();
+  mec.WriteIfr (0xffff); /* force mode off: no change */
+  CHECK (mec.ifr () == before);
 }
 
-TEST_CASE_FIXTURE (mec_fixture,
-		   "MEC reserved bits in the interrupt writes raise an error")
+TEST_CASE ("Mec reports reserved bits in the interrupt writes")
 {
-  /* Every interrupt register rejects its reserved bits through the error
-     manager.  With the error routed to level 1, each reserved-bit write
-     leaves level 1 pending.  */
-  wr (R_MCR, MCR_HWERR_IRQ);
+  TestEnv env;
+  erc32::Mec<TestEnv> mec (env);
 
-  wr (R_IMR, 1); /* bit 0 reserved */
-  CHECK ((rd (R_IPR) & (1u << 1)) != 0);
+  /* Every interrupt register reports its reserved bits to the environment.  */
+  mec.WriteIsr (0x2000);
+  CHECK (env.errors == 1);
+  mec.WriteImr (1);
+  CHECK (env.errors == 2);
+  mec.WriteIcr (1);
+  CHECK (env.errors == 3);
+  mec.WriteTcr (0x40);
+  CHECK (env.errors == 4);
 
-  wr (R_ICR, 1); /* bit 0 reserved */
-  CHECK ((rd (R_IPR) & (1u << 1)) != 0);
-
-  wr (R_TCR, TCR_IFR_EN);
-  wr (R_IFR, 1); /* bit 0 reserved, force mode on */
-  CHECK ((rd (R_IPR) & (1u << 1)) != 0);
+  mec.WriteTcr (TCR_IFR_EN);
+  mec.WriteIfr (1);
+  CHECK (env.errors == 5);
 }
 
-TEST_CASE_FIXTURE (mec_fixture, "MEC narrates interrupt changes when verbose")
+TEST_CASE ("Mec narrates interrupt changes when verbose")
 {
-  /* The verbose report of a rising request level and of an acknowledge.  A
-     re-evaluation that does not raise the level prints nothing.  */
-  sis_verbose = 1;
+  TestEnv env;
+  env.verbose = true;
+  erc32::Mec<TestEnv> mec (env);
   stdout_capture cap;
 
-  wr (R_TCR, TCR_IFR_EN);
-  wr (R_IMR, 0);
-  ext_irl[0] = 0;
-  wr (R_IFR, 1u << 7); /* raises the level from 0 to 7 */
-  wr (R_IMR, 0);       /* re-evaluates with the level already 7 */
-  sregs[0].intack (7, 0);
+  mec.WriteTcr (TCR_IFR_EN);
+  mec.WriteImr (0);
+  env.irl = 0;
+  mec.WriteIfr (1u << 7); /* raises the level from 0 to 7 */
+  mec.WriteImr (0);	  /* re-evaluates with the level already 7 */
+  mec.Intack (7);
 
   std::string out = cap.str ();
   CHECK (out.find ("IU irl: 7") != std::string::npos);
   CHECK (out.find ("interrupt 7 acknowledged") != std::string::npos);
+}
+
+TEST_CASE_FIXTURE (mec_fixture, "MEC dispatches the interrupt registers")
+{
+  /* The board integration seam: the register window reads and writes reach
+     the interrupt controller, and the acknowledge callback is wired.  */
+  wr (R_ISR, 0x1000);
+  CHECK (rd (R_ISR) == 0x1000);
+
+  wr (R_MCR, MCR_HWERR_IRQ);
+  wr (R_IMR, 0);
+  wr (R_TCR, TCR_IFR_EN);
+  CHECK (rd (R_TCR) == TCR_IFR_EN);
+
+  wr (R_IFR, 1u << 4);
+  CHECK ((rd (R_IFR) & (1u << 4)) != 0);
+  CHECK (ext_irl[0] == 4);
+
+  sregs[0].intack (4, 0); /* the mec_intack trampoline */
+  CHECK (ext_irl[0] == 0);
+
+  wr (R_ICR, 0);
 }
 
 TEST_CASE_FIXTURE (mec_fixture, "MEC reads the running GPT scaler down")
