@@ -2054,7 +2054,7 @@ riscv_execute_trap (struct pstate *sregs)
        */
 
       /* Increase simulator time and add some jitter */
-      sregs->icnt = TRAP_C + (sregs->ninst ^ sregs->simtime) & 0x7;
+      sregs->icnt = TRAP_C + ((sregs->ninst ^ sregs->simtime) & 0x7);
       sregs->trap = 0;
 
       if (sregs->err_mode)
