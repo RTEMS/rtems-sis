@@ -99,9 +99,9 @@ def configure(conf):
     if conf.env.CXX_NAME == 'msvc':
         msvc_opt = {'0': '/Od', '1': '/O1', 's': '/Os'}.get(level, '/O2')
         conf.env.append_value('CXXFLAGS',
-                              [msvc_opt, '/Zi', '/EHsc', '/std:c++17'])
+                              [msvc_opt, '/Zi', '/EHsc', '/std:c++20'])
     else:
-        conf.env.append_value('CXXFLAGS', ['-O' + level, '-g', '-std=c++17'])
+        conf.env.append_value('CXXFLAGS', ['-O' + level, '-g', '-std=c++20'])
     conf.env.append_value('DEFINES', ['FAST_UART'])
 
     for header in HEADERS:
