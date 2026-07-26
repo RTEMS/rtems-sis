@@ -123,6 +123,7 @@ public:
     iocr_ = 0;
     memcfg_ = kMemcfgReset;
     wcr_ = 0xffffffffu;
+    UpdateAccessProtect ();
 
     DecodeMemcfg ();
     DecodeWcr ();
@@ -279,7 +280,7 @@ public:
       env_.ReportError ();
     seg_base_[seg] = data & kSegAddressMask;
     seg_mode_[seg] = (data >> kSegModeShift) & (kSegUser | kSegSupervisor);
-    access_protect_ = seg_mode_[0] != 0 || seg_mode_[1] != 0;
+    UpdateAccessProtect ();
     if (env_.Verbose () && seg_mode_[seg])
       {
 	char msg[80];
@@ -357,6 +358,13 @@ private:
       }
   }
 
+  /* The write protection is on while either segment has a mode enabled.  */
+  void
+  UpdateAccessProtect ()
+  {
+    access_protect_ = seg_mode_[0] != 0 || seg_mode_[1] != 0;
+  }
+
   /* The two PROM waitstate fields encode no waitstates twice, at zero and at
      one, so the count is one below the field from there on.  */
   static uint32
@@ -394,7 +402,6 @@ private:
   void
   DecodeMcr ()
   {
-    access_protect_ = seg_mode_[0] != 0 || seg_mode_[1] != 0;
     block_protect_ = (mcr_ & kMcrBlockProtect) != 0;
     env_.SetErrorMask (mcr_);
 
