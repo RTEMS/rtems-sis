@@ -43,6 +43,7 @@
 #include "erc32_error.h"
 #include "erc32_mec.h"
 #include "erc32_timer.h"
+#include "erc32_uart.h"
 
 /* MEC registers */
 #define MEC_START 0x01f80000
@@ -94,9 +95,6 @@
 #define MEC_UART_CTRL 0x0E8
 #define SIM_LOAD      0x0F0
 
-/* Size of UART buffers (bytes) */
-#define UARTBUF 1024
-
 /* Number of simulator ticks between flushing the UARTS. 	 */
 /* For good performance, keep above 1000			 */
 #define UART_FLUSH_TIME 3000
@@ -112,13 +110,6 @@ static uint32 posted_irq;
 
 static struct uart_port porta = UART_PORT_INIT;
 static struct uart_port portb = UART_PORT_INIT;
-static int32 Ucontrol; /* UART status register */
-static unsigned char aq[UARTBUF], bq[UARTBUF];
-static int32 anum, aind = 0;
-static int32 bnum, bind = 0;
-static char wbufa[UARTBUF], wbufb[UARTBUF];
-static unsigned wnuma;
-static unsigned wnumb;
 #ifndef O_NONBLOCK
 #define O_NONBLOCK 0
 #endif
@@ -172,6 +163,47 @@ struct RealEnv
 static constexpr erc32::MemoryGeometry ram_geometry = { .ram_start = RAM_START,
 							.ram_end = RAM_END,
 							.ram_mask = RAM_MASK };
+
+/* The environment a UART channel runs against in the real board.  PORT is the
+   host port it moves bytes through, so the template itself names no global. */
+template <struct uart_port *Port> struct RealUartEnv
+{
+  void
+  Irq (int level)
+  {
+    mec_irq (level);
+  }
+  bool
+  PortOpen ()
+  {
+    return Port->open != 0;
+  }
+  int
+  PortRead (char *buf, int len)
+  {
+    return uart_port_read (Port, buf, len);
+  }
+  int
+  PortWrite (const char *buf, int len)
+  {
+    return (int) fwrite (buf, 1, len, Port->fout);
+  }
+};
+
+static RealUartEnv<&porta> uarta_env;
+static RealUartEnv<&portb> uartb_env;
+
+static constexpr erc32::UartSpec uarta_spec = { .level = erc32::kUartALevel,
+						.status_shift = 0,
+						.name = "A" };
+
+static constexpr erc32::UartSpec uartb_spec = { .level = erc32::kUartBLevel,
+						.status_shift =
+						    erc32::kUartStatusBLevel,
+						.name = "B" };
+
+static erc32::Uart<RealUartEnv<&porta>> uarta (uarta_env, uarta_spec);
+static erc32::Uart<RealUartEnv<&portb>> uartb (uartb_env, uartb_spec);
 
 static RealEnv real_env;
 static erc32::Mec<RealEnv> mec (real_env);
@@ -386,8 +418,8 @@ mec_reset ()
   cfg.Reset ();
 
   posted_irq = 0;
-  wnuma = wnumb = 0;
-  anum = aind = bnum = bind = 0;
+  uarta.Reset ();
+  uartb.Reset ();
 
   rtc.Reset ();
   gpt.Reset ();
@@ -663,131 +695,22 @@ port_init ()
   /* With -uben the console drives port B and port A is left unattached.  */
   uart_port_open (&porta, "A", uart_dev1, !uben);
   uart_port_open (&portb, "B", uart_dev2, uben);
-  wnuma = wnumb = 0;
 }
 
 static uint32
 read_uart (uint32 addr)
 {
-
-  unsigned tmp;
-
-  tmp = 0;
   switch (addr & 0xff)
     {
+    case 0xE0: /* UART A RX and TX register */
+      return uarta.ReadData ();
 
-    case 0xE0: /* UART 1 */
-#ifndef _WIN32
+    case 0xE4: /* UART B RX and TX register */
+      return uartb.ReadData ();
 
-      if (aind < anum)
-	{
-	  if ((aind + 1) < anum)
-	    mec_irq (4);
-	  return (0x700 | (uint32) aq[aind++]);
-	}
-      else
-	{
-	  if (porta.open)
-	    anum = uart_port_read (&porta, (char *) aq, UARTBUF);
-	  else
-	    anum = 0;
-	  if (anum > 0)
-	    {
-	      aind = 0;
-	      if ((aind + 1) < anum)
-		mec_irq (4);
-	      return (0x700 | (uint32) aq[aind++]);
-	    }
-	  else
-	    {
-	      /* Nothing arrived, so the receive register still holds the
-		 last byte delivered.  */
-	      return (0x600 | (uint32) aq[aind > 0 ? aind - 1 : 0]);
-	    }
-	}
-#else
-      return 0;
-#endif
-      break;
+    case 0xE8: /* UART status register */
+      return uarta.StatusBits () | uartb.StatusBits ();
 
-    case 0xE4: /* UART 2 */
-#ifndef _WIN32
-      if (bind < bnum)
-	{
-	  if ((bind + 1) < bnum)
-	    mec_irq (5);
-	  return (0x700 | (uint32) bq[bind++]);
-	}
-      else
-	{
-	  if (portb.open)
-	    bnum = uart_port_read (&portb, (char *) bq, UARTBUF);
-	  else
-	    bnum = 0;
-	  if (bnum > 0)
-	    {
-	      bind = 0;
-	      if ((bind + 1) < bnum)
-		mec_irq (5);
-	      return (0x700 | (uint32) bq[bind++]);
-	    }
-	  else
-	    {
-	      /* Nothing arrived, so the receive register still holds the
-		 last byte delivered.  */
-	      return (0x600 | (uint32) bq[bind > 0 ? bind - 1 : 0]);
-	    }
-	}
-#else
-      return 0;
-#endif
-      break;
-
-    case 0xE8: /* UART status register  */
-#ifndef _WIN32
-
-      Ucontrol = 0;
-      if (aind < anum)
-	{
-	  Ucontrol |= 0x00000001;
-	}
-      else
-	{
-	  if (porta.open)
-	    anum = uart_port_read (&porta, (char *) aq, UARTBUF);
-	  else
-	    anum = 0;
-	  if (anum > 0)
-	    {
-	      Ucontrol |= 0x00000001;
-	      aind = 0;
-	      mec_irq (4);
-	    }
-	}
-      if (bind < bnum)
-	{
-	  Ucontrol |= 0x00010000;
-	}
-      else
-	{
-	  if (portb.open)
-	    bnum = uart_port_read (&portb, (char *) bq, UARTBUF);
-	  else
-	    bnum = 0;
-	  if (bnum > 0)
-	    {
-	      Ucontrol |= 0x00010000;
-	      bind = 0;
-	      mec_irq (5);
-	    }
-	}
-
-      Ucontrol |= 0x00060006;
-      return Ucontrol;
-#else
-      return 0x00060006;
-#endif
-      break;
     default:
       if (sis_verbose)
 	printf ("Read from unimplemented MEC register (%x)\n", addr);
@@ -798,47 +721,19 @@ read_uart (uint32 addr)
 static void
 write_uart (uint32 addr, uint32 data)
 {
-  unsigned char c;
-
-  c = (unsigned char) data;
   switch (addr & 0xff)
     {
-
-    case 0xE0: /* UART A */
-      if (porta.open)
-	{
-	  if (wnuma < UARTBUF)
-	    wbufa[wnuma++] = c;
-	  else
-	    {
-	      while (wnuma)
-		{
-		  wnuma -= fwrite (wbufa, 1, wnuma, porta.fout);
-		}
-	      wbufa[wnuma++] = c;
-	    }
-	}
-      mec_irq (4);
+    case 0xE0: /* UART A RX and TX register */
+      uarta.WriteData (data);
       break;
 
-    case 0xE4: /* UART B */
-      if (portb.open)
-	{
-	  if (wnumb < UARTBUF)
-	    wbufb[wnumb++] = c;
-	  else
-	    {
-	      while (wnumb)
-		{
-		  wnumb -= fwrite (wbufb, 1, wnumb, portb.fout);
-		}
-	      wbufb[wnumb++] = c;
-	    }
-	}
-      mec_irq (5);
+    case 0xE4: /* UART B RX and TX register */
+      uartb.WriteData (data);
       break;
+
     case 0xE8: /* UART status register */
       break;
+
     default:
       if (sis_verbose)
 	printf ("Write to unimplemented MEC register (%x)\n", addr);
@@ -848,14 +743,8 @@ write_uart (uint32 addr, uint32 data)
 static void
 flush_uart ()
 {
-  while (wnuma && porta.open)
-    {
-      wnuma -= fwrite (wbufa, 1, wnuma, porta.fout);
-    }
-  while (wnumb && portb.open)
-    {
-      wnumb -= fwrite (wbufb, 1, wnumb, portb.fout);
-    }
+  uarta.Flush ();
+  uartb.Flush ();
 }
 
 /* Move whatever the emulated UARTs have buffered, and re-arm.  This is the
