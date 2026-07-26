@@ -66,27 +66,38 @@ against real descriptors the way `tests/sisio.cc` does.
 ## Where the tree stands
 
 Measured with `./waf configure --enable-coverage && ./waf`, branch metric,
-552 of 5499 arcs (10%).
+767 of 6137 arcs (12%). The totals move as headers join the filter, so compare
+per file rather than against an older total.
 
 | Area | Arcs | Taken |
 |---|---|---|
 | `sparc.cc`, `riscv.cc` | 2274 | 17 |
 | `grlib.cc`, `grspw.cc`, `gr1553.cc`, `greth.cc`, `memscrub.cc`, `tap.cc` | 1071 | 0 |
 | `sis.cc`, `remote.cc`, `interf.cc` | 546 | 0 |
-| `erc32.cc` | 502 | 377 |
+| `erc32.cc` | 412 | 331 |
 | `leon2.cc`, `leon3.cc`, `gr740.cc`, `rv32.cc` | 353 | 0 |
-| graduated: `erc32_mec.h`, `exec.cc`, `help.cc`, `sisio.cc` | | 100% |
+| graduated: `erc32_error.h`, `erc32_mec.h`, `erc32_timer.h`, `exec.cc`, `help.cc`, `sisio.cc` | | 100% |
 
 `func.cc` and `elf.cc` are not in the table above only because they were not
 captured in that run. Measure them before planning their step.
 
-Done, in `erc32_mec.h`, graduated in `tests/covered.txt`:
+Done, graduated in `tests/covered.txt`:
 
-- The MEC interrupt controller. `template <MecEnv Env> class Mec` holds the
-  interrupt registers and the level logic. Its environment provides `Verbose`,
-  `Irl`, `ReportError` and `Log`. The `MecEnv` concept states that contract.
-  `erc32.cc` instantiates `Mec<RealEnv>`; `tests/erc32.cc` drives `Mec<TestEnv>`
-  with no globals.
+- **`erc32_mec.h`** the MEC interrupt controller. `template <MecEnv Env> class
+  Mec` holds the interrupt registers and the level logic. Its environment
+  provides `Verbose`, `Irl`, `ReportError` and `Log`.
+- **`erc32_timer.h`** the RTC, the GPT and the watchdog. `Timer` is one
+  template driven by a `TimerSpec`, so the two timers differ only by data;
+  `Watchdog` is its own template with the trap-door state machine.
+- **`erc32_error.h`** the error handler, the error and reset status register,
+  the system fault status register and the failing address register. The five
+  error sources collapse into one table, so the reset-or-halt decision is
+  written once.
+
+`erc32.cc` instantiates each of these on its single `RealEnv`, except the
+timers, which need a per-instance event thunk and so take a
+`RealTimerEnv<Thunk>`. `tests/erc32.cc` drives each template on its own small
+test environment with no globals.
 
 ## The order of work
 
@@ -101,13 +112,8 @@ One subsystem per step, each its own header and template with its own narrow
 concept, all in `namespace erc32`. `erc32.cc` holds one `RealEnv` satisfying
 all of the concepts; each test file holds a small `TestEnv` per subsystem.
 
-1. **`erc32_timer.h`** RTC, GPT and watchdog. First, because it validates the
-   scheduling and interrupt injection every later subsystem needs, on the
-   subsystem with the cleanest spec.
-2. **`erc32_error.h`** ERSR, SFSR, FFAR, `mecparerror`, `decode_ersr`. The
-   largest single uncovered block, and it validates `SysReset`/`SysHalt`
-   injection. It also turns the already-shipped `RealEnv::ReportError` from a
-   hole into a tested call.
+1. ~~**`erc32_timer.h`** RTC, GPT and watchdog.~~ Done.
+2. ~~**`erc32_error.h`** ERSR, SFSR, FFAR, `mecparerror`, `decode_ersr`.~~ Done.
 3. **`erc32_cfg.h`** MEC control, memory configuration, waitstates, I/O
    configuration, software reset, power down, the access protection segments.
    Precedes the memory path, which reads the sizes and masks it computes.
@@ -287,6 +293,13 @@ Hard-won here, so the next person does not rediscover them.
   its pipeline. Every register the remaining subsystems implement lives in the
   TSC693E Memory Controller manual, which was missing. It is there now, but the
   same trap is waiting for any file whose peripheral spec nobody has opened.
+
+- **Collapsing duplicated logic into a table exposes the rows that are
+  missing.** The error handler wrote the same reset-or-halt block three times,
+  once per error source it knew about. As a loop over a table of sources, the
+  two rows the manual lists and the code never had were plain to see: an IU
+  hardware error and an FPU comparison error latched and were then ignored.
+  Look for the same shape in `grlib.cc` and the UART.
 
 - **Spec-driven testing earns its keep.** The one real bug found while covering
   `erc32.cc` (the GPT scaler read was gated on the wrong enable bit) surfaced
