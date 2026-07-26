@@ -21,6 +21,7 @@
 #include "config.h"
 #include "sis.h"
 
+#include "erc32_cfg.h"
 #include "erc32_error.h"
 #include "erc32_mec.h"
 #include "erc32_timer.h"
@@ -234,6 +235,68 @@ struct ErrorTestEnv
     return error_write_enabled;
   }
 };
+
+/* A test environment for the configuration template: it owns the verbosity,
+   the PROM width of the board, the error count, and what the configuration
+   asked the rest of the machine to do, so a case drives erc32::Config with no
+   simulator globals.  */
+struct ConfigTestEnv
+{
+  bool verbose = false;
+  bool rom8 = false;
+  std::string log;
+  int errors = 0;
+  uint32 error_mask = 0;
+  int resets = 0;
+  int power_downs = 0;
+  int power_down_timings = 0;
+
+  bool
+  Verbose ()
+  {
+    return verbose;
+  }
+  void
+  Log (const char *msg)
+  {
+    log += msg;
+  }
+  void
+  ReportError ()
+  {
+    ++errors;
+  }
+  bool
+  Rom8 ()
+  {
+    return rom8;
+  }
+  void
+  SetErrorMask (uint32 mcr)
+  {
+    error_mask = mcr;
+  }
+  void
+  SoftwareReset ()
+  {
+    ++resets;
+  }
+  void
+  EnterPowerDown ()
+  {
+    ++power_downs;
+  }
+  void
+  StartPowerDownTiming ()
+  {
+    ++power_down_timings;
+  }
+};
+
+/* The RAM window of the ERC32 board, as erc32.cc hands it over.  */
+constexpr erc32::MemoryGeometry TEST_GEOMETRY = { .ram_start = 0x02000000,
+						  .ram_end = 0x03000000,
+						  .ram_mask = 0x00ffffff };
 
 struct mec_fixture
 {
@@ -1009,6 +1072,323 @@ TEST_CASE_FIXTURE (mec_fixture, "MEC timer writes reject their reserved bits")
    01F8 00A4 and 01F8 00B0: the MEC control register carries one mask bit and
    one reset-or-halt bit per error source, and an unmasked error halts by
    default.  */
+
+/* The configuration registers, driven in isolation.  The expectations come
+   from the TSC693E manual: the reset values of each register, the size and
+   waitstate encodings, and the two modes the control register gates.  */
+
+TEST_CASE ("Config resets to the values the manual documents")
+{
+  ConfigTestEnv env;
+  erc32::Config<ConfigTestEnv> cfg (env, TEST_GEOMETRY);
+
+  /* The control register resets with the bus timeout, the watchdog
+     prescaler, DMA, the DMA session timeout, the UART parity and clock and a
+     UART scaler of one.  */
+  CHECK (cfg.mcr () == 0x01b50014);
+
+  /* The memory configuration register resets with PROM writes enabled and
+     both size fields at their minimum, which is 256 Kbyte of RAM and 128
+     Kbyte of PROM.  The PROM width bit follows the board.  */
+  CHECK (cfg.memcfg () == (erc32::kMemcfgPromWrite | erc32::kMemcfgProm40Bit));
+  CHECK (cfg.ram_size () == 256 * 1024);
+  CHECK (cfg.rom_size () == 128 * 1024);
+  CHECK (cfg.prom_write ());
+  CHECK (cfg.prom_40bit ());
+
+  /* The waitstate register resets to all ones, the maximum of each field.  */
+  CHECK (cfg.ram_read_ws () == 3);
+  CHECK (cfg.ram_write_ws () == 3);
+  CHECK (cfg.rom_read_ws () == 14);
+  CHECK (cfg.rom_write_ws () == 14);
+
+  /* No I/O unit enabled and no segment protected.  */
+  CHECK (cfg.iocr () == 0);
+  CHECK (cfg.access_protect () == false);
+  CHECK (cfg.block_protect () == false);
+  for (int i = 0; i < erc32::kSegments; i++)
+    {
+      CHECK (cfg.seg_base (i) == 0);
+      CHECK (cfg.seg_end (i) == 0);
+      CHECK (cfg.seg_mode (i) == 0);
+    }
+
+  /* The RAM window comes from the board, not from a register.  */
+  CHECK (cfg.ram_start () == 0x02000000);
+  CHECK (cfg.ram_end () == 0x03000000);
+  CHECK (cfg.ram_mask () == 0x00ffffff);
+
+  /* The error handler is given the control register.  */
+  CHECK (env.error_mask == cfg.mcr ());
+}
+
+TEST_CASE ("Config decodes every memory size the fields select")
+{
+  ConfigTestEnv env;
+  erc32::Config<ConfigTestEnv> cfg (env, TEST_GEOMETRY);
+
+  /* The RAM size field starts at 256 Kbyte and doubles, the PROM size field
+     starts at 128 Kbyte and doubles.  */
+  for (uint32 i = 0; i < 8; i++)
+    {
+      cfg.WriteMemcfg (i << 10);
+      CHECK (cfg.ram_size () == (256u * 1024u << i));
+
+      cfg.WriteMemcfg (i << 18);
+      CHECK (cfg.rom_size () == (128u * 1024u << i));
+    }
+}
+
+TEST_CASE ("Config takes the PROM width from the board")
+{
+  ConfigTestEnv env;
+
+  /* The PROM width bit is read only and follows the board's PROM8 pin, so a
+     write of the opposite value has no effect.  */
+  erc32::Config<ConfigTestEnv> wide (env, TEST_GEOMETRY);
+  wide.WriteMemcfg (0);
+  CHECK (wide.prom_40bit ());
+
+  env.rom8 = true;
+  erc32::Config<ConfigTestEnv> narrow (env, TEST_GEOMETRY);
+  narrow.WriteMemcfg (erc32::kMemcfgProm40Bit);
+  CHECK (narrow.prom_40bit () == false);
+}
+
+TEST_CASE ("Config decodes the RAM waitstate fields")
+{
+  ConfigTestEnv env;
+  erc32::Config<ConfigTestEnv> cfg (env, TEST_GEOMETRY);
+
+  /* Two bits each, counting waitstates directly.  */
+  cfg.WriteWcr (0x2 | (0x1 << 2));
+  CHECK (cfg.ram_read_ws () == 2);
+  CHECK (cfg.ram_write_ws () == 1);
+}
+
+TEST_CASE ("Config decodes no PROM waitstates at zero and at one")
+{
+  ConfigTestEnv env;
+  erc32::Config<ConfigTestEnv> cfg (env, TEST_GEOMETRY);
+
+  /* The PROM fields encode no waitstates twice, so the count is one below the
+     field from two upwards.  */
+  const uint32 expect[16] = { 0, 0, 1, 2,  3,  4,  5,  6,
+			      7, 8, 9, 10, 11, 12, 13, 14 };
+
+  for (uint32 f = 0; f < 16; f++)
+    {
+      cfg.WriteWcr ((f << 4) | (f << 8));
+      CHECK (cfg.rom_read_ws () == expect[f]);
+      CHECK (cfg.rom_write_ws () == expect[f]);
+    }
+}
+
+TEST_CASE ("Config stretches the PROM read for an 8-bit PROM")
+{
+  ConfigTestEnv env;
+  env.rom8 = true;
+  erc32::Config<ConfigTestEnv> cfg (env, TEST_GEOMETRY);
+
+  /* A word takes four accesses from an 8 bit PROM, so the decoded waitstates
+     are four times the count plus the accesses themselves.  The write path is
+     unaffected.  */
+  cfg.WriteWcr ((3u << 4) | (3u << 8));
+  CHECK (cfg.rom_read_ws () == 5 + 4 * 2);
+  CHECK (cfg.rom_write_ws () == 2);
+}
+
+TEST_CASE ("Config keeps the two protection segments apart")
+{
+  ConfigTestEnv env;
+  erc32::Config<ConfigTestEnv> cfg (env, TEST_GEOMETRY);
+
+  /* A segment address counts words and reads back with its two mode bits.  */
+  cfg.WriteSegmentBase (0, 0x1000 | (erc32::kSegUser << erc32::kSegModeShift));
+  cfg.WriteSegmentEnd (0, 0x2000);
+  cfg.WriteSegmentBase (
+      1, 0x3000 | (erc32::kSegSupervisor << erc32::kSegModeShift));
+  cfg.WriteSegmentEnd (1, 0x4000);
+
+  CHECK (cfg.seg_base (0) == 0x1000);
+  CHECK (cfg.seg_end (0) == 0x2000);
+  CHECK (cfg.seg_mode (0) == erc32::kSegUser);
+  CHECK (cfg.ReadSegmentBase (0) ==
+	 (0x1000u | (erc32::kSegUser << erc32::kSegModeShift)));
+
+  CHECK (cfg.seg_base (1) == 0x3000);
+  CHECK (cfg.seg_end (1) == 0x4000);
+  CHECK (cfg.seg_mode (1) == erc32::kSegSupervisor);
+}
+
+TEST_CASE ("Config protects while either segment has a mode")
+{
+  ConfigTestEnv env;
+  erc32::Config<ConfigTestEnv> cfg (env, TEST_GEOMETRY);
+
+  /* Both mode bits clear disables the protection for that segment, so the
+     protection is on while either segment still has one.  */
+  CHECK (cfg.access_protect () == false);
+
+  cfg.WriteSegmentBase (0, erc32::kSegUser << erc32::kSegModeShift);
+  CHECK (cfg.access_protect ());
+
+  cfg.WriteSegmentBase (1, erc32::kSegSupervisor << erc32::kSegModeShift);
+  CHECK (cfg.access_protect ());
+
+  cfg.WriteSegmentBase (0, 0);
+  CHECK (cfg.access_protect ());
+
+  cfg.WriteSegmentBase (1, 0);
+  CHECK (cfg.access_protect () == false);
+}
+
+TEST_CASE ("Config takes the block protection bit from the control register")
+{
+  ConfigTestEnv env;
+  erc32::Config<ConfigTestEnv> cfg (env, TEST_GEOMETRY);
+
+  cfg.WriteMcr (erc32::kMcrBlockProtect);
+  CHECK (cfg.block_protect ());
+  CHECK (env.error_mask == erc32::kMcrBlockProtect);
+
+  cfg.WriteMcr (0);
+  CHECK (cfg.block_protect () == false);
+}
+
+TEST_CASE ("Config reports the reserved bits of every write")
+{
+  ConfigTestEnv env;
+  erc32::Config<ConfigTestEnv> cfg (env, TEST_GEOMETRY);
+
+  /* A write that stays inside the fields is kept and reports nothing.  */
+  cfg.WriteIocr (0x0f);
+  CHECK (cfg.iocr () == 0x0f);
+  CHECK (env.errors == 0);
+
+  cfg.WriteMemcfg (erc32::kMemcfgReserved);
+  CHECK (env.errors == 1);
+
+  cfg.WriteIocr (erc32::kIocrReserved);
+  CHECK (env.errors == 2);
+  CHECK (cfg.iocr () == erc32::kIocrReserved);
+
+  cfg.WriteSegmentBase (0, erc32::kSegBaseReserved);
+  CHECK (env.errors == 3);
+
+  cfg.WriteSegmentEnd (0, erc32::kSegEndReserved);
+  CHECK (env.errors == 4);
+
+  /* The control register's reserved bit 15 is what the simulator uses to
+     inject a MEC hardware error.  */
+  cfg.WriteMcr (erc32::kMcrHardwareError);
+  CHECK (env.errors == 5);
+}
+
+TEST_CASE ("Config resets the processor only when the control register allows")
+{
+  ConfigTestEnv env;
+  erc32::Config<ConfigTestEnv> cfg (env, TEST_GEOMETRY);
+
+  cfg.WriteMcr (0);
+  cfg.WriteSoftwareReset ();
+  CHECK (env.resets == 0);
+
+  cfg.WriteMcr (erc32::kMcrSoftwareReset);
+  cfg.WriteSoftwareReset ();
+  CHECK (env.resets == 1);
+}
+
+TEST_CASE ("Config enters power down only when the control register allows")
+{
+  ConfigTestEnv env;
+  erc32::Config<ConfigTestEnv> cfg (env, TEST_GEOMETRY);
+
+  /* The timing of the power down is started either way; only entering it is
+     gated.  */
+  cfg.WriteMcr (0);
+  cfg.WritePowerDown ();
+  CHECK (env.power_downs == 0);
+  CHECK (env.power_down_timings == 1);
+
+  cfg.WriteMcr (erc32::kMcrPowerDown);
+  cfg.WritePowerDown ();
+  CHECK (env.power_downs == 1);
+  CHECK (env.power_down_timings == 2);
+
+  /* The simulator's boot loader enables it without a register write.  */
+  cfg.WriteMcr (0);
+  cfg.EnablePowerDown ();
+  cfg.WritePowerDown ();
+  CHECK (env.power_downs == 2);
+}
+
+TEST_CASE ("Config narrates what it decodes when verbose")
+{
+  ConfigTestEnv env;
+  erc32::Config<ConfigTestEnv> cfg (env, TEST_GEOMETRY);
+  env.verbose = true;
+
+  cfg.WriteMemcfg (0);
+  CHECK (env.log.find ("RAM start: 0x2000000, RAM size: 256 K, ROM size: 128 "
+		       "K\n") != std::string::npos);
+
+  env.log.clear ();
+  cfg.WriteWcr (0);
+  CHECK (
+      env.log ==
+      "Waitstates = RAM read: 0, RAM write: 0, ROM read: 0, ROM write: 0\n");
+
+  env.log.clear ();
+  cfg.WriteSegmentBase (0, 0x40 | (erc32::kSegUser << erc32::kSegModeShift));
+  CHECK (env.log ==
+	 "Segment 1 memory protection enabled (0x02000100 - 0x02000000)\n");
+
+  env.log.clear ();
+  cfg.WriteMcr (erc32::kMcrSoftwareReset | erc32::kMcrPowerDown);
+  CHECK (env.log == "Memory block write protection enabled\n"
+		    "Software reset enabled\n"
+		    "Power-down mode enabled\n");
+
+  env.log.clear ();
+  cfg.WriteSoftwareReset ();
+  CHECK (env.log == " Software reset issued\n");
+}
+
+TEST_CASE ("Config narrates only what is enabled")
+{
+  ConfigTestEnv env;
+  erc32::Config<ConfigTestEnv> cfg (env, TEST_GEOMETRY);
+  env.verbose = true;
+
+  /* Verbose, but with no segment protected and neither mode enabled, there is
+     nothing to announce.  */
+  cfg.WriteMcr (0);
+  CHECK (env.log.empty ());
+
+  /* A segment write with neither mode bit set protects nothing and announces
+     nothing.  */
+  cfg.WriteSegmentBase (1, 0x100);
+  CHECK (env.log.empty ());
+
+  /* The hardware error test bit is reported without being narrated.  */
+  cfg.WriteMcr (erc32::kMcrHardwareError);
+  CHECK (env.errors == 1);
+  CHECK (env.log.empty ());
+}
+
+TEST_CASE ("Config stays quiet when not verbose")
+{
+  ConfigTestEnv env;
+  erc32::Config<ConfigTestEnv> cfg (env, TEST_GEOMETRY);
+
+  cfg.WriteMemcfg (0);
+  cfg.WriteWcr (0);
+  cfg.WriteSegmentBase (0, erc32::kSegUser << erc32::kSegModeShift);
+  cfg.WriteMcr (erc32::kMcrSoftwareReset | erc32::kMcrPowerDown);
+  cfg.WriteSoftwareReset ();
+  CHECK (env.log.empty ());
+}
 
 TEST_CASE ("ErrorHandler resets to the values the manual documents")
 {
