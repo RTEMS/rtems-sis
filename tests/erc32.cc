@@ -741,7 +741,7 @@ TEST_CASE ("Watchdog program register decodes its three fields")
   CHECK (wdog.state () == erc32::WatchdogState::Enabled);
 }
 
-TEST_CASE ("Watchdog trap door disables it only before it is programmed")
+TEST_CASE ("Watchdog trap door disables it from the reset state")
 {
   TimerTestEnv env;
   env.verbose = true;
@@ -750,11 +750,42 @@ TEST_CASE ("Watchdog trap door disables it only before it is programmed")
   wdog.WriteTrapDoor ();
   CHECK (wdog.state () == erc32::WatchdogState::Disabled);
   CHECK (env.log == "Watchdog disabled\n");
+}
 
-  /* The manual: the watchdog cannot be disabled once the program register
-     has been written.  */
+TEST_CASE ("Watchdog cannot be disabled once it has been programmed")
+{
+  TimerTestEnv env;
+  erc32::Watchdog<TimerTestEnv> wdog (env);
+
   wdog.WriteProgram (0x00010001u);
   REQUIRE (wdog.state () == erc32::WatchdogState::Enabled);
+
+  wdog.WriteTrapDoor ();
+  CHECK (wdog.state () == erc32::WatchdogState::Enabled);
+}
+
+TEST_CASE ("Watchdog cannot be disabled once it has elapsed")
+{
+  TimerTestEnv env;
+  erc32::Watchdog<TimerTestEnv> wdog (env);
+
+  /* The trap door window runs from reset until the watchdog elapses, so a
+     timeout closes it even though the program register was never written.
+     Figure 7 gives the timeout state no trap door transition.
+
+     Walk the reset counter of FFFF all the way down, so that the watchdog
+     reaches its timeout having only ever been in the reset state.  */
+  REQUIRE (wdog.state () == erc32::WatchdogState::Init);
+  for (uint32 i = 0; i < 0xffffu; ++i)
+    wdog.Tick ();
+  REQUIRE (wdog.counter () == 0);
+  REQUIRE (wdog.state () == erc32::WatchdogState::Init); /* still open */
+  CHECK (env.irqs.empty ());
+
+  wdog.Tick (); /* the timeout */
+  REQUIRE (env.irqs.size () == 1);
+  CHECK (env.irqs[0] == 15);
+
   wdog.WriteTrapDoor ();
   CHECK (wdog.state () == erc32::WatchdogState::Enabled);
 }

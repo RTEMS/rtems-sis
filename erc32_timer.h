@@ -247,7 +247,8 @@ public:
   explicit Watchdog (Env &env) : env_ (env) { Reset (); }
 
   /* The reset state of the program register: scaler, counter and reset
-     counter all at their maximum, and the watchdog enabled and running.  */
+     counter all at their maximum.  The manual has the watchdog enabled and
+     running from reset, which the board does by calling Start.  */
   void
   Reset ()
   {
@@ -309,9 +310,10 @@ public:
     state_ = WatchdogState::Enabled;
   }
 
-  /* The trap door: a write disables the watchdog, but only while it is
-     still in its reset state.  Once the program register has been written
-     the watchdog cannot be disabled again.  */
+  /* The trap door: a write disables the watchdog, but only while it is still
+     in its reset state.  The manual closes that window on two events, and
+     Figure 7 gives the trap door no transition out of either: writing the
+     program register, and the watchdog elapsing.  */
   void
   WriteTrapDoor ()
   {
@@ -350,6 +352,8 @@ public:
 	env_.Irq (kWatchdogLevel);
 	rston_ = true;
 	counter_ = rst_delay_;
+	/* Having elapsed, the watchdog can no longer be disabled.  */
+	state_ = WatchdogState::Enabled;
 	env_.ScheduleTick (scaler_ + 1);
       }
   }
