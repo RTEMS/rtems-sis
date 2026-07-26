@@ -72,7 +72,7 @@ an older total.
 
 | Area | Arcs | Taken |
 |---|---|---|
-| `sparc.cc`, `riscv.cc` | 2274 | 17 |
+| `sparc.cc`, `riscv.cc` | 2274 | 117 |
 | `grlib.cc`, `grspw.cc`, `gr1553.cc`, `greth.cc`, `memscrub.cc`, `tap.cc` | 986 | 0 |
 | `sis.cc`, `remote.cc`, `interf.cc` | 546 | 0 |
 | `leon2.cc`, `leon3.cc`, `gr740.cc`, `rv32.cc` | 276 | 0 |
@@ -164,11 +164,33 @@ all of the concepts; each test file holds a small `TestEnv` per subsystem.
 
 ### Then the rest of the simulator
 
-1. `sparc.cc`, then `riscv.cc`. The largest arc count, the best specs, and the
-   only place where a defect means a wrongly emulated program rather than a
-   wrong warning. They need a test-only flat-memory `memsys` under `tests/` and
-   a table-driven instruction harness, not a production refactor. Expect dozens
-   of commits; `sparc.cc` alone is larger than everything else here.
+1. `sparc.cc`, then `riscv.cc`. **In progress.** The largest arc count, the
+   best specs, and the only place where a defect means a wrongly emulated
+   program rather than a wrong warning. No production refactor: the cores
+   already take a `struct pstate *` and reach memory through the vtable.
+
+   The harness is in place. `tests/cpumem.{h,cc}` is a flat-memory `memsys`
+   with a 64 K window at address zero; an access outside it takes a memory
+   exception, which is how a case reaches a core's fault paths. The
+   `sparc_fixture` in `tests/sparc.cc` points `ms` and `arch` at it, clears
+   the register file, and executes one instruction word through
+   `arch->dispatch_instruction`.
+
+   Two things to know before adding cases:
+
+   - **`init_regs` does not clear the register file**, so a case inherits
+     whatever the one before it left. The fixture clears `g[]` and `r[]`
+     itself.
+   - **`dispatch_instruction` executes the instruction at `sregs->pc`** and
+     advances `pc` and `npc` itself. A call, a branch or a `jmpl` therefore
+     computes its target and its saved address from `pc`, not from `npc`.
+
+   `sparc.cc` is at 105 of 1152 arcs. What is covered: the integer and logical
+   operations, the shifts, `sethi`, the `y` register, word and sub-word memory
+   access, branches, `call` and `jmpl`, and the alignment and data access
+   traps. What is not: the register window instructions (`save`, `restore`,
+   `rett`), the traps (`ticc`), the privileged registers, multiply and divide,
+   the whole FPU, and the alternate-space and atomic accesses.
 2. `grlib.cc` and the GRLIB cores. One file behind four boards, and the GRLIB
    manual in `ref/` is already scoped to the cores SIS models.
 3. `leon2.cc`, `leon3.cc`, `gr740.cc`, `rv32.cc`. Thin once `grlib.cc` and the
