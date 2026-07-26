@@ -1652,7 +1652,13 @@ riscv_dispatch_instruction (struct pstate *sregs)
 		      switch (op1)
 			{
 			case FP_NAN:
-			  op1 = (1 << 8); // FIX ME, add quiet NaN
+			  /* The classification table separates the two: a
+			     quiet value has the most significant bit of its
+			     significand set, a signalling one does not.  */
+			  if (sregs->fsi[frs1] & 0x00400000)
+			    op1 = (1 << 9);
+			  else
+			    op1 = (1 << 8);
 			  break;
 			case FP_INFINITE:
 			  if (sregs->fsi[frs1] & 0x80000000)
@@ -1827,7 +1833,13 @@ riscv_dispatch_instruction (struct pstate *sregs)
 		      switch (op1)
 			{
 			case FP_NAN:
-			  op1 = (1 << 8); // FIX ME, add quiet NaN
+			  /* The classification table separates the two: a
+			     quiet value has the most significant bit of its
+			     significand set, a signalling one does not.  */
+			  if (sregs->fsi[frs1] & 0x00400000)
+			    op1 = (1 << 9);
+			  else
+			    op1 = (1 << 8);
 			  break;
 			case FP_INFINITE:
 			  if (sregs->fsi[(rs1 << 1) + 1 - BEH] & 0x80000000)
