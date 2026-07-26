@@ -238,8 +238,12 @@ all of the concepts; each test file holds a small `TestEnv` per subsystem.
    It is timing only, not a wrong result.
 
    Then `riscv.cc`, which has the same shape and can reuse the flat memory.
-   Apply the exhaustive switch restructure to its decoder first: that gain
-   comes free, and measuring it is easier before the arc count moves.
+   Its decoder has been through the exhaustive switch restructure already,
+   and it is worth knowing that **it bought no speed there**: the RISC-V
+   fields are masked to their width at extraction, so the compiler already
+   knew the range and emitted no bounds check to remove. The SPARC gain came
+   from switches whose scrutinee range the compiler could not see. Expect
+   the restructure to pay only where the range is not already obvious.
 
 2. `grlib.cc` and the GRLIB cores. One file behind four boards, and the GRLIB
    manual in `ref/` is already scoped to the cores SIS models.
