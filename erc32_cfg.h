@@ -255,9 +255,10 @@ public:
       hit[i] = (seg_mode_[i] & mode) && (waddr >= seg_base_[i]) &&
 	       ((waddr | (sz == 3)) < seg_end_[i]);
 
-    if (block_protect_)
-      return hit[0] || hit[1];
-    return !((seg_mode_[0] && hit[0]) || (seg_mode_[1] && hit[1]));
+    /* Block protection inverts the criterion, so the two cases are exactly
+       each other's negation.  */
+    bool inside = hit[0] || hit[1];
+    return block_protect_ ? inside : !inside;
   }
 
   /* The read-back value of a segment base register: its address and its two
