@@ -100,6 +100,13 @@ set_csr (uint32 address, struct pstate *sregs, uint32 value)
     case CSR_MIP:
       sregs->mip = value;
       break;
+    case CSR_MSTATUSH:
+      /*
+       * Every field of mstatush belongs to an extension which is not
+       * emulated, so the fields read as zero and a write is discarded.  The
+       * CSR itself is mandatory on RV32 and must not raise an exception.
+       */
+      break;
     case CSR_MSCRATCH:
       sregs->mscratch = value;
       break;
@@ -154,6 +161,9 @@ get_csr (uint32 address, struct pstate *sregs)
       break;
     case CSR_MIE:
       return (sregs->mie);
+      break;
+    case CSR_MSTATUSH:
+      return (0);
       break;
     case CSR_MTVAL:
       return (sregs->mtval);
@@ -1970,6 +1980,23 @@ riscv_dispatch_instruction (struct pstate *sregs)
   return 0;
 }
 
+/*
+ * Pseudo random jitter of 0 to 7 clocks for the trap entry cost.
+ *
+ * The sequence is deterministic, so a run stays reproducible, but it must not
+ * be derived from the simulated time or the instruction count.  Test code
+ * which hunts for a race by varying a busy wait moves both of those, so a
+ * jitter derived from them would track the search variable instead of being
+ * independent of it, and the race window would never be found.
+ */
+static uint32
+trap_jitter (struct pstate *sregs)
+{
+  sregs->jitter = sregs->jitter * 1103515245 + 12345;
+
+  return (sregs->jitter >> 16) & 0x7;
+}
+
 static int
 riscv_execute_trap (struct pstate *sregs)
 {
@@ -2054,11 +2081,13 @@ riscv_execute_trap (struct pstate *sregs)
        */
 
       /* Increase simulator time and add some jitter */
-      sregs->icnt = TRAP_C + ((sregs->ninst ^ sregs->simtime) & 0x7);
-      sregs->trap = 0;
+      sregs->icnt = TRAP_C + trap_jitter (sregs);
 
+      /* Keep the trap cause for the error report, as the SPARC code does. */
       if (sregs->err_mode)
 	return (ERROR_MODE);
+
+      sregs->trap = 0;
     }
 
   return 0;
