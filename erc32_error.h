@@ -97,7 +97,9 @@ struct ErrorSource
    because the manual gives the MEC no action for it.  */
 inline constexpr ErrorSource kErrorSources[] = {
   { kErrIuErrorMode, 5, "IU in error mode" },
+  { kErrIuHwError, 7, "IU hardware error" },
   { kErrIuCmpError, 9, "IU comparison error" },
+  { kErrFpuCmpError, 11, "FPU comparison error" },
   { kErrMecHwError, 13, "MEC hardware error" },
 };
 
