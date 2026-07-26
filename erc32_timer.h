@@ -100,6 +100,11 @@ public:
   {
     return enabled_;
   }
+  bool
+  reload_at_zero () const
+  {
+    return reload_at_zero_;
+  }
 
   /* The scaler counts down between counter ticks, so while the timer runs
      its visible value is the programmed value less the time since the last

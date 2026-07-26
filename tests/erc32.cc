@@ -22,11 +22,13 @@
 #include "sis.h"
 
 #include "erc32_mec.h"
+#include "erc32_timer.h"
 
 #include <stdio.h>
 #include <string.h>
 #include <string>
 #include <unistd.h>
+#include <vector>
 
 using sis_tests::stdout_capture;
 
@@ -55,6 +57,8 @@ const uint32 R_IPR = 0x048;
 const uint32 R_IMR = 0x04c;
 const uint32 R_ICR = 0x050;
 const uint32 R_IFR = 0x054;
+const uint32 R_WDOG = 0x060;
+const uint32 R_TRAPD = 0x064;
 const uint32 R_RTC_COUNTER = 0x080;
 const uint32 R_RTC_SCALER = 0x084;
 const uint32 R_GPT_COUNTER = 0x088;
@@ -78,6 +82,13 @@ const uint32 TC_GPT_SCALER_EN = 0x004;
 const uint32 TC_RTC_RELOAD = 0x100;
 const uint32 TC_RTC_LOAD = 0x200;
 const uint32 TC_RTC_SCALER_EN = 0x400;
+
+/* The two timers as erc32.cc instantiates them: scaler width, and where each
+   one's control bits sit in the timer control register.  */
+const uint32 RTC_SCALER_MASK = 0x0ff;
+const uint32 GPT_SCALER_MASK = 0x0ffff;
+const unsigned RTC_CTRL_SHIFT = 8;
+const unsigned GPT_CTRL_SHIFT = 0;
 
 /* Store-size encoding for a word and the test-mode / IFR-enable bit of the
    MEC test control register.  */
@@ -119,6 +130,51 @@ struct TestEnv
   Log (const char *msg)
   {
     log += msg;
+  }
+};
+
+/* A test environment for the timer templates: it owns the simulated time,
+   the ticks that were scheduled, the interrupts that were raised and whether
+   the watchdog reset the processor, so a case drives erc32::Timer and
+   erc32::Watchdog with no simulator globals.  */
+struct TimerTestEnv
+{
+  bool verbose = false;
+  uint64 time = 0;
+  std::string log;
+  std::vector<int> irqs;
+  std::vector<uint64> ticks;
+  int resets = 0;
+
+  bool
+  Verbose ()
+  {
+    return verbose;
+  }
+  uint64
+  Now ()
+  {
+    return time;
+  }
+  void
+  Irq (int level)
+  {
+    irqs.push_back (level);
+  }
+  void
+  ScheduleTick (uint64 delta)
+  {
+    ticks.push_back (delta);
+  }
+  void
+  Log (const char *msg)
+  {
+    log += msg;
+  }
+  void
+  WatchdogReset ()
+  {
+    ++resets;
   }
 };
 
@@ -388,23 +444,420 @@ TEST_CASE_FIXTURE (mec_fixture, "MEC dispatches the interrupt registers")
   wr (R_ICR, 0);
 }
 
-TEST_CASE_FIXTURE (mec_fixture, "MEC reads the running GPT scaler down")
-{
-  /* A running scaler reads back as its start value minus the elapsed time.
-     The GPT scaler read must follow the GPT's own enable, not the RTC's: with
-     the GPT running and the RTC stopped it still counts down.  */
-  ebase.simtime = 100;
-  wr (R_GPT_SCALER, 50);
-  wr (R_TIMER_CTRL, TC_GPT_SCALER_EN); /* start the GPT scaler only */
+/* The timers are tested through erc32::Timer and erc32::Watchdog on a
+   TimerTestEnv, with no simulator globals: the environment owns the
+   simulated time, the ticks that were scheduled and the interrupts that were
+   raised.  Register layouts, reset values and interrupt levels come from the
+   TSC693E manual, sections 3.13 and 3.14 and the register descriptions for
+   01F8 0060 through 01F8 0098.  */
 
-  ebase.simtime = 110;
-  CHECK (rd (R_GPT_SCALER) == 40);
+TEST_CASE ("Timer resets to the values the manual documents")
+{
+  TimerTestEnv env;
+  erc32::Timer<TimerTestEnv> rtc (env, RTC_SCALER_MASK, erc32::kRtcLevel,
+				  RTC_CTRL_SHIFT, true, "RTC");
+  erc32::Timer<TimerTestEnv> gpt (env, GPT_SCALER_MASK, erc32::kGptLevel,
+				  GPT_CTRL_SHIFT, false, "GPT");
+
+  /* Counter and programmed counter reset to FFFFFFFF, and the timer is not
+     running: the manual states it must be programmed after reset.  */
+  CHECK (rtc.counter () == 0xffffffffu);
+  CHECK (rtc.reload () == 0xffffffffu);
+  CHECK (rtc.enabled () == false);
+  CHECK (gpt.counter () == 0xffffffffu);
+  CHECK (gpt.reload () == 0xffffffffu);
+  CHECK (gpt.enabled () == false);
+
+  /* The real time clock has an 8 bit scaler resetting to FF, the general
+     purpose timer a 16 bit scaler resetting to FFFF.  */
+  CHECK (rtc.scaler () == 0xffu);
+  CHECK (gpt.scaler () == 0xffffu);
+
+  /* RTCCR, bit 8 of the timer control register, is the one control bit whose
+     reset value is one; GCR, bit 0, resets to zero.  */
+  CHECK (rtc.reload_at_zero () == true);
+  CHECK (gpt.reload_at_zero () == false);
+
+  /* Nothing is scheduled and nothing is requested by a reset timer.  */
+  CHECK (env.ticks.empty ());
+  CHECK (env.irqs.empty ());
 }
 
-TEST_CASE_FIXTURE (mec_fixture, "MEC timer counters load from their reloads")
+TEST_CASE ("Timer truncates a scaler to its programmed width")
 {
-  /* A counter load copies the reload register into the counter, which then
-     reads back.  */
+  TimerTestEnv env;
+  erc32::Timer<TimerTestEnv> rtc (env, RTC_SCALER_MASK, erc32::kRtcLevel,
+				  RTC_CTRL_SHIFT, true, "RTC");
+  erc32::Timer<TimerTestEnv> gpt (env, GPT_SCALER_MASK, erc32::kGptLevel,
+				  GPT_CTRL_SHIFT, false, "GPT");
+
+  /* Bits above the scaler width are not part of the register.  */
+  rtc.SetScaler (0x1a5);
+  CHECK (rtc.scaler () == 0xa5);
+
+  gpt.SetScaler (0x1beef);
+  CHECK (gpt.scaler () == 0xbeef);
+}
+
+TEST_CASE ("Timer control loads the counter from its programmed value")
+{
+  TimerTestEnv env;
+  erc32::Timer<TimerTestEnv> rtc (env, RTC_SCALER_MASK, erc32::kRtcLevel,
+				  RTC_CTRL_SHIFT, true, "RTC");
+
+  rtc.SetReload (0x1234);
+  CHECK (rtc.reload () == 0x1234);
+  CHECK (rtc.counter () == 0xffffffffu); /* not loaded yet */
+
+  rtc.WriteControl (TC_RTC_LOAD);
+  CHECK (rtc.counter () == 0x1234);
+  CHECK (rtc.enabled () == false); /* loading does not start it */
+  CHECK (env.ticks.empty ());
+}
+
+TEST_CASE ("Timer control reads its own field of the control register")
+{
+  TimerTestEnv env;
+  erc32::Timer<TimerTestEnv> rtc (env, RTC_SCALER_MASK, erc32::kRtcLevel,
+				  RTC_CTRL_SHIFT, true, "RTC");
+  erc32::Timer<TimerTestEnv> gpt (env, GPT_SCALER_MASK, erc32::kGptLevel,
+				  GPT_CTRL_SHIFT, false, "GPT");
+
+  /* One register carries both timers, so the general purpose timer's bits
+     must leave the real time clock alone and the other way round.  */
+  rtc.SetReload (0x11);
+  gpt.SetReload (0x22);
+
+  rtc.WriteControl (TC_GPT_LOAD);
+  gpt.WriteControl (TC_GPT_LOAD);
+  CHECK (rtc.counter () == 0xffffffffu);
+  CHECK (gpt.counter () == 0x22);
+
+  rtc.WriteControl (TC_RTC_LOAD);
+  gpt.WriteControl (TC_RTC_LOAD);
+  CHECK (rtc.counter () == 0x11);
+  CHECK (gpt.counter () == 0x22); /* unchanged by the RTC's load */
+
+  /* The reload bit follows the same split.  */
+  rtc.WriteControl (TC_RTC_RELOAD);
+  gpt.WriteControl (TC_RTC_RELOAD);
+  CHECK (rtc.reload_at_zero () == true);
+  CHECK (gpt.reload_at_zero () == false);
+}
+
+TEST_CASE ("Timer start schedules one scaler period ahead")
+{
+  TimerTestEnv env;
+  erc32::Timer<TimerTestEnv> gpt (env, GPT_SCALER_MASK, erc32::kGptLevel,
+				  GPT_CTRL_SHIFT, false, "GPT");
+
+  /* The counter is decremented once per scaler period, so the timeout is
+     counter times scaler plus one clocks.  */
+  env.time = 500;
+  gpt.SetScaler (49);
+  gpt.WriteControl (TC_GPT_SCALER_EN);
+
+  CHECK (gpt.enabled () == true);
+  REQUIRE (env.ticks.size () == 1);
+  CHECK (env.ticks[0] == 50);
+
+  /* Enabling an already running timer does not restart it.  */
+  gpt.WriteControl (TC_GPT_SCALER_EN);
+  CHECK (env.ticks.size () == 1);
+}
+
+TEST_CASE ("Timer scaler reads down while running")
+{
+  TimerTestEnv env;
+  erc32::Timer<TimerTestEnv> gpt (env, GPT_SCALER_MASK, erc32::kGptLevel,
+				  GPT_CTRL_SHIFT, false, "GPT");
+
+  env.time = 100;
+  gpt.SetScaler (50);
+  gpt.WriteControl (TC_GPT_SCALER_EN);
+
+  /* A running scaler reads its programmed value less the elapsed time.  */
+  CHECK (gpt.ScalerRead () == 50);
+  env.time = 110;
+  CHECK (gpt.ScalerRead () == 40);
+  env.time = 150;
+  CHECK (gpt.ScalerRead () == 0);
+}
+
+TEST_CASE ("Timer scaler reads its programmed value while stopped")
+{
+  TimerTestEnv env;
+  erc32::Timer<TimerTestEnv> rtc (env, RTC_SCALER_MASK, erc32::kRtcLevel,
+				  RTC_CTRL_SHIFT, true, "RTC");
+
+  env.time = 900;
+  rtc.SetScaler (0x20);
+  CHECK (rtc.ScalerRead () == 0x20);
+}
+
+TEST_CASE ("Timer tick counts a non-zero counter down and re-arms")
+{
+  TimerTestEnv env;
+  erc32::Timer<TimerTestEnv> rtc (env, RTC_SCALER_MASK, erc32::kRtcLevel,
+				  RTC_CTRL_SHIFT, true, "RTC");
+
+  rtc.SetScaler (7);
+  rtc.SetReload (5);
+  rtc.WriteControl (TC_RTC_LOAD | TC_RTC_SCALER_EN);
+  REQUIRE (env.ticks.size () == 1);
+
+  env.time = 8;
+  rtc.Tick ();
+
+  CHECK (rtc.counter () == 4);
+  CHECK (rtc.enabled () == true);
+  REQUIRE (env.ticks.size () == 2);
+  CHECK (env.ticks[1] == 8); /* one scaler period again */
+  CHECK (env.irqs.empty ()); /* no interrupt above zero */
+}
+
+TEST_CASE ("Timer tick at zero interrupts at the level of the timer")
+{
+  TimerTestEnv env;
+  erc32::Timer<TimerTestEnv> rtc (env, RTC_SCALER_MASK, erc32::kRtcLevel,
+				  RTC_CTRL_SHIFT, true, "RTC");
+  erc32::Timer<TimerTestEnv> gpt (env, GPT_SCALER_MASK, erc32::kGptLevel,
+				  GPT_CTRL_SHIFT, false, "GPT");
+
+  /* Table 5 of the manual assigns the real time clock interrupt level 13 and
+     the general purpose timer level 12.  */
+  rtc.SetScaler (0);
+  rtc.SetReload (0);
+  rtc.WriteControl (TC_RTC_LOAD | TC_RTC_RELOAD | TC_RTC_SCALER_EN);
+  rtc.Tick ();
+
+  gpt.SetScaler (0);
+  gpt.SetReload (0);
+  gpt.WriteControl (TC_GPT_LOAD | TC_GPT_RELOAD | TC_GPT_SCALER_EN);
+  gpt.Tick ();
+
+  REQUIRE (env.irqs.size () == 2);
+  CHECK (env.irqs[0] == 13);
+  CHECK (env.irqs[1] == 12);
+}
+
+TEST_CASE ("Timer reloads at zero and keeps running when told to")
+{
+  TimerTestEnv env;
+  erc32::Timer<TimerTestEnv> gpt (env, GPT_SCALER_MASK, erc32::kGptLevel,
+				  GPT_CTRL_SHIFT, false, "GPT");
+
+  gpt.SetScaler (3);
+  gpt.SetReload (9);
+  gpt.WriteControl (TC_GPT_LOAD | TC_GPT_RELOAD | TC_GPT_SCALER_EN);
+  gpt.SetReload (7); /* reprogrammed while running */
+
+  /* Walk the counter down to zero and one tick past it.  */
+  for (int i = 0; i < 9; ++i)
+    gpt.Tick ();
+  CHECK (gpt.counter () == 0);
+  CHECK (env.irqs.empty ());
+
+  gpt.Tick ();
+  CHECK (env.irqs.size () == 1);
+  CHECK (gpt.counter () == 7); /* reloaded from the programmed value */
+  CHECK (gpt.enabled () == true);
+}
+
+TEST_CASE ("Timer stops at zero when reload is not set")
+{
+  TimerTestEnv env;
+  erc32::Timer<TimerTestEnv> gpt (env, GPT_SCALER_MASK, erc32::kGptLevel,
+				  GPT_CTRL_SHIFT, false, "GPT");
+
+  gpt.SetScaler (2);
+  gpt.SetReload (0);
+  gpt.WriteControl (TC_GPT_LOAD | TC_GPT_SCALER_EN); /* single shot */
+  size_t armed = env.ticks.size ();
+
+  gpt.Tick ();
+
+  CHECK (env.irqs.size () == 1);
+  CHECK (gpt.enabled () == false);
+  CHECK (env.ticks.size () == armed); /* not re-armed */
+  CHECK (gpt.ScalerRead () == 2);     /* stopped, so the static value */
+}
+
+TEST_CASE ("Timer narrates its start and stop when verbose")
+{
+  TimerTestEnv env;
+  env.verbose = true;
+  erc32::Timer<TimerTestEnv> rtc (env, RTC_SCALER_MASK, erc32::kRtcLevel,
+				  RTC_CTRL_SHIFT, true, "RTC");
+
+  rtc.SetScaler (9);
+  rtc.SetReload (0);
+  rtc.WriteControl (TC_RTC_LOAD | TC_RTC_SCALER_EN);
+  CHECK (env.log == "RTC started (period 10)\n\r");
+
+  rtc.Tick (); /* at zero without reload, so it stops */
+  CHECK (env.log == "RTC started (period 10)\n\rRTC stopped\n\r");
+}
+
+/* The watch dog, from section 3.14 and Figure 7 of the manual.  */
+
+TEST_CASE ("Watchdog resets to the values the manual documents")
+{
+  TimerTestEnv env;
+  erc32::Watchdog<TimerTestEnv> wdog (env);
+
+  /* The program register resets with every field at its maximum: counter
+     FFFF, scaler FF, reset counter FF.  */
+  CHECK (wdog.counter () == 0xffffu);
+  CHECK (wdog.scaler () == 0xffu);
+  CHECK (wdog.rst_delay () == 0xffu);
+  CHECK (wdog.state () == erc32::WatchdogState::Init);
+}
+
+TEST_CASE ("Watchdog start schedules one scaler period and narrates")
+{
+  TimerTestEnv env;
+  env.verbose = true;
+  erc32::Watchdog<TimerTestEnv> wdog (env);
+
+  wdog.Start ();
+
+  REQUIRE (env.ticks.size () == 1);
+  CHECK (env.ticks[0] == 256); /* scaler plus one */
+  CHECK (env.log == "Watchdog started, scaler = 255, counter = 65535\n");
+}
+
+TEST_CASE ("Watchdog program register decodes its three fields")
+{
+  TimerTestEnv env;
+  erc32::Watchdog<TimerTestEnv> wdog (env);
+
+  /* Counter in bits 15-0, scaler in bits 23-16, reset counter in 31-24.  */
+  wdog.WriteProgram (0xa5c31234u);
+
+  CHECK (wdog.counter () == 0x1234u);
+  CHECK (wdog.scaler () == 0xc3u);
+  CHECK (wdog.rst_delay () == 0xa5u);
+  CHECK (wdog.state () == erc32::WatchdogState::Enabled);
+}
+
+TEST_CASE ("Watchdog trap door disables it only before it is programmed")
+{
+  TimerTestEnv env;
+  env.verbose = true;
+  erc32::Watchdog<TimerTestEnv> wdog (env);
+
+  wdog.WriteTrapDoor ();
+  CHECK (wdog.state () == erc32::WatchdogState::Disabled);
+  CHECK (env.log == "Watchdog disabled\n");
+
+  /* The manual: the watchdog cannot be disabled once the program register
+     has been written.  */
+  wdog.WriteProgram (0x00010001u);
+  REQUIRE (wdog.state () == erc32::WatchdogState::Enabled);
+  wdog.WriteTrapDoor ();
+  CHECK (wdog.state () == erc32::WatchdogState::Enabled);
+}
+
+TEST_CASE ("Watchdog disabled stops at its next tick")
+{
+  TimerTestEnv env;
+  erc32::Watchdog<TimerTestEnv> wdog (env);
+
+  wdog.WriteTrapDoor ();
+  wdog.Tick ();
+
+  CHECK (wdog.state () == erc32::WatchdogState::Stopped);
+  CHECK (env.ticks.empty ()); /* not re-armed */
+  CHECK (env.irqs.empty ());
+
+  /* Programming it again after it stopped starts it counting.  */
+  wdog.WriteProgram (0x00020003u);
+  CHECK (wdog.state () == erc32::WatchdogState::Enabled);
+  REQUIRE (env.ticks.size () == 1);
+  CHECK (env.ticks[0] == 3); /* the new scaler plus one */
+}
+
+TEST_CASE ("Watchdog counts down and re-arms each scaler period")
+{
+  TimerTestEnv env;
+  erc32::Watchdog<TimerTestEnv> wdog (env);
+
+  wdog.WriteProgram (0x00040002u); /* reset delay 0, scaler 4, counter 2 */
+
+  wdog.Tick ();
+  CHECK (wdog.counter () == 1);
+  wdog.Tick ();
+  CHECK (wdog.counter () == 0);
+
+  REQUIRE (env.ticks.size () == 2);
+  CHECK (env.ticks[0] == 5);
+  CHECK (env.ticks[1] == 5);
+  CHECK (env.irqs.empty ());
+}
+
+TEST_CASE ("Watchdog timeout interrupts and starts the reset delay")
+{
+  TimerTestEnv env;
+  erc32::Watchdog<TimerTestEnv> wdog (env);
+
+  /* Reset counter 7, scaler 0, counter 0: the next tick is the timeout.  */
+  wdog.WriteProgram (0x07000000u);
+  wdog.Tick ();
+
+  /* Table 5 assigns the watch dog time-out interrupt level 15.  */
+  REQUIRE (env.irqs.size () == 1);
+  CHECK (env.irqs[0] == 15);
+
+  /* The counter restarts from the reset counter, and the watchdog keeps
+     running.  */
+  CHECK (wdog.counter () == 7);
+  CHECK (env.ticks.size () == 1);
+}
+
+TEST_CASE ("Watchdog resets the processor if the timeout is not acknowledged")
+{
+  TimerTestEnv env;
+  erc32::Watchdog<TimerTestEnv> wdog (env);
+
+  wdog.WriteProgram (0); /* every field zero, so each tick is a timeout */
+  wdog.Tick ();		 /* timeout: interrupt, reset delay starts */
+  REQUIRE (env.irqs.size () == 1);
+  CHECK (env.resets == 0);
+
+  wdog.Tick (); /* the reset delay elapses unacknowledged */
+
+  CHECK (env.resets == 1);
+  CHECK (env.log == "Watchdog reset!\n");
+  CHECK (env.ticks.size () == 1); /* the reset ends the counting */
+}
+
+TEST_CASE ("Watchdog acknowledge before the reset delay restarts it")
+{
+  TimerTestEnv env;
+  erc32::Watchdog<TimerTestEnv> wdog (env);
+
+  wdog.WriteProgram (0x01000000u); /* reset delay 1, scaler 0, counter 0 */
+  wdog.Tick ();			   /* timeout */
+  REQUIRE (env.irqs.size () == 1);
+
+  /* The manual: acknowledging with a new value before the reset timeout
+     elapses restarts the counting instead of resetting.  */
+  wdog.WriteProgram (0x00000005u);
+  wdog.Tick ();
+  wdog.Tick ();
+
+  CHECK (env.resets == 0);
+  CHECK (wdog.counter () == 3);
+}
+
+/* One case through the board's register dispatch, so that the MEC register
+   window arcs in erc32.cc are covered too.  The logic itself is covered by
+   the isolated cases above.  */
+
+TEST_CASE_FIXTURE (mec_fixture, "MEC dispatches the timer registers")
+{
+  /* Programmed values read back through the counter and scaler offsets.  */
   wr (R_RTC_COUNTER, 0x1234); /* the counter offset is the reload on write */
   wr (R_TIMER_CTRL, TC_RTC_LOAD);
   CHECK (rd (R_RTC_COUNTER) == 0x1234);
@@ -412,19 +865,53 @@ TEST_CASE_FIXTURE (mec_fixture, "MEC timer counters load from their reloads")
   wr (R_GPT_COUNTER, 0x5678);
   wr (R_TIMER_CTRL, TC_GPT_LOAD);
   CHECK (rd (R_GPT_COUNTER) == 0x5678);
-}
 
-TEST_CASE_FIXTURE (mec_fixture, "MEC reads the RTC scaler down while running")
-{
-  /* The running RTC scaler reads down from its start; a stopped GPT scaler
-     reads its static value.  */
+  /* A running scaler reads down through the board as well.  */
+  ebase.simtime = 100;
+  wr (R_GPT_SCALER, 50);
+  wr (R_TIMER_CTRL, TC_GPT_SCALER_EN);
+  ebase.simtime = 110;
+  CHECK (rd (R_GPT_SCALER) == 40);
+
   ebase.simtime = 200;
   wr (R_RTC_SCALER, 100);
   wr (R_TIMER_CTRL, TC_RTC_SCALER_EN);
-
   ebase.simtime = 230;
   CHECK (rd (R_RTC_SCALER) == 70);
-  CHECK (rd (R_GPT_SCALER) == 0xffff); /* GPT stopped, reset scaler value */
+}
+
+TEST_CASE_FIXTURE (mec_fixture, "MEC ticks the timers from the event queue")
+{
+  /* The board re-enters the timers through the event queue, so a scheduled
+     tick must reach them and post the interrupt.  */
+  wr (R_RTC_SCALER, 0);
+  wr (R_RTC_COUNTER, 0);
+  wr (R_TIMER_CTRL, TC_RTC_LOAD | TC_RTC_RELOAD | TC_RTC_SCALER_EN);
+
+  wr (R_GPT_SCALER, 0);
+  wr (R_GPT_COUNTER, 0);
+  wr (R_TIMER_CTRL, TC_GPT_LOAD | TC_GPT_RELOAD | TC_GPT_SCALER_EN);
+
+  advance_time (1);
+
+  CHECK ((rd (R_IPR) & (1u << 13)) != 0);
+  CHECK ((rd (R_IPR) & (1u << 12)) != 0);
+}
+
+TEST_CASE_FIXTURE (mec_fixture, "MEC ticks the watchdog from the event queue")
+{
+  /* The watchdog is started by the board reset, so it is already armed one
+     scaler period ahead.  Disabling it through the trap door stops it at that
+     tick, and programming it again restarts it.  */
+  wr (R_TRAPD, 0);
+  advance_time (256);
+
+  wr (R_WDOG, 0x00000001u); /* restart with scaler 0, counter 1 */
+  advance_time (257);
+  CHECK ((rd (R_IPR) & (1u << 15)) == 0); /* counted down, not yet timed out */
+
+  advance_time (258);
+  CHECK ((rd (R_IPR) & (1u << 15)) != 0); /* timed out at level 15 */
 }
 
 TEST_CASE_FIXTURE (mec_fixture, "MEC timer writes reject their reserved bits")
@@ -443,103 +930,6 @@ TEST_CASE_FIXTURE (mec_fixture, "MEC timer writes reject their reserved bits")
 
   wr (R_TIMER_CTRL, 0x10); /* not a control bit */
   CHECK ((rd (R_IPR) & (1u << 1)) != 0);
-}
-
-TEST_CASE_FIXTURE (mec_fixture, "MEC RTC tick decrements a non-zero counter")
-{
-  /* A tick with a non-zero counter decrements it and, with the scaler still
-     enabled, re-arms.  */
-  wr (R_RTC_SCALER, 0); /* fire on the next tick */
-  wr (R_RTC_COUNTER, 5);
-  wr (R_TIMER_CTRL, TC_RTC_RELOAD | TC_RTC_LOAD | TC_RTC_SCALER_EN);
-
-  advance_time (1);
-  CHECK (rd (R_RTC_COUNTER) == 4);
-
-  /* Re-enabling while already running does not restart it.  */
-  wr (R_TIMER_CTRL, TC_RTC_SCALER_EN);
-}
-
-TEST_CASE_FIXTURE (mec_fixture, "MEC RTC underflow reloads and interrupts")
-{
-  /* A tick at zero raises interrupt 13, and with reload enabled the counter
-     reloads and the timer keeps running.  */
-  wr (R_RTC_SCALER, 0);
-  wr (R_RTC_COUNTER, 0);
-  wr (R_TIMER_CTRL, TC_RTC_RELOAD | TC_RTC_LOAD | TC_RTC_SCALER_EN);
-
-  advance_time (1);
-  CHECK ((rd (R_IPR) & (1u << 13)) != 0);
-}
-
-TEST_CASE_FIXTURE (mec_fixture, "MEC RTC underflow without reload stops")
-{
-  /* A tick at zero with reload disabled raises the interrupt and stops the
-     timer.  */
-  wr (R_RTC_SCALER, 0);
-  wr (R_RTC_COUNTER, 0);
-  wr (R_TIMER_CTRL, TC_RTC_LOAD | TC_RTC_SCALER_EN); /* no reload bit */
-
-  advance_time (1);
-  CHECK ((rd (R_IPR) & (1u << 13)) != 0);
-  /* Stopped: the scaler now reads its static value, not a running-down one. */
-  CHECK (rd (R_RTC_SCALER) == 0);
-}
-
-TEST_CASE_FIXTURE (mec_fixture, "MEC GPT tick decrements a non-zero counter")
-{
-  wr (R_GPT_SCALER, 0);
-  wr (R_GPT_COUNTER, 5);
-  wr (R_TIMER_CTRL, TC_GPT_RELOAD | TC_GPT_LOAD | TC_GPT_SCALER_EN);
-
-  advance_time (1);
-  CHECK (rd (R_GPT_COUNTER) == 4);
-
-  wr (R_TIMER_CTRL, TC_GPT_SCALER_EN); /* already running, no restart */
-}
-
-TEST_CASE_FIXTURE (mec_fixture, "MEC GPT underflow reloads and interrupts")
-{
-  wr (R_GPT_SCALER, 0);
-  wr (R_GPT_COUNTER, 0);
-  wr (R_TIMER_CTRL, TC_GPT_RELOAD | TC_GPT_LOAD | TC_GPT_SCALER_EN);
-
-  advance_time (1);
-  CHECK ((rd (R_IPR) & (1u << 12)) != 0);
-}
-
-TEST_CASE_FIXTURE (mec_fixture, "MEC GPT underflow without reload stops")
-{
-  wr (R_GPT_SCALER, 0);
-  wr (R_GPT_COUNTER, 0);
-  wr (R_TIMER_CTRL, TC_GPT_LOAD | TC_GPT_SCALER_EN);
-
-  advance_time (1);
-  CHECK ((rd (R_IPR) & (1u << 12)) != 0);
-  CHECK (rd (R_GPT_SCALER) == 0);
-}
-
-TEST_CASE_FIXTURE (mec_fixture,
-		   "MEC narrates timer starts and stops when verbose")
-{
-  sis_verbose = 1;
-  stdout_capture cap;
-
-  /* Start both timers with a zero counter and no reload, then let each tick
-     once so it stops.  */
-  wr (R_RTC_SCALER, 0);
-  wr (R_RTC_COUNTER, 0);
-  wr (R_TIMER_CTRL, TC_RTC_LOAD | TC_RTC_SCALER_EN);
-  wr (R_GPT_SCALER, 0);
-  wr (R_GPT_COUNTER, 0);
-  wr (R_TIMER_CTRL, TC_GPT_LOAD | TC_GPT_SCALER_EN);
-  advance_time (1);
-
-  std::string out = cap.str ();
-  CHECK (out.find ("RTC started") != std::string::npos);
-  CHECK (out.find ("GPT started") != std::string::npos);
-  CHECK (out.find ("RTC stopped") != std::string::npos);
-  CHECK (out.find ("GPT stopped") != std::string::npos);
 }
 
 TEST_CASE_FIXTURE (mec_fixture, "MEC configuration registers round-trip")
