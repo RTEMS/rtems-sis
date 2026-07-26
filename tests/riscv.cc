@@ -25,6 +25,7 @@
 
 #include "cpumem.h"
 
+#include <limits>
 #include <string>
 
 using sis_tests::stdout_capture;
@@ -54,6 +55,14 @@ trap_icnt (uint64 ninst, uint64 simtime)
 
   return s.icnt;
 }
+
+/* Which half of a double register holds a single precision value, the way
+   riscv.cc names it.  */
+#ifdef WORDS_BIGENDIAN
+#define BEH 1
+#else
+#define BEH 0
+#endif
 
 /* Instruction formats, from chapter 2 of the unprivileged specification.
    The opcode field is the low seven bits, which is the five bit op the core
@@ -187,6 +196,42 @@ struct riscv_fixture
   set (int r, uint32 value)
   {
     sregs[0].r[r] = value;
+  }
+
+  /* A single precision register is the low half of a double register and is
+     boxed by setting the other half to all ones, which is how the
+     specification says a narrow value sits in a wide register.  A case
+     reaches one through these and never indexes the arrays itself.  */
+  float32 &
+  fs (int n)
+  {
+    return sregs[0].fs[(n << 1) + BEH];
+  }
+
+  int32 &
+  fsi (int n)
+  {
+    return sregs[0].fsi[(n << 1) + BEH];
+  }
+
+  int32 &
+  fbox (int n)
+  {
+    return sregs[0].fsi[(n << 1) + 1 - BEH];
+  }
+
+  float64 &
+  fd (int n)
+  {
+    return sregs[0].fd[n];
+  }
+
+  /* Put a single precision value in a register the way a load does.  */
+  void
+  setfs (int n, float32 value)
+  {
+    fs (n) = value;
+    fbox (n) = -1;
   }
 
   uint32
@@ -990,4 +1035,272 @@ TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the unassigned atomics are illegal")
   CHECK (exec (amo (4, 3, 1, 2)) == TRAP_ILLEG);
   CHECK (exec (amo (6, 3, 1, 2)) == TRAP_ILLEG);
   CHECK (exec (amo (0x1f, 3, 1, 2)) == TRAP_ILLEG);
+}
+
+namespace
+{
+
+/* A floating point operation is the register format with the operation in
+   the top five bits and the format in the two below them.  */
+uint32
+fpu (uint32 funct5, uint32 fmt, uint32 rd, uint32 funct3, uint32 rs1,
+     uint32 rs2)
+{
+  return rtype (OP_FPU, rd, funct3, rs1, rs2, (funct5 << 2) | fmt);
+}
+
+const uint32 FMT_S = 0;
+const uint32 FMT_D = 1;
+
+/* funct5 encodings of the single precision group.  */
+const uint32 F_ADD = 0x00;
+const uint32 F_SUB = 0x01;
+const uint32 F_MUL = 0x02;
+const uint32 F_DIV = 0x03;
+const uint32 F_SGNJ = 0x04;
+const uint32 F_MINMAX = 0x05;
+const uint32 F_SQRT = 0x0b;
+const uint32 F_CMP = 0x14;
+const uint32 F_CVT_W = 0x18;
+const uint32 F_CVT_F = 0x1a;
+const uint32 F_MV_X = 0x1c;
+const uint32 F_MV_F = 0x1e;
+
+} /* namespace */
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V single precision arithmetic")
+{
+  /* The F extension, with the result boxed into the wide register.  */
+  setfs (1, 3.5f);
+  setfs (2, 1.25f);
+
+  CHECK (exec (fpu (F_ADD, FMT_S, 3, 0, 1, 2)) == 0);
+  CHECK (fs (3) == 4.75f);
+  CHECK (fbox (3) == -1);
+
+  CHECK (exec (fpu (F_SUB, FMT_S, 3, 0, 1, 2)) == 0);
+  CHECK (fs (3) == 2.25f);
+
+  CHECK (exec (fpu (F_MUL, FMT_S, 3, 0, 1, 2)) == 0);
+  CHECK (fs (3) == 4.375f);
+
+  CHECK (exec (fpu (F_DIV, FMT_S, 3, 0, 1, 2)) == 0);
+  CHECK (fs (3) == 2.8f);
+
+  setfs (1, 4.0f);
+  CHECK (exec (fpu (F_SQRT, FMT_S, 3, 0, 1, 0)) == 0);
+  CHECK (fs (3) == 2.0f);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V single precision sign injection")
+{
+  /* The three sign injection forms take the magnitude from the first source
+     and the sign from the second, negated or exclusive-ored.  */
+  setfs (1, -2.5f);
+  setfs (2, 1.0f);
+
+  CHECK (exec (fpu (F_SGNJ, FMT_S, 3, 0, 1, 2)) == 0);
+  CHECK (fs (3) == 2.5f);
+  CHECK (fbox (3) == -1);
+
+  CHECK (exec (fpu (F_SGNJ, FMT_S, 3, 1, 1, 2)) == 0);
+  CHECK (fs (3) == -2.5f);
+
+  CHECK (exec (fpu (F_SGNJ, FMT_S, 3, 2, 1, 2)) == 0);
+  CHECK (fs (3) == -2.5f);
+
+  setfs (2, -1.0f);
+  CHECK (exec (fpu (F_SGNJ, FMT_S, 3, 2, 1, 2)) == 0);
+  CHECK (fs (3) == 2.5f);
+
+  /* The rest of the function field is unassigned.  */
+  CHECK (exec (fpu (F_SGNJ, FMT_S, 3, 3, 1, 2)) == TRAP_ILLEG);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture,
+		   "RISC-V single precision minimum and maximum")
+{
+  setfs (1, 3.5f);
+  setfs (2, 1.25f);
+
+  CHECK (exec (fpu (F_MINMAX, FMT_S, 3, 0, 1, 2)) == 0);
+  CHECK (fs (3) == 1.25f);
+  CHECK (fbox (3) == -1);
+
+  CHECK (exec (fpu (F_MINMAX, FMT_S, 3, 1, 1, 2)) == 0);
+  CHECK (fs (3) == 3.5f);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V single precision comparisons")
+{
+  /* The comparisons write an integer register, so a program branches on
+     them like any other test.  */
+  setfs (1, 1.0f);
+  setfs (2, 2.0f);
+
+  CHECK (exec (fpu (F_CMP, FMT_S, 3, 0, 1, 2)) == 0); /* less or equal */
+  CHECK (get (3) == 1);
+  CHECK (exec (fpu (F_CMP, FMT_S, 3, 1, 1, 2)) == 0); /* less */
+  CHECK (get (3) == 1);
+  CHECK (exec (fpu (F_CMP, FMT_S, 3, 2, 1, 2)) == 0); /* equal */
+  CHECK (get (3) == 0);
+
+  setfs (2, 1.0f);
+  CHECK (exec (fpu (F_CMP, FMT_S, 3, 0, 1, 2)) == 0);
+  CHECK (get (3) == 1);
+  CHECK (exec (fpu (F_CMP, FMT_S, 3, 1, 1, 2)) == 0);
+  CHECK (get (3) == 0);
+  CHECK (exec (fpu (F_CMP, FMT_S, 3, 2, 1, 2)) == 0);
+  CHECK (get (3) == 1);
+
+  CHECK (exec (fpu (F_CMP, FMT_S, 3, 3, 1, 2)) == TRAP_ILLEG);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V single precision conversions")
+{
+  /* Both directions between an integer register and a floating point one,
+     signed and unsigned.  */
+  setfs (1, -3.75f);
+
+  CHECK (exec (fpu (F_CVT_W, FMT_S, 3, 0, 1, 0)) == 0);
+  CHECK (get (3) == (uint32) -3); /* rounds towards zero */
+
+  setfs (1, 3.75f);
+  CHECK (exec (fpu (F_CVT_W, FMT_S, 3, 0, 1, 1)) == 0);
+  CHECK (get (3) == 3);
+
+  set (1, (uint32) -5);
+  CHECK (exec (fpu (F_CVT_F, FMT_S, 3, 0, 1, 0)) == 0);
+  CHECK (fs (3) == -5.0f);
+  CHECK (fbox (3) == -1);
+
+  CHECK (exec (fpu (F_CVT_F, FMT_S, 3, 0, 1, 1)) == 0);
+  CHECK (fs (3) == 4294967296.0f - 5.0f);
+
+  /* The rest of the source field is unassigned in both directions.  */
+  CHECK (exec (fpu (F_CVT_W, FMT_S, 3, 0, 1, 2)) == TRAP_ILLEG);
+  CHECK (exec (fpu (F_CVT_F, FMT_S, 3, 0, 1, 2)) == TRAP_ILLEG);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V a value moves between the files")
+{
+  /* The move instructions carry the bits across without converting them.  */
+  fsi (1) = 0x40490fdb;
+
+  CHECK (exec (fpu (F_MV_X, FMT_S, 3, 0, 1, 0)) == 0);
+  CHECK (get (3) == 0x40490fdb);
+
+  set (1, 0x3f800000);
+  CHECK (exec (fpu (F_MV_F, FMT_S, 3, 0, 1, 0)) == 0);
+  CHECK (fs (3) == 1.0f);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V a value is classified")
+{
+  /* fclass reports what kind of value a register holds as a one-hot word,
+     with the bit numbers of the classification table.  */
+  struct
+  {
+    float32 value;
+    uint32 bit;
+  } cases[] = {
+    { -1.0f, 1 },
+    { 1.0f, 6 },
+    { -0.0f, 3 },
+    { 0.0f, 4 },
+  };
+
+  for (auto c : cases)
+    {
+      INFO ("bit " << c.bit);
+      setfs (1, c.value);
+      CHECK (exec (fpu (F_MV_X, FMT_S, 3, 1, 1, 0)) == 0);
+      CHECK (get (3) == (1u << c.bit));
+    }
+
+  setfs (1, std::numeric_limits<float>::infinity ());
+  CHECK (exec (fpu (F_MV_X, FMT_S, 3, 1, 1, 0)) == 0);
+  CHECK (get (3) == (1u << 7));
+
+  setfs (1, -std::numeric_limits<float>::infinity ());
+  CHECK (exec (fpu (F_MV_X, FMT_S, 3, 1, 1, 0)) == 0);
+  CHECK (get (3) == (1u << 0));
+
+  /* Bit 8 is a signalling and bit 9 a quiet value which is not a number.  */
+  setfs (1, std::numeric_limits<float>::quiet_NaN ());
+  CHECK (exec (fpu (F_MV_X, FMT_S, 3, 1, 1, 0)) == 0);
+  CHECK (get (3) == (1u << 9));
+
+  fsi (1) = 0x7f800001; /* a signalling one: the top mantissa bit clear */
+  fbox (1) = -1;
+  CHECK (exec (fpu (F_MV_X, FMT_S, 3, 1, 1, 0)) == 0);
+  CHECK (get (3) == (1u << 8));
+
+  /* And a subnormal, which the exponent of zero and a non-zero mantissa
+     make.  */
+  fsi (1) = 0x00000001;
+  fbox (1) = -1;
+  CHECK (exec (fpu (F_MV_X, FMT_S, 3, 1, 1, 0)) == 0);
+  CHECK (get (3) == (1u << 5));
+
+  fsi (1) = 0x80000001;
+  fbox (1) = -1;
+  CHECK (exec (fpu (F_MV_X, FMT_S, 3, 1, 1, 0)) == 0);
+  CHECK (get (3) == (1u << 2));
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the floating point loads and stores")
+{
+  /* A single precision load boxes the value and a double one fills both
+     halves.  */
+  sis_tests::flatmem_poke (0x40, 0x3f800000);
+  sis_tests::flatmem_poke (0x44, 0x40000000);
+  set (1, 0x40);
+
+  CHECK (exec (itype (OP_FLOAD, 2, LW, 1, 0)) == 0);
+  CHECK (fs (2) == 1.0f);
+  CHECK (fbox (2) == -1);
+
+  CHECK (exec (itype (OP_FLOAD, 2, LD, 1, 0)) == 0);
+  CHECK (fsi (2) == 0x3f800000);
+  CHECK (fbox (2) == 0x40000000);
+
+  /* And back out again.  */
+  setfs (3, 2.5f);
+  set (1, 0x80);
+  CHECK (exec (stype (OP_FSW, SW, 1, 3, 0)) == 0);
+  CHECK (sis_tests::flatmem_peek (0x80) == 0x40200000);
+
+  CHECK (exec (stype (OP_FSW, LD, 1, 2, 0)) == 0);
+  CHECK (sis_tests::flatmem_peek (0x80) == 0x3f800000);
+  CHECK (sis_tests::flatmem_peek (0x84) == 0x40000000);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture,
+		   "RISC-V a floating point access must be aligned")
+{
+  /* A single precision access needs a word and a double one needs a double
+     word, and each reports the address it refused.  */
+  set (1, 0x42);
+  setfs (2, 1.0f);
+
+  CHECK (exec (itype (OP_FLOAD, 2, LW, 1, 0)) == TRAP_LMALI);
+  CHECK (sregs[0].wpaddress == 0x42);
+  CHECK (exec (stype (OP_FSW, SW, 1, 2, 0)) == TRAP_SMALI);
+
+  set (1, 0x44);
+  CHECK (exec (itype (OP_FLOAD, 2, LD, 1, 0)) == TRAP_LMALI);
+  CHECK (exec (stype (OP_FSW, LD, 1, 2, 0)) == TRAP_SMALI);
+
+  /* And a word outside memory is an access fault.  */
+  set (1, sis_tests::FLATMEM_SIZE);
+  CHECK (exec (itype (OP_FLOAD, 2, LW, 1, 0)) == TRAP_LEXC);
+  CHECK (exec (itype (OP_FLOAD, 2, LD, 1, 0)) == TRAP_LEXC);
+  CHECK (exec (stype (OP_FSW, SW, 1, 2, 0)) == TRAP_SEXC);
+  CHECK (exec (stype (OP_FSW, LD, 1, 2, 0)) == TRAP_SEXC);
+
+  /* The unassigned widths are illegal.  */
+  set (1, 0x40);
+  CHECK (exec (itype (OP_FLOAD, 2, LB, 1, 0)) == TRAP_ILLEG);
+  CHECK (exec (stype (OP_FSW, SB, 1, 2, 0)) == TRAP_ILLEG);
 }
