@@ -41,6 +41,7 @@
 #include "sis.h"
 #include "sisio.h"
 
+#include "erc32_cfg.h"
 #include "erc32_error.h"
 #include "erc32_mec.h"
 #include "erc32_timer.h"
@@ -123,28 +124,7 @@
 /* MEC registers */
 
 static char fname[256];
-static uint32 mec_ssa[2]; /* Write protection start address */
-static uint32 mec_sea[2]; /* Write protection end address */
-static uint32 mec_wpr[2]; /* Write protection control fields */
-static uint32 mec_mcr;	  /* MEC control register */
-static uint32 mec_memcfg; /* Memory control register */
-static uint32 mec_wcr;	  /* MEC waitstate register */
-static uint32 mec_iocr;	  /* MEC IO control register */
 static uint32 posted_irq;
-
-/* Memory support variables */
-
-static uint32 mem_ramr_ws;   /* RAM read waitstates */
-static uint32 mem_ramw_ws;   /* RAM write waitstates */
-static uint32 mem_romr_ws;   /* ROM read waitstates */
-static uint32 mem_romw_ws;   /* ROM write waitstates */
-static uint32 mem_ramstart;  /* RAM start */
-static uint32 mem_ramend;    /* RAM end */
-static uint32 mem_rammask;   /* RAM address mask */
-static uint32 mem_ramsz;     /* RAM size */
-static uint32 mem_romsz;     /* ROM size */
-static uint32 mem_accprot;   /* RAM write protection enabled */
-static uint32 mem_blockprot; /* RAM block write protection enabled */
 
 /* UART support variables */
 
@@ -173,10 +153,6 @@ static uint32 uarta_data, uartb_data;
 /* Forward declarations */
 
 static void mecparerror (void);
-static bool error_write_enabled (void);
-static void decode_memcfg (void);
-static void decode_wcr (void);
-static void decode_mcr (void);
 static void close_port (void);
 static void mec_reset (void);
 static void mec_intack (int32 level, int32 cpu);
@@ -202,62 +178,115 @@ static char *get_mem_ptr (uint32 addr, uint32 size);
 static void store_bytes (char *mem, uint32 waddr, uint32 *data, int sz,
 			 int32 *ws);
 
-/* The environment the MEC runs against in the real board: its dependencies
-   are the simulator globals.  */
+/* The environment every MEC subsystem runs against in the real board: its
+   dependencies are the simulator globals.  The methods are declared here and
+   defined after the subsystems, because several of them reach back into a
+   subsystem which cannot be constructed until this class is complete.  */
 struct RealEnv
 {
-  bool
-  Verbose ()
-  {
-    return sis_verbose != 0;
-  }
-  int &
-  Irl ()
-  {
-    return ext_irl[0];
-  }
-  void
-  ReportError ()
-  {
-    mecparerror ();
-  }
-  void
-  Irq (int level)
-  {
-    mec_irq (level);
-  }
-  void
-  SysReset ()
-  {
-    sys_reset ();
-  }
-  void
-  SysHalt ()
-  {
-    sys_halt ();
-  }
-  bool
-  ErrorWriteEnabled ()
-  {
-    return error_write_enabled ();
-  }
-  void
-  Log (const char *msg)
-  {
-    fputs (msg, stdout);
-  }
+  bool Verbose ();
+  int &Irl ();
+  void ReportError ();
+  void Irq (int level);
+  void SysReset ();
+  void SysHalt ();
+  bool ErrorWriteEnabled ();
+  bool Rom8 ();
+  void SetErrorMask (uint32 mcr);
+  void SoftwareReset ();
+  void EnterPowerDown ();
+  void StartPowerDownTiming ();
+  void Log (const char *msg);
 };
+
+/* The RAM window of the ERC32 board.  The MEC decodes its size from a
+   register, but not its position.  */
+static constexpr erc32::MemoryGeometry ram_geometry = { .ram_start = RAM_START,
+							.ram_end = RAM_END,
+							.ram_mask = RAM_MASK };
 
 static RealEnv real_env;
 static erc32::Mec<RealEnv> mec (real_env);
 static erc32::ErrorHandler<RealEnv> error_handler (real_env);
+static erc32::Config<RealEnv> cfg (real_env, ram_geometry);
 
-/* The interrupt controller and the error handler each depend on the other,
-   so one of the two links through a function defined after both.  */
-static bool
-error_write_enabled ()
+bool
+RealEnv::Verbose ()
+{
+  return sis_verbose != 0;
+}
+
+int &
+RealEnv::Irl ()
+{
+  return ext_irl[0];
+}
+
+void
+RealEnv::ReportError ()
+{
+  mecparerror ();
+}
+
+void
+RealEnv::Irq (int level)
+{
+  mec_irq (level);
+}
+
+void
+RealEnv::SysReset ()
+{
+  sys_reset ();
+}
+
+void
+RealEnv::SysHalt ()
+{
+  sys_halt ();
+}
+
+void
+RealEnv::Log (const char *msg)
+{
+  fputs (msg, stdout);
+}
+
+bool
+RealEnv::ErrorWriteEnabled ()
 {
   return (mec.tcr () & 0x100000u) != 0;
+}
+
+bool
+RealEnv::Rom8 ()
+{
+  return rom8 != 0;
+}
+
+void
+RealEnv::SetErrorMask (uint32 mcr)
+{
+  error_handler.SetControl (mcr);
+}
+
+void
+RealEnv::SoftwareReset ()
+{
+  sys_reset ();
+  error_handler.SetResetCause (erc32::kResetSoftware);
+}
+
+void
+RealEnv::EnterPowerDown ()
+{
+  sregs->pwd_mode = 1;
+}
+
+void
+RealEnv::StartPowerDownTiming ()
+{
+  sregs->pwdstart = sregs->simtime;
 }
 
 /* The environment a timer runs against in the real board.  THUNK is the
@@ -360,63 +389,6 @@ error_mode (uint32 pc)
   error_handler.IuErrorMode ();
 }
 
-/* Check memory settings */
-
-static void
-decode_memcfg ()
-{
-  if (rom8)
-    mec_memcfg &= ~0x20000;
-  else
-    mec_memcfg |= 0x20000;
-
-  mem_ramsz = (1024 * 1024) << ((mec_memcfg >> 10) & 7);
-  mem_romsz = (2 * 1024 * 1024) << ((mec_memcfg >> 18) & 7);
-
-  mem_ramstart = RAM_START;
-  mem_ramend = RAM_END;
-  mem_rammask = RAM_MASK;
-
-  if (sis_verbose)
-    printf ("RAM start: 0x%x, RAM size: %d K, ROM size: %d K\n", mem_ramstart,
-	    mem_ramsz >> 10, mem_romsz >> 10);
-}
-
-static void
-decode_wcr ()
-{
-  mem_ramr_ws = mec_wcr & 3;
-  mem_ramw_ws = (mec_wcr >> 2) & 3;
-  mem_romr_ws = (mec_wcr >> 4) & 0x0f;
-  if (rom8)
-    {
-      if (mem_romr_ws > 0)
-	mem_romr_ws--;
-      mem_romr_ws = 5 + (4 * mem_romr_ws);
-    }
-  mem_romw_ws = (mec_wcr >> 8) & 0x0f;
-  if (sis_verbose)
-    printf ("Waitstates = RAM read: %d, RAM write: %d, ROM read: %d, ROM "
-	    "write: %d\n",
-	    mem_ramr_ws, mem_ramw_ws, mem_romr_ws, mem_romw_ws);
-}
-
-static void
-decode_mcr ()
-{
-  mem_accprot = (mec_wpr[0] | mec_wpr[1]);
-  mem_blockprot = (mec_mcr >> 3) & 1;
-  error_handler.SetControl (mec_mcr);
-  if (sis_verbose && mem_accprot)
-    printf ("Memory block write protection enabled\n");
-  if (mec_mcr & 0x08000)
-    mecparerror ();
-  if (sis_verbose && (mec_mcr & 2))
-    printf ("Software reset enabled\n");
-  if (sis_verbose && (mec_mcr & 1))
-    printf ("Power-down mode enabled\n");
-}
-
 /* Flush ports when simulator stops */
 
 static void
@@ -445,20 +417,9 @@ exit_sim ()
 static void
 mec_reset ()
 {
-  int i;
-
-  for (i = 0; i < 2; i++)
-    mec_ssa[i] = mec_sea[i] = mec_wpr[i] = 0;
-  mec_mcr = 0x01350014;
-  mec_iocr = 0;
   error_handler.Reset ();
   mec.ResetInterrupts ();
-  mec_memcfg = 0x10000;
-  mec_wcr = -1;
-
-  decode_memcfg ();
-  decode_wcr ();
-  decode_mcr ();
+  cfg.Reset ();
 
   posted_irq = 0;
   wnuma = wnumb = 0;
@@ -499,28 +460,28 @@ mec_read (uint32 addr, uint32 asi, uint32 *data)
     {
 
     case MEC_MCR: /* 0x00 */
-      *data = mec_mcr;
+      *data = cfg.mcr ();
       break;
 
     case MEC_MEMCFG: /* 0x10 */
-      *data = mec_memcfg;
+      *data = cfg.memcfg ();
       break;
 
-    case MEC_IOCR:
-      *data = mec_iocr; /* 0x14 */
+    case MEC_IOCR: /* 0x14 */
+      *data = cfg.iocr ();
       break;
 
     case MEC_SSA1: /* 0x20 */
-      *data = mec_ssa[0] | (mec_wpr[0] << 23);
+      *data = cfg.ReadSegmentBase (0);
       break;
     case MEC_SEA1: /* 0x24 */
-      *data = mec_sea[0];
+      *data = cfg.seg_end (0);
       break;
     case MEC_SSA2: /* 0x28 */
-      *data = mec_ssa[1] | (mec_wpr[1] << 23);
+      *data = cfg.ReadSegmentBase (1);
       break;
     case MEC_SEA2: /* 0x2c */
-      *data = mec_sea[1];
+      *data = cfg.seg_end (1);
       break;
 
     case MEC_ISR: /* 0x44 */
@@ -601,58 +562,29 @@ mec_write (uint32 addr, uint32 data)
   switch (addr & 0x0ff)
     {
 
-    case MEC_MCR:
-      mec_mcr = data;
-      decode_mcr ();
-      if (mec_mcr & 0x08000)
-	mecparerror ();
+    case MEC_MCR: /* 0x00 */
+      cfg.WriteMcr (data);
       break;
 
-    case MEC_SFR:
-      if (mec_mcr & 0x2)
-	{
-	  sys_reset ();
-	  error_handler.SetResetCause (erc32::kResetSoftware);
-	  if (sis_verbose)
-	    printf (" Software reset issued\n");
-	}
+    case MEC_SFR: /* 0x04 */
+      cfg.WriteSoftwareReset ();
       break;
 
-    case MEC_IOCR:
-      mec_iocr = data;
-      if (mec_iocr & 0xC0C0C0C0)
-	mecparerror ();
+    case MEC_IOCR: /* 0x14 */
+      cfg.WriteIocr (data);
       break;
 
     case MEC_SSA1: /* 0x20 */
-      if (data & 0xFE000000)
-	mecparerror ();
-      mec_ssa[0] = data & 0x7fffff;
-      mec_wpr[0] = (data >> 23) & 0x03;
-      mem_accprot = mec_wpr[0] || mec_wpr[1];
-      if (sis_verbose && mec_wpr[0])
-	printf ("Segment 1 memory protection enabled (0x02%06x - 0x02%06x)\n",
-		mec_ssa[0] << 2, mec_sea[0] << 2);
+      cfg.WriteSegmentBase (0, data);
       break;
     case MEC_SEA1: /* 0x24 */
-      if (data & 0xFF800000)
-	mecparerror ();
-      mec_sea[0] = data & 0x7fffff;
+      cfg.WriteSegmentEnd (0, data);
       break;
     case MEC_SSA2: /* 0x28 */
-      if (data & 0xFE000000)
-	mecparerror ();
-      mec_ssa[1] = data & 0x7fffff;
-      mec_wpr[1] = (data >> 23) & 0x03;
-      mem_accprot = mec_wpr[0] || mec_wpr[1];
-      if (sis_verbose && mec_wpr[1])
-	printf ("Segment 2 memory protection enabled (0x02%06x - 0x02%06x)\n",
-		mec_ssa[1] << 2, mec_sea[1] << 2);
+      cfg.WriteSegmentBase (1, data);
       break;
     case MEC_SEA2: /* 0x2c */
-      if (data & 0xFF800000)
-	mecparerror ();
-      mec_sea[1] = data & 0x7fffff;
+      cfg.WriteSegmentEnd (1, data);
       break;
 
     case MEC_UARTA:
@@ -713,17 +645,11 @@ mec_write (uint32 addr, uint32 data)
       break;
 
     case MEC_MEMCFG: /* 0x10 */
-      if (data & 0xC0E08000)
-	mecparerror ();
-      mec_memcfg = data;
-      decode_memcfg ();
-      if (mec_memcfg & 0xc0e08000)
-	mecparerror ();
+      cfg.WriteMemcfg (data);
       break;
 
     case MEC_WCR: /* 0x18 */
-      mec_wcr = data;
-      decode_wcr ();
+      cfg.WriteWcr (data);
       break;
 
     case MEC_ERSR: /* 0xB0 */
@@ -742,10 +668,8 @@ mec_write (uint32 addr, uint32 data)
       wdog.WriteTrapDoor ();
       break;
 
-    case MEC_PWDR:
-      if (mec_mcr & 1)
-	sregs->pwd_mode = 1;
-      sregs->pwdstart = sregs->simtime;
+    case MEC_PWDR: /* 0x08 */
+      cfg.WritePowerDown ();
       break;
 
     default:
@@ -1306,7 +1230,7 @@ store_bytes (char *mem, uint32 waddr, uint32 *data, int32 sz, int32 *ws)
       waddr ^= 3;
 #endif
       mem[waddr] = *data & 0x0ff;
-      *ws = mem_ramw_ws + 3;
+      *ws = cfg.ram_write_ws () + 3;
     }
   else if (sz == 1)
     {
@@ -1314,17 +1238,17 @@ store_bytes (char *mem, uint32 waddr, uint32 *data, int32 sz, int32 *ws)
       waddr ^= 2;
 #endif
       *((uint16 *) &mem[waddr]) = *data & 0x0ffff;
-      *ws = mem_ramw_ws + 3;
+      *ws = cfg.ram_write_ws () + 3;
     }
   else if (sz == 2)
     {
       memcpy (&mem[waddr], data, 4);
-      *ws = mem_ramw_ws;
+      *ws = cfg.ram_write_ws ();
     }
   else
     {
       memcpy (&mem[waddr], data, 8);
-      *ws = 2 * mem_ramw_ws + STD_WS;
+      *ws = 2 * cfg.ram_write_ws () + STD_WS;
     }
 }
 
@@ -1334,16 +1258,17 @@ static int
 memory_iread (uint32 addr, uint32 *data, int32 *ws)
 {
   uint32 asi;
-  if ((addr >= mem_ramstart) && (addr < (mem_ramstart + mem_ramsz)))
+  if ((addr >= cfg.ram_start ()) &&
+      (addr < (cfg.ram_start () + cfg.ram_size ())))
     {
-      memcpy (data, &ramb[addr & mem_rammask], 4);
-      *ws = mem_ramr_ws;
+      memcpy (data, &ramb[addr & cfg.ram_mask ()], 4);
+      *ws = cfg.ram_read_ws ();
       return 0;
     }
-  else if (addr < mem_romsz)
+  else if (addr < cfg.rom_size ())
     {
       memcpy (data, &romb[addr], 4);
-      *ws = mem_romr_ws;
+      *ws = cfg.rom_read_ws ();
       return 0;
     }
 
@@ -1364,10 +1289,11 @@ memory_read (uint32 addr, uint32 *data, int32 *ws)
   int32 mexc;
   int32 asi;
 
-  if ((addr >= mem_ramstart) && (addr < (mem_ramstart + mem_ramsz)))
+  if ((addr >= cfg.ram_start ()) &&
+      (addr < (cfg.ram_start () + cfg.ram_size ())))
     {
-      memcpy (data, &ramb[addr & mem_rammask], 4);
-      *ws = mem_ramr_ws;
+      memcpy (data, &ramb[addr & cfg.ram_mask ()], 4);
+      *ws = cfg.ram_read_ws ();
       return 0;
     }
   else if ((addr >= MEC_START) && (addr < MEC_END))
@@ -1385,10 +1311,10 @@ memory_read (uint32 addr, uint32 *data, int32 *ws)
 	}
       return mexc;
     }
-  else if (addr < mem_romsz)
+  else if (addr < cfg.rom_size ())
     {
       memcpy (data, &romb[addr], 4);
-      *ws = mem_romr_ws;
+      *ws = cfg.rom_read_ws ();
       return 0;
     }
 
@@ -1412,22 +1338,25 @@ memory_write (uint32 addr, uint32 *data, int32 sz, int32 *ws)
   int wphit[2];
   int asi;
 
-  if ((addr >= mem_ramstart) && (addr < (mem_ramstart + mem_ramsz)))
+  if ((addr >= cfg.ram_start ()) &&
+      (addr < (cfg.ram_start () + cfg.ram_size ())))
     {
-      if (mem_accprot)
+      if (cfg.access_protect ())
 	{
 
 	  waddr = (addr & 0x7fffff) >> 2;
 	  asi = (sregs->psr & 0x080) ? 11 : 10;
 	  for (i = 0; i < 2; i++)
 	    wphit[i] =
-		(((asi == 0xa) && (mec_wpr[i] & 1)) ||
-		 ((asi == 0xb) && (mec_wpr[i] & 2))) &&
-		((waddr >= mec_ssa[i]) && ((waddr | (sz == 3)) < mec_sea[i]));
+		(((asi == 0xa) && (cfg.seg_mode (i) & erc32::kSegUser)) ||
+		 ((asi == 0xb) &&
+		  (cfg.seg_mode (i) & erc32::kSegSupervisor))) &&
+		((waddr >= cfg.seg_base (i)) &&
+		 ((waddr | (sz == 3)) < cfg.seg_end (i)));
 
-	  if (((mem_blockprot) && (wphit[0] || wphit[1])) ||
-	      ((!mem_blockprot) &&
-	       !((mec_wpr[0] && wphit[0]) || (mec_wpr[1] && wphit[1]))))
+	  if (((cfg.block_protect ()) && (wphit[0] || wphit[1])) ||
+	      ((!cfg.block_protect ()) && !((cfg.seg_mode (0) && wphit[0]) ||
+					    (cfg.seg_mode (1) && wphit[1]))))
 	    {
 	      if (sis_verbose)
 		printf ("Memory access protection error at 0x%08x\n", addr);
@@ -1436,7 +1365,7 @@ memory_write (uint32 addr, uint32 *data, int32 sz, int32 *ws)
 	      return 1;
 	    }
 	}
-      waddr = addr & mem_rammask;
+      waddr = addr & cfg.ram_mask ();
       store_bytes (ramb, waddr, data, sz, ws);
       return 0;
     }
@@ -1461,14 +1390,14 @@ memory_write (uint32 addr, uint32 *data, int32 sz, int32 *ws)
 	}
       return mexc;
     }
-  else if ((addr < mem_romsz) && (mec_memcfg & 0x10000) && (wrp) &&
-	   (((mec_memcfg & 0x20000) && (sz > 1)) ||
-	    (!(mec_memcfg & 0x20000) && (sz == 0))))
+  else if ((addr < cfg.rom_size ()) && cfg.prom_write () && (wrp) &&
+	   ((cfg.prom_40bit () && (sz > 1)) ||
+	    (!cfg.prom_40bit () && (sz == 0))))
     {
 
-      *ws = mem_romw_ws + 1;
+      *ws = cfg.rom_write_ws () + 1;
       if (sz == 3)
-	*ws += mem_romw_ws + STD_WS;
+	*ws += cfg.rom_write_ws () + STD_WS;
       store_bytes (romb, addr, data, sz, ws);
       return 0;
     }
@@ -1486,9 +1415,9 @@ get_mem_ptr (uint32 addr, uint32 size)
     {
       return &romb[addr];
     }
-  else if ((addr >= mem_ramstart) && ((addr + size) < mem_ramend))
+  else if ((addr >= cfg.ram_start ()) && ((addr + size) < cfg.ram_end ()))
     {
-      return &ramb[addr & mem_rammask];
+      return &ramb[addr & cfg.ram_mask ()];
     }
 
   return (char *) -1;
@@ -1538,7 +1467,7 @@ boot_init (void)
   sregs->psr = 0x110010e0;
   sregs->r[30] = RAM_END;
   sregs->r[14] = sregs->r[30] - 96 * 4;
-  mec_mcr |= 1; /* power-down enabled */
+  cfg.EnablePowerDown ();
 }
 
 const struct memsys erc32sys = {
