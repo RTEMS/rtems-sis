@@ -21,6 +21,7 @@
 #include "config.h"
 #include "sis.h"
 
+#include "erc32_error.h"
 #include "erc32_mec.h"
 #include "erc32_timer.h"
 
@@ -66,6 +67,7 @@ const uint32 R_GPT_SCALER = 0x08c;
 const uint32 R_TIMER_CTRL = 0x098;
 const uint32 R_SFSR = 0x0a0;
 const uint32 R_FFAR = 0x0a4;
+const uint32 R_ERSR = 0x0b0;
 const uint32 R_TCR = 0x0d0;
 const uint32 R_UARTA = 0x0e0;
 const uint32 R_UARTB = 0x0e4;
@@ -103,6 +105,7 @@ constexpr erc32::TimerSpec GPT_SPEC = { .scaler_mask = 0x0ffff,
    MEC test control register.  */
 const int32 SZ_WORD = 2;
 const uint32 TCR_IFR_EN = 0x80000;
+const uint32 TCR_ERROR_WRITE_EN = 0x100000;
 
 /* The MEC error manager sends a parity or hardware error to reset, to halt,
    or to interrupt request level 1, chosen by MCR bits.  Routing it to the
@@ -184,6 +187,51 @@ struct TimerTestEnv
   WatchdogReset ()
   {
     ++resets;
+  }
+};
+
+/* A test environment for the error handler template: it owns the verbosity,
+   the interrupts raised, whether the processor was reset or halted, and
+   whether fault injection is armed, so a case drives erc32::ErrorHandler
+   with no simulator globals.  */
+struct ErrorTestEnv
+{
+  bool verbose = false;
+  bool error_write_enabled = false;
+  std::string log;
+  std::vector<int> irqs;
+  int resets = 0;
+  int halts = 0;
+
+  bool
+  Verbose ()
+  {
+    return verbose;
+  }
+  void
+  Log (const char *msg)
+  {
+    log += msg;
+  }
+  void
+  Irq (int level)
+  {
+    irqs.push_back (level);
+  }
+  void
+  SysReset ()
+  {
+    ++resets;
+  }
+  void
+  SysHalt ()
+  {
+    ++halts;
+  }
+  bool
+  ErrorWriteEnabled ()
+  {
+    return error_write_enabled;
   }
 };
 
@@ -954,6 +1002,318 @@ TEST_CASE_FIXTURE (mec_fixture, "MEC timer writes reject their reserved bits")
 
   wr (R_TIMER_CTRL, 0x10); /* not a control bit */
   CHECK ((rd (R_IPR) & (1u << 1)) != 0);
+}
+
+/* The error handler, driven in isolation.  The expectations come from the
+   TSC693E manual, section 3.17 and the register descriptions for 01F8 00A0,
+   01F8 00A4 and 01F8 00B0: the MEC control register carries one mask bit and
+   one reset-or-halt bit per error source, and an unmasked error halts by
+   default.  */
+
+TEST_CASE ("ErrorHandler resets to the values the manual documents")
+{
+  ErrorTestEnv env;
+  erc32::ErrorHandler<ErrorTestEnv> err (env);
+
+  /* No error latched, no address latched, and the fault type field all
+     ones.  */
+  CHECK (err.ersr () == 0);
+  CHECK (err.ffar () == 0);
+  CHECK (err.sfsr () == 0x078);
+}
+
+TEST_CASE ("ErrorHandler halts on an unmasked error by default")
+{
+  ErrorTestEnv env;
+  erc32::ErrorHandler<ErrorTestEnv> err (env);
+
+  /* The reset value of the mask and reset-or-halt bits is zero, which the
+     manual describes as an error leading to a processor halt.  */
+  err.IuErrorMode ();
+
+  CHECK (env.halts == 1);
+  CHECK (env.resets == 0);
+  CHECK (env.irqs.empty ());
+  CHECK (err.ersr () == (erc32::kErrIuErrorMode | erc32::kErrHalted));
+}
+
+TEST_CASE ("ErrorHandler resets when the control register says so")
+{
+  ErrorTestEnv env;
+  erc32::ErrorHandler<ErrorTestEnv> err (env);
+
+  /* RHIUEM, bit 6 of the control register, turns the halt into a reset.  The
+     register is left holding the reset cause and nothing else.  */
+  err.SetControl (1u << 6);
+  err.IuErrorMode ();
+
+  CHECK (env.resets == 1);
+  CHECK (env.halts == 0);
+  CHECK (err.ersr () == erc32::kResetError);
+}
+
+TEST_CASE ("ErrorHandler interrupts when the error is masked")
+{
+  ErrorTestEnv env;
+  erc32::ErrorHandler<ErrorTestEnv> err (env);
+
+  /* IUEMMSK, bit 5, masks the error.  A masked error raises the masked
+     hardware error interrupt instead of stopping the processor, and stays
+     latched.  */
+  err.SetControl (1u << 5);
+  err.IuErrorMode ();
+
+  CHECK (env.halts == 0);
+  CHECK (env.resets == 0);
+  REQUIRE (env.irqs.size () == 1);
+  CHECK (env.irqs[0] == erc32::kMaskedErrorLevel);
+  CHECK (err.ersr () == erc32::kErrIuErrorMode);
+}
+
+TEST_CASE ("ErrorHandler acts on every source the MEC handles")
+{
+  /* The five error sources the manual gives the MEC an action for, each with
+     the position of its mask bit in the control register.  */
+  struct
+  {
+    uint32 bit;
+    unsigned mask_shift;
+  } sources[] = { { erc32::kErrIuErrorMode, 5 },
+		  { erc32::kErrIuHwError, 7 },
+		  { erc32::kErrIuCmpError, 9 },
+		  { erc32::kErrFpuCmpError, 11 },
+		  { erc32::kErrMecHwError, 13 } };
+
+  for (auto src : sources)
+    {
+      ErrorTestEnv env;
+      env.error_write_enabled = true;
+      erc32::ErrorHandler<ErrorTestEnv> err (env);
+
+      /* Unmasked, the source halts.  */
+      err.WriteErsr (src.bit);
+      CHECK (env.halts == 1);
+
+      /* Masked, the same source interrupts instead.  */
+      ErrorTestEnv masked;
+      masked.error_write_enabled = true;
+      erc32::ErrorHandler<ErrorTestEnv> err2 (masked);
+      err2.SetControl (1u << src.mask_shift);
+      err2.WriteErsr (src.bit);
+      CHECK (masked.halts == 0);
+      REQUIRE (masked.irqs.size () == 1);
+      CHECK (masked.irqs[0] == erc32::kMaskedErrorLevel);
+
+      /* Unmasked and told to reset, it resets.  */
+      ErrorTestEnv resetting;
+      resetting.error_write_enabled = true;
+      erc32::ErrorHandler<ErrorTestEnv> err3 (resetting);
+      err3.SetControl (2u << src.mask_shift);
+      err3.WriteErsr (src.bit);
+      CHECK (resetting.resets == 1);
+      CHECK (err3.ersr () == erc32::kResetError);
+    }
+}
+
+TEST_CASE ("ErrorHandler takes no action on an FPU hardware error")
+{
+  ErrorTestEnv env;
+  env.error_write_enabled = true;
+  erc32::ErrorHandler<ErrorTestEnv> err (env);
+
+  /* FPUHE is the one error bit the manual marks as no MEC action.  It
+     latches and nothing else happens.  */
+  err.WriteErsr (erc32::kErrFpuHwError);
+
+  CHECK (env.halts == 0);
+  CHECK (env.resets == 0);
+  CHECK (env.irqs.empty ());
+  CHECK (err.ersr () == erc32::kErrFpuHwError);
+}
+
+TEST_CASE ("ErrorHandler leaves a later source the cleared register")
+{
+  ErrorTestEnv env;
+  env.error_write_enabled = true;
+  erc32::ErrorHandler<ErrorTestEnv> err (env);
+
+  /* A reset clears the register, so the second of two latched errors finds
+     nothing left to act on.  */
+  err.SetControl (2u << 5); /* the IU error mode source resets */
+  err.WriteErsr (erc32::kErrIuErrorMode | erc32::kErrMecHwError);
+
+  CHECK (env.resets == 1);
+  CHECK (env.halts == 0);
+  CHECK (err.ersr () == erc32::kResetError);
+}
+
+TEST_CASE ("ErrorHandler names the error it acted on")
+{
+  ErrorTestEnv env;
+  env.verbose = true;
+  erc32::ErrorHandler<ErrorTestEnv> err (env);
+
+  err.IuErrorMode ();
+  CHECK (env.log == "Error manager halt - IU in error mode\n");
+
+  ErrorTestEnv resetting;
+  resetting.verbose = true;
+  erc32::ErrorHandler<ErrorTestEnv> err2 (resetting);
+  err2.SetControl (2u << 13); /* the MEC hardware error source resets */
+  err2.MecHwError ();
+  CHECK (resetting.log == "Error manager reset - MEC hardware error\n");
+}
+
+TEST_CASE ("ErrorHandler stays quiet when not verbose")
+{
+  ErrorTestEnv env;
+  erc32::ErrorHandler<ErrorTestEnv> err (env);
+
+  err.MecHwError ();
+  CHECK (env.log.empty ());
+}
+
+TEST_CASE ("ErrorHandler writes the error bits only in test mode")
+{
+  ErrorTestEnv env;
+  erc32::ErrorHandler<ErrorTestEnv> err (env);
+
+  /* The manual makes bits 5-0 writable only while the error write enable bit
+     of the test control register is set.  Without it the write is dropped
+     and no error is injected.  */
+  err.WriteErsr (erc32::kErrIuErrorMode);
+  CHECK (err.ersr () == 0);
+  CHECK (env.halts == 0);
+
+  /* With it, the write injects the error and the handler acts on it.  */
+  env.error_write_enabled = true;
+  err.WriteErsr (erc32::kErrIuErrorMode);
+  CHECK (env.halts == 1);
+  CHECK (err.ersr () == (erc32::kErrIuErrorMode | erc32::kErrHalted));
+}
+
+TEST_CASE ("ErrorHandler keeps the read-only fields across a write")
+{
+  ErrorTestEnv env;
+  erc32::ErrorHandler<ErrorTestEnv> err (env);
+
+  /* The reset cause is read only, so it survives a write of the system
+     availability bit, which is not.  */
+  err.SetResetCause (erc32::kResetWatchdog);
+  err.WriteErsr (erc32::kErrSysAvailable);
+  CHECK (err.ersr () == (erc32::kResetWatchdog | erc32::kErrSysAvailable));
+
+  err.WriteErsr (0);
+  CHECK (err.ersr () == erc32::kResetWatchdog);
+}
+
+TEST_CASE ("ErrorHandler reports the reserved bits of an injected error")
+{
+  ErrorTestEnv env;
+  env.error_write_enabled = true;
+  erc32::ErrorHandler<ErrorTestEnv> err (env);
+
+  /* Bit 6 is outside the writable fields.  Writing it in test mode latches a
+     MEC hardware error, which then halts the processor.  */
+  err.WriteErsr (1u << 6);
+
+  CHECK (env.halts == 1);
+  CHECK ((err.ersr () & erc32::kErrMecHwError) != 0);
+}
+
+TEST_CASE ("ErrorHandler records a supervisor load fault")
+{
+  ErrorTestEnv env;
+  erc32::ErrorHandler<ErrorTestEnv> err (env);
+
+  /* An access to an unimplemented area under the supervisor data ASI: the
+     fault type in bits 6-3, the data fault valid bit, and the access type
+     field marking a supervisor load.  */
+  err.SetFault (erc32::kFaultUnimplemented, 0x02001234, 0xb, 1);
+
+  CHECK (err.ffar () == 0x02001234);
+  CHECK (err.sfsr () ==
+	 ((erc32::kFaultUnimplemented << 3) | erc32::kSfsrDataFaultValid |
+	  erc32::kSfsrAtSupervisor));
+}
+
+TEST_CASE ("ErrorHandler records a user store fault")
+{
+  ErrorTestEnv env;
+  erc32::ErrorHandler<ErrorTestEnv> err (env);
+
+  /* A protected-area write under the user data ASI: the access type field
+     marks a store and leaves the supervisor bit clear.  */
+  err.SetFault (erc32::kFaultProtection, 0x02005678, 0xa, 0);
+
+  CHECK (err.ffar () == 0x02005678);
+  CHECK (err.sfsr () == ((erc32::kFaultProtection << 3) |
+			 erc32::kSfsrDataFaultValid | erc32::kSfsrAtStore));
+}
+
+TEST_CASE ("ErrorHandler ignores a fault on an instruction fetch")
+{
+  ErrorTestEnv env;
+  erc32::ErrorHandler<ErrorTestEnv> err (env);
+
+  /* Only a data access latches.  An instruction fetch carries ASI 8 or 9 and
+     leaves both registers at their reset values.  */
+  err.SetFault (erc32::kFaultUnimplemented, 0x02001234, 0x9, 1);
+
+  CHECK (err.ffar () == 0);
+  CHECK (err.sfsr () == 0x078);
+}
+
+TEST_CASE ("ErrorHandler clears the fault status on any write")
+{
+  ErrorTestEnv env;
+  erc32::ErrorHandler<ErrorTestEnv> err (env);
+
+  err.SetFault (erc32::kFaultMecRegister, 0x01f8000c, 0xb, 1);
+  REQUIRE (err.sfsr () != 0x078);
+
+  /* The manual makes the data irrelevant: the register goes back to its
+     reset value.  The failing address keeps its value.  */
+  err.WriteSfsr (0x1234);
+  CHECK (err.sfsr () == 0x078);
+  CHECK (err.ffar () == 0x01f8000c);
+}
+
+TEST_CASE ("ErrorHandler reports the reserved bits of a fault status write")
+{
+  ErrorTestEnv env;
+  erc32::ErrorHandler<ErrorTestEnv> err (env);
+
+  /* Bit 11 is reserved, so writing it is a MEC hardware error and halts.  */
+  err.WriteSfsr (0x0800);
+
+  CHECK (env.halts == 1);
+  CHECK (err.sfsr () == 0x078);
+}
+
+/* The board dispatch: the same registers reached the way the processor
+   reaches them.  */
+
+TEST_CASE_FIXTURE (mec_fixture, "MEC dispatches the error registers")
+{
+  /* Route errors to interrupt level 1 so a case does not stop the
+     simulator.  */
+  wr (R_MCR, MCR_HWERR_IRQ);
+
+  CHECK (rd (R_SFSR) == 0x78);
+  CHECK (rd (R_FFAR) == 0);
+  CHECK (rd (R_ERSR) == 0);
+
+  /* Without the error write enable bit an injected error is dropped.  */
+  wr (R_ERSR, erc32::kErrMecHwError);
+  CHECK (rd (R_ERSR) == 0);
+
+  /* With it, the error is latched and raises the masked hardware error
+     interrupt.  */
+  wr (R_TCR, TCR_ERROR_WRITE_EN);
+  wr (R_ERSR, erc32::kErrMecHwError);
+  CHECK ((rd (R_ERSR) & erc32::kErrMecHwError) != 0);
+  CHECK ((rd (R_IPR) & (1u << erc32::kMaskedErrorLevel)) != 0);
 }
 
 TEST_CASE_FIXTURE (mec_fixture, "MEC configuration registers round-trip")

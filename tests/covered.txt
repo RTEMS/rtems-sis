@@ -8,6 +8,7 @@
 #
 # Keep sorted.  erc32_mec.h is a header because the ERC32 MEC is a template
 # that lives there; gcovr is told to measure it (see gcovr.cfg).
+erc32_error.h
 erc32_mec.h
 erc32_timer.h
 exec.cc
