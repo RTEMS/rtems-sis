@@ -66,17 +66,18 @@ against real descriptors the way `tests/sisio.cc` does.
 ## Where the tree stands
 
 Measured with `./waf configure --enable-coverage && ./waf`, branch metric,
-771 of 6141 arcs (13%). The totals move as headers join the filter, so compare
-per file rather than against an older total.
+763 of 5959 arcs (13%). The totals move as headers join the filter and as
+duplicated code is removed, so compare per file rather than against an older
+total.
 
 | Area | Arcs | Taken |
 |---|---|---|
 | `sparc.cc`, `riscv.cc` | 2274 | 17 |
-| `grlib.cc`, `grspw.cc`, `gr1553.cc`, `greth.cc`, `memscrub.cc`, `tap.cc` | 1071 | 0 |
+| `grlib.cc`, `grspw.cc`, `gr1553.cc`, `greth.cc`, `memscrub.cc`, `tap.cc` | 1001 | 0 |
 | `sis.cc`, `remote.cc`, `interf.cc` | 546 | 0 |
-| `erc32.cc` | 325 | 246 |
-| `leon2.cc`, `leon3.cc`, `gr740.cc`, `rv32.cc` | 353 | 0 |
-| graduated: `erc32_cfg.h`, `erc32_error.h`, `erc32_mec.h`, `erc32_timer.h`, `exec.cc`, `help.cc`, `sisio.cc` | | 100% |
+| `erc32.cc` | 227 | 211 |
+| `leon2.cc`, `leon3.cc`, `gr740.cc`, `rv32.cc` | 291 | 0 |
+| graduated: `erc32_cfg.h`, `erc32_error.h`, `erc32_mec.h`, `erc32_timer.h`, `exec.cc`, `help.cc`, `sisio.cc`, `uartport.cc` | | 100% |
 
 `func.cc` and `elf.cc` are not in the table above only because they were not
 captured in that run. Measure them before planning their step.
@@ -98,6 +99,10 @@ Done, graduated in `tests/covered.txt`:
   globals their decode used to write. The memory access path reads what they
   decode to through accessors, and asks `WriteProtected` whether a RAM write
   is allowed.
+- **`uartport.cc`** the host side of an emulated UART, shared by `erc32.cc`,
+  `leon2.cc` and `grlib.cc` rather than written once each. Not a template: it
+  is plain code taking a `struct uart_port` and tested against real
+  descriptors, the way `tests/sisio.cc` works.
 
 `erc32.cc` instantiates each of these on its single `RealEnv`, except the
 timers, which need a per-instance event thunk and so take a
@@ -126,12 +131,9 @@ all of the concepts; each test file holds a small `TestEnv` per subsystem.
 2. ~~**`erc32_error.h`** ERSR, SFSR, FFAR, `mecparerror`, `decode_ersr`.~~ Done.
 3. ~~**`erc32_cfg.h`** MEC control, memory configuration, waitstates, I/O
    configuration, software reset, power down, the protection segments.~~ Done.
-4. **The shared host UART port module.** `port_init`, `init_stdio`,
-   `restore_stdio` and the `DO_STDIO_READ` macro are near-identical in
-   `erc32.cc`, `leon2.cc` and `grlib.cc`. They become one plain `.cc` taking
-   explicit parameters, tested against real descriptors like `tests/sisio.cc`.
-   This is a restructuring step: it removes duplicated arcs from the tree
-   rather than covering the same code three times.
+4. ~~**The shared host UART port module.**~~ Done, as `uartport.cc`. It
+   removed 182 arcs from the tree for 44 covered ones, and took `erc32.cc`
+   from 325 arcs to 227.
 5. **`erc32_uart.h`** the MEC UART register model, on top of step 4.
 6. **`erc32_mem.h`** memory access dispatch. The only step with a performance
    obligation. Keep the implementation in an out-of-line global function
@@ -334,9 +336,14 @@ Hard-won here, so the next person does not rediscover them.
   reference manuals; never invent a constant to make a test pass.
 
 - **Look for the same code in three files before covering it once.** The host
-  UART port setup is triplicated across `erc32.cc`, `leon2.cc` and `grlib.cc`,
-  roughly 90 arcs of the same logic written three times. Deduplicating removes
-  arcs from the denominator instead of covering them repeatedly.
+  UART port setup was triplicated across `erc32.cc`, `leon2.cc` and
+  `grlib.cc`. Deduplicating it into `uartport.cc` removed 182 arcs from the
+  tree and replaced them with 44 covered ones, which is a far better trade
+  than covering the same logic three times. Two of the three copies had
+  drifted, and reading them side by side is what showed it: ERC32 hung port
+  B's terminal settings off port A's open flag, and only GRLIB switched the
+  Windows console into raw mode. Look for the next such triple before
+  starting on `leon2.cc` or `grlib.cc`.
 
 - **`sis.h` is include-guarded now, keep it that way.** A subsystem header
   includes `sis.h`, so including it beside the board file's own `sis.h` used to
