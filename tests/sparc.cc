@@ -2428,3 +2428,146 @@ TEST_CASE_FIXTURE (sparc_fixture, "SPARC a byte store outside memory traps")
   CHECK (exec (f3i (OP_MEM, 2, STB, 1, 0)) == 0);
   CHECK (exec (f3i (OP_MEM, 2, STB, 1, 1)) == TRAP_DEXC);
 }
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC each floating point source is a dependency")
+{
+  const uint32 addr = 0x2000;
+
+  sregs[0].psr |= PSR_EF;
+  set (1, addr);
+
+  /* A load waits for an operation in the pipe when its destination is any
+     of that operation's three registers, so each is checked on its own.  */
+  for (int which = 0; which < 3; which++)
+    {
+      sregs[0].simtime = 0;
+      sregs[0].ftime = 50;
+      sregs[0].frd = 30;
+      sregs[0].frs1 = 30;
+      sregs[0].frs2 = 30;
+      if (which == 0)
+	sregs[0].frd = 2;
+      else if (which == 1)
+	sregs[0].frs1 = 2;
+      else
+	sregs[0].frs2 = 2;
+
+      INFO ("dependency on source ", which);
+      CHECK (exec (f3i (OP_MEM, 2, LDF, 1, 0)) == 0);
+    }
+
+  /* And the same for a double load, which compares register pairs.  */
+  for (int which = 0; which < 3; which++)
+    {
+      sregs[0].simtime = 0;
+      sregs[0].ftime = 50;
+      sregs[0].frd = 30;
+      sregs[0].frs1 = 30;
+      sregs[0].frs2 = 30;
+      if (which == 0)
+	sregs[0].frd = 4;
+      else if (which == 1)
+	sregs[0].frs1 = 4;
+      else
+	sregs[0].frs2 = 4;
+
+      INFO ("double dependency on source ", which);
+      CHECK (exec (f3i (OP_MEM, 4, LDDF, 1, 0)) == 0);
+    }
+
+  /* A double store waits for either register of the pair.  */
+  sregs[0].simtime = 0;
+  sregs[0].ftime = 50;
+  sregs[0].frd = 5;
+  CHECK (exec (f3i (OP_MEM, 4, STDF, 1, 0)) == 0);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC the atomic accesses check their address")
+{
+  set (1, 0x2001);
+  CHECK (exec (f3i (OP_MEM, 2, SWAP, 1, 0)) == TRAP_UNALI);
+  CHECK (exec (f3i (OP_MEM, 2, LDSTUB, 1, 0)) == 0);
+  CHECK (exec (f3r (OP_MEM, 2, CASA, 1, 0) | (0xb << 5)) == TRAP_UNALI);
+
+  /* And their memory.  */
+  set (1, sis_tests::FLATMEM_SIZE + 0x1000);
+  CHECK (exec (f3r (OP_MEM, 2, SWAPA, 1, 0) | (0xb << 5)) == TRAP_DEXC);
+  CHECK (exec (f3r (OP_MEM, 2, LDSTUBA, 1, 0) | (0xb << 5)) == TRAP_DEXC);
+  CHECK (exec (f3r (OP_MEM, 2, CASA, 1, 0) | (0xb << 5)) == TRAP_DEXC);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC a LEON reads and writes an ASI at an address")
+{
+  int saved = cputype;
+  cputype = CPU_LEON3;
+
+  /* Address space two answers from the cache control register at address
+     zero and reports the configuration elsewhere, on both the load and the
+     store side.  */
+  set (1, 8);
+  set (2, 0x0f);
+  CHECK (exec (f3r (OP_MEM, 2, STA, 1, 0) | (2 << 5)) == 0);
+
+  set (1, 0);
+  CHECK (exec (f3r (OP_MEM, 3, LDA, 1, 0) | (2 << 5)) == 0);
+
+  cputype = saved;
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC floating point exceptions reach the status")
+{
+  sregs[0].psr |= PSR_EF;
+
+  /* A divide by zero, an overflow and an underflow each set their bit in
+     the accrued exception field.  */
+  fs (1) = 1.0f;
+  fs (2) = 0.0f;
+  CHECK (exec (fpop (FPOP1, 3, 1, OPF_FDIVs, 2)) == 0);
+  CHECK ((sregs[0].fsr & 0x1f) != 0);
+
+  sregs[0].fsr = 0;
+  fs (1) = 3.0e38f;
+  fs (2) = 3.0e38f;
+  CHECK (exec (fpop (FPOP1, 3, 1, OPF_FADDs, 2)) == 0);
+  CHECK ((sregs[0].fsr & 0x1f) != 0);
+
+  sregs[0].fsr = 0;
+  fs (1) = 1.0e-38f;
+  fs (2) = 1.0e8f;
+  CHECK (exec (fpop (FPOP1, 3, 1, OPF_FDIVs, 2)) == 0);
+  CHECK ((sregs[0].fsr & 0x1f) != 0);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC divide reports a negative quotient")
+{
+  /* The signed forms set the negative bit from the quotient, and the
+     unsigned form can produce one too.  */
+  sregs[0].y = 0;
+  set (1, 0x80000000);
+  set (2, 1);
+  CHECK (exec (f3r (OP_ARITH, 3, UDIVCC, 1, 2)) == 0);
+  CHECK (icc () == N);
+
+  sregs[0].y = 0xffffffff;
+  set (1, 0x80000000);
+  CHECK (exec (f3r (OP_ARITH, 3, SDIVCC, 1, 2)) == 0);
+  CHECK ((icc () & N) != 0);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC a byte store into unmapped memory traps")
+{
+  set (1, sis_tests::FLATMEM_SIZE);
+  set (2, 0x11);
+
+  CHECK (exec (f3i (OP_MEM, 2, STB, 1, 0)) == TRAP_DEXC);
+  CHECK (exec (f3r (OP_MEM, 2, STBA, 1, 0) | (0xb << 5)) == TRAP_DEXC);
+  CHECK (exec (f3r (OP_MEM, 2, STHA, 1, 0) | (0xb << 5)) == TRAP_DEXC);
+  CHECK (exec (f3r (OP_MEM, 2, STA, 1, 0) | (0xb << 5)) == TRAP_DEXC);
+  CHECK (exec (f3r (OP_MEM, 2, STDA, 1, 0) | (0xb << 5)) == TRAP_DEXC);
+  CHECK (exec (f3r (OP_MEM, 2, LDDA, 1, 0) | (0xb << 5)) == TRAP_DEXC);
+}
