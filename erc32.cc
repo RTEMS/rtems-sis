@@ -29,9 +29,6 @@
 #endif
 #include <stdio.h>
 #include <string.h>
-#ifdef HAVE_TERMIOS_H
-#include <termios.h>
-#endif
 #ifndef _WIN32
 #include <sys/file.h>
 #endif
