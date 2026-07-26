@@ -72,7 +72,7 @@ an older total.
 
 | Area | Arcs | Taken |
 |---|---|---|
-| `sparc.cc`, `riscv.cc` | 2274 | 117 |
+| `sparc.cc`, `riscv.cc` | 2280 | 986 |
 | `grlib.cc`, `grspw.cc`, `gr1553.cc`, `greth.cc`, `memscrub.cc`, `tap.cc` | 986 | 0 |
 | `sis.cc`, `remote.cc`, `interf.cc` | 546 | 0 |
 | `leon2.cc`, `leon3.cc`, `gr740.cc`, `rv32.cc` | 276 | 0 |
@@ -184,13 +184,47 @@ all of the concepts; each test file holds a small `TestEnv` per subsystem.
    - **`dispatch_instruction` executes the instruction at `sregs->pc`** and
      advances `pc` and `npc` itself. A call, a branch or a `jmpl` therefore
      computes its target and its saved address from `pc`, not from `npc`.
+   - **`init_regs` also keeps the low five bits of the old `psr`**, so a
+     window and a mode leak between cases. The fixture sets the whole
+     register outright.
+   - **The core swaps the index of a single floating point register on a
+     little endian host**, so `f<n>` is not `fs[n]`. The fixture reaches them
+     through `fs()`, `fsi()` and `fd()`, which do the same swap.
+   - **The `opf` encodings are file-local to `sparc.cc`**, so the test
+     transcribes them from appendix B rather than sharing them.
 
-   `sparc.cc` is at 105 of 1152 arcs. What is covered: the integer and logical
-   operations, the shifts, `sethi`, the `y` register, word and sub-word memory
-   access, branches, `call` and `jmpl`, and the alignment and data access
-   traps. What is not: the register window instructions (`save`, `restore`,
-   `rett`), the traps (`ticc`), the privileged registers, multiply and divide,
-   the whole FPU, and the alternate-space and atomic accesses.
+   `sparc.cc` is at **974 of 1158 arcs, 84%**, from 5 when this started.
+   Covered: the integer, logical and shift operations with their condition
+   codes, the loads and stores in every width and both address spaces, the
+   atomic accesses, the register windows and their traps, `rett`, `ticc`, the
+   state and ancillary registers, multiply and divide, tagged arithmetic, all
+   sixteen integer and sixteen floating point branch conditions against every
+   set of condition codes, the whole floating point unit including its holds
+   and its deferred trap queue, trap entry and interrupt checking, the
+   register access the shell and the GDB stub use, the disassembler, and the
+   target coverage collection.
+
+   Four bugs came out of it, each confirmed against the manual before the
+   test was written: `LDSBA` and `LDSHA` not sign extending, `STDFQ` not
+   privileged, and, in `func.cc`, the end-of-time sentinel wrapping into the
+   past.
+
+   What is left, and it needs a decision as well as more cases:
+
+   - **About 8 arcs are structurally unreachable.** A `switch` whose cases
+     cover every value of its selector still gets an implicit no-case-matched
+     arc, which gcov counts and nothing can take. `switch (cond)` on a four
+     bit condition with all sixteen labels is the clearest example. Rule 6
+     says restructure rather than mark, and the cheap restructure is to make
+     the last `case` the `default:`, which costs nothing at run time and may
+     remove a bounds check. That touches the hot decoder, so it is worth
+     agreeing before doing it across the eight switches involved.
+   - **The rest need more cases** in the same style: the paths gated on
+     `sis_gdb_break`, `sync_rt`, and the remaining corners of multiply,
+     divide and the floating point exception flags.
+
+   Then `riscv.cc`, which has the same shape and can reuse the flat memory.
+
 2. `grlib.cc` and the GRLIB cores. One file behind four boards, and the GRLIB
    manual in `ref/` is already scoped to the cores SIS models.
 3. `leon2.cc`, `leon3.cc`, `gr740.cc`, `rv32.cc`. Thin once `grlib.cc` and the
