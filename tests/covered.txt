@@ -15,3 +15,4 @@ erc32_timer.h
 exec.cc
 help.cc
 sisio.cc
+uartport.cc
