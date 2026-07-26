@@ -106,15 +106,30 @@ Done, graduated in `tests/covered.txt`:
   is plain code taking a `struct uart_port` and tested against real
   descriptors, the way `tests/sisio.cc` works.
 
-`erc32.cc` instantiates each of these on its single `RealEnv`, except the
-timers, which need a per-instance event thunk and so take a
-`RealTimerEnv<Thunk>`. `tests/erc32.cc` drives each template on its own small
-test environment with no globals.
+`tests/erc32.cc` drives each template on its own small test environment with
+no globals.
 
-`RealEnv` now serves four subsystems, and two of its methods reach back into
-one of them. Its methods are therefore declared in the class and defined after
-the subsystem objects are constructed, which is what lets one environment serve
-subsystems that depend on each other. Follow that when adding the fifth.
+### The real environment, settled
+
+A board has **one** `RealEnv`, holding every method any of its subsystems
+asks for. Two rules make that work, and both are worth copying:
+
+- **Declare its methods, define them after the subsystems.** Several of them
+  reach back into a subsystem, which cannot be constructed until the class is
+  complete. Declaring in the class and defining below the objects breaks the
+  cycle, and removes the forwarding functions the alternative needs.
+- **A subsystem the board has more than one of extends `RealEnv`, it does not
+  stand beside it.** Two timers and two UART channels each need a binding per
+  instance, which one environment object cannot carry:
+  `RealTimerEnv<Thunk>` adds the event queue callback which ticks that timer,
+  `RealUartEnv<Port>` adds the host port that channel moves bytes through, and
+  both inherit the rest. The binding is a template argument, so it stays a
+  compile time constant and the call is direct, and the subsystem template
+  still names no global, which is what decision (vii) asked for.
+
+Keep the environments, the specs which distinguish the instances, and the
+instances themselves together, in that order, so the shape of a board reads in
+one place.
 
 ## The order of work
 
