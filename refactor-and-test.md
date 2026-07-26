@@ -211,14 +211,8 @@ all of the concepts; each test file holds a small `TestEnv` per subsystem.
 
    What is left, and it needs a decision as well as more cases:
 
-   - **About 8 arcs are structurally unreachable.** A `switch` whose cases
-     cover every value of its selector still gets an implicit no-case-matched
-     arc, which gcov counts and nothing can take. `switch (cond)` on a four
-     bit condition with all sixteen labels is the clearest example. Rule 6
-     says restructure rather than mark, and the cheap restructure is to make
-     the last `case` the `default:`, which costs nothing at run time and may
-     remove a bounds check. That touches the hot decoder, so it is worth
-     agreeing before doing it across the eight switches involved.
+   - ~~The structurally unreachable switch arcs.~~ Done, and it was worth
+     far more than the arcs. See "Exhaustive switches" below.
    - **The rest need more cases** in the same style: the paths gated on
      `sis_gdb_break`, `sync_rt`, and the remaining corners of multiply,
      divide and the floating point exception flags.
@@ -295,6 +289,34 @@ test environment stays a handful of counters instead of a fake event queue.
 
 Where a subsystem schedules more than one kind of event, it gets one named
 method per kind rather than an enum or a callback.
+
+## Exhaustive switches, and what they were costing
+
+A `switch` whose case labels already cover every value of its selector still
+has an implicit no-case-matched arc. Nothing can take it, and the gate counts
+it. Rule 6 says restructure rather than mark, so the decoder's five exhaustive
+switches each name a case as `default:`.
+
+**Pick the commonest case, and measure which that is.** Build with
+`--enable-coverage`, run the real target binaries rather than the unit tests,
+and read the branch percentages out of `gcov -b`. The unit tests exercise
+conditions uniformly by construction and will mislead you. For `sparc.cc` the
+answer was the arithmetic group at 60% of instruction formats, branch on equal
+at 39% of conditional branches, and trap always at 100% of conditional traps.
+Two of the five switches are reached by no target binary at all, so there the
+choice cannot matter and the comment says so rather than implying data.
+
+**This is a performance change, not just a coverage one.** The decoder runs on
+every instruction, so removing its bounds checks compounded: erc32 crypt01 went
+from 82.3 to 73.9 seconds, 10% faster, measured with interleaved runs against a
+worktree of the parent commit. Expect the same shape in `riscv.cc`.
+
+**An assert costs an arc in the coverage build.** The invariant a `default:`
+now swallows is worth asserting, but the coverage build is unoptimized, so the
+assert survives as a branch whose failing side nothing can take. The build
+therefore defines `NDEBUG` when coverage is on, which is documented in
+`doc/building-sis.md`. Without that the five asserts cost exactly the five arcs
+the restructure had removed.
 
 ## When the manual and the code disagree
 
