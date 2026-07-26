@@ -149,15 +149,35 @@ The following registers are implemented:
 | Interrupt clear register   | 0x01f80050 |
 | Interrupt force register   | 0x01f80054 |
 
-## System fault status registers
+## Error handler
 
-The system fault status register and fist failing address register are
-implemented and updated accordingly. Implemented registers are:
+Errors are latched in the error and reset status register. Every error source
+the MEC acts on has a mask bit and a reset-or-halt bit in the MEC control
+register: an unmasked error halts the processor, or resets it when the
+reset-or-halt bit is set, and a masked error raises interrupt level 1 instead.
+The register survives a reset holding its cause, so a program can read after
+reset whether it was a system, software, error or watchdog reset. An FPU
+hardware error is latched and ignored, as in the specification.
 
-| Register                       | Address    |
-|--------------------------------|------------|
-| System fault status register   | 0x01f800a0 |
-| First failing address register | 0x01f800a4 |
+The simulator has no error inputs, so only two errors arise on their own: the
+IU entering error mode, and a MEC hardware error, which stands in for the
+register parity errors of the hardware and is reported for a write of a
+reserved bit of a MEC register. Setting bit 15 of the MEC control register,
+which the specification leaves unused, is also taken as a MEC hardware error.
+The IU hardware error and the FPU comparison error are reachable only through
+fault injection: with the error write enable bit of the test control register
+set, a write of bits 5-0 injects the error and the handler acts on it as if
+the hardware had signalled it.
+
+The system fault status register and the failing address register record the
+cause and the address of a memory exception. Only a data access latches them,
+so an instruction fetch leaves them alone.
+
+| Register                        | Address    |
+|---------------------------------|------------|
+| System fault status register    | 0x01f800a0 |
+| Failing address register        | 0x01f800a4 |
+| Error and reset status register | 0x01f800b0 |
 
 ## Memory interface
 
