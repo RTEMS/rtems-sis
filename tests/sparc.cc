@@ -90,6 +90,15 @@ const uint32 OP_CALL = 1;
 const uint32 OP_ARITH = 2;
 const uint32 OP_MEM = 3;
 
+/* The core holds the floating point registers in host order and swaps the
+   index of a single register on a little endian host, so a case which has to
+   name a register the way the core recorded it goes through this.  */
+#ifdef HOST_LITTLE_ENDIAN
+#define REG_SWAP(n) ((n) ^ 1)
+#else
+#define REG_SWAP(n) (n)
+#endif
+
 /* The condition field, most significant bit first.  */
 const uint32 N = 8, Z = 4, V = 2, C = 1;
 
@@ -2326,22 +2335,32 @@ TEST_CASE_FIXTURE (sparc_fixture,
   sregs[0].simtime = 0;
   sregs[0].ftime = 50;
   sregs[0].frd = 2;
+  sregs[0].fhold = 0;
   CHECK (exec (f3i (OP_MEM, 2, STF, 1, 0)) == 0);
+  CHECK (sregs[0].fhold > 0);
 
+  /* The status register accesses wait for the whole unit rather than for a
+     register, so they are charged the remaining time whatever is in it.  */
   sregs[0].simtime = 0;
   sregs[0].ftime = 50;
+  sregs[0].fhold = 0;
   CHECK (exec (f3i (OP_MEM, 0, STFSR, 1, 0)) == 0);
+  CHECK (sregs[0].fhold > 0);
 
   sregs[0].simtime = 0;
   sregs[0].ftime = 50;
+  sregs[0].fhold = 0;
   CHECK (exec (f3i (OP_MEM, 0, LDFSR, 1, 0)) == 0);
+  CHECK (sregs[0].fhold > 0);
 
   sregs[0].simtime = 0;
   sregs[0].ftime = 50;
   sregs[0].frd = 4;
   sregs[0].frs1 = 4;
   sregs[0].frs2 = 4;
+  sregs[0].fhold = 0;
   CHECK (exec (f3i (OP_MEM, 4, STDF, 1, 0)) == 0);
+  CHECK (sregs[0].fhold > 0);
 }
 
 TEST_CASE_FIXTURE (sparc_fixture,
@@ -2438,23 +2457,29 @@ TEST_CASE_FIXTURE (sparc_fixture,
   set (1, addr);
 
   /* A load waits for an operation in the pipe when its destination is any
-     of that operation's three registers, so each is checked on its own.  */
+     of that operation's three registers, so each is checked on its own.
+     The core records those three by their swapped index, which is what the
+     load compares against, so the case has to swap too.  */
+  const int busy = REG_SWAP (2);
+
   for (int which = 0; which < 3; which++)
     {
       sregs[0].simtime = 0;
       sregs[0].ftime = 50;
+      sregs[0].fhold = 0;
       sregs[0].frd = 30;
       sregs[0].frs1 = 30;
       sregs[0].frs2 = 30;
       if (which == 0)
-	sregs[0].frd = 2;
+	sregs[0].frd = busy;
       else if (which == 1)
-	sregs[0].frs1 = 2;
+	sregs[0].frs1 = busy;
       else
-	sregs[0].frs2 = 2;
+	sregs[0].frs2 = busy;
 
       INFO ("dependency on source ", which);
       CHECK (exec (f3i (OP_MEM, 2, LDF, 1, 0)) == 0);
+      CHECK (sregs[0].fhold > 0);
     }
 
   /* And the same for a double load, which compares register pairs.  */
@@ -2472,15 +2497,24 @@ TEST_CASE_FIXTURE (sparc_fixture,
       else
 	sregs[0].frs2 = 4;
 
+      sregs[0].fhold = 0;
       INFO ("double dependency on source ", which);
       CHECK (exec (f3i (OP_MEM, 4, LDDF, 1, 0)) == 0);
+      CHECK (sregs[0].fhold > 0);
     }
 
-  /* A double store waits for either register of the pair.  */
-  sregs[0].simtime = 0;
-  sregs[0].ftime = 50;
-  sregs[0].frd = 5;
-  CHECK (exec (f3i (OP_MEM, 4, STDF, 1, 0)) == 0);
+  /* A double store waits for either register of the pair, which it names by
+     the even one.  */
+  for (int busy_reg : { 4, 3 })
+    {
+      sregs[0].simtime = 0;
+      sregs[0].ftime = 50;
+      sregs[0].frd = busy_reg;
+      sregs[0].fhold = 0;
+      INFO ("busy register ", busy_reg);
+      CHECK (exec (f3i (OP_MEM, 4, STDF, 1, 0)) == 0);
+      CHECK (sregs[0].fhold > 0);
+    }
 }
 
 TEST_CASE_FIXTURE (sparc_fixture,
