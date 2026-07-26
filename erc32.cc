@@ -140,7 +140,12 @@ static void store_bytes (char *mem, uint32 waddr, uint32 *data, int sz,
 /* The environment every MEC subsystem runs against in the real board: its
    dependencies are the simulator globals.  The methods are declared here and
    defined after the subsystems, because several of them reach back into a
-   subsystem which cannot be constructed until this class is complete.  */
+   subsystem which cannot be constructed until this class is complete.
+
+   A subsystem the MEC has more than one of needs a binding per instance,
+   which one environment object cannot carry.  Those extend this environment
+   and take the binding as a template argument, so it stays a compile time
+   constant and the subsystem template still names no global.  */
 struct RealEnv
 {
   bool Verbose ();
@@ -156,23 +161,29 @@ struct RealEnv
   void EnterPowerDown ();
   void StartPowerDownTiming ();
   void Log (const char *msg);
+  uint64 Now ();
 };
 
-/* The RAM window of the ERC32 board.  The MEC decodes its size from a
-   register, but not its position.  */
-static constexpr erc32::MemoryGeometry ram_geometry = { .ram_start = RAM_START,
-							.ram_end = RAM_END,
-							.ram_mask = RAM_MASK };
-
-/* The environment a UART channel runs against in the real board.  PORT is the
-   host port it moves bytes through, so the template itself names no global. */
-template <struct uart_port *Port> struct RealUartEnv
+/* A timer is ticked from the event queue; THUNK is the callback which ticks
+   this one.  */
+template <void (*Thunk) (int32)> struct RealTimerEnv : RealEnv
 {
   void
-  Irq (int level)
+  ScheduleTick (uint64 delta)
   {
-    mec_irq (level);
+    event (Thunk, 0, delta);
   }
+};
+
+/* The watchdog additionally issues the MEC's warm reset.  */
+struct RealWatchdogEnv : RealTimerEnv<wdog_intr>
+{
+  void WatchdogReset ();
+};
+
+/* A UART channel moves its bytes through PORT.  */
+template <struct uart_port *Port> struct RealUartEnv : RealEnv
+{
   bool
   PortOpen ()
   {
@@ -190,9 +201,29 @@ template <struct uart_port *Port> struct RealUartEnv
   }
 };
 
-static RealUartEnv<&porta> uarta_env;
-static RealUartEnv<&portb> uartb_env;
+/* The RAM window of the ERC32 board.  The MEC decodes its size from a
+   register, but not its position.  */
+static constexpr erc32::MemoryGeometry ram_geometry = { .ram_start = RAM_START,
+							.ram_end = RAM_END,
+							.ram_mask = RAM_MASK };
 
+/* What distinguishes the two timers: the real time clock has an 8 bit scaler
+   and the general purpose timer a 16 bit one, and their fields sit at bit 8
+   and bit 0 of the timer control register.  */
+static constexpr erc32::TimerSpec rtc_spec = { .scaler_mask = 0x0ff,
+					       .level = erc32::kRtcLevel,
+					       .ctrl_shift = 8,
+					       .reload_at_zero_reset = true,
+					       .name = "RTC" };
+
+static constexpr erc32::TimerSpec gpt_spec = { .scaler_mask = 0x0ffff,
+					       .level = erc32::kGptLevel,
+					       .ctrl_shift = 0,
+					       .reload_at_zero_reset = false,
+					       .name = "GPT" };
+
+/* What distinguishes the two UART channels: their interrupt level and where
+   their field sits in the shared status register.  */
 static constexpr erc32::UartSpec uarta_spec = { .level = erc32::kUartALevel,
 						.status_shift = 0,
 						.name = "A" };
@@ -202,13 +233,24 @@ static constexpr erc32::UartSpec uartb_spec = { .level = erc32::kUartBLevel,
 						    erc32::kUartStatusBLevel,
 						.name = "B" };
 
-static erc32::Uart<RealUartEnv<&porta>> uarta (uarta_env, uarta_spec);
-static erc32::Uart<RealUartEnv<&portb>> uartb (uartb_env, uartb_spec);
-
 static RealEnv real_env;
+static RealTimerEnv<rtc_intr> rtc_env;
+static RealTimerEnv<gpt_intr> gpt_env;
+static RealWatchdogEnv wdog_env;
+static RealUartEnv<&porta> uarta_env;
+static RealUartEnv<&portb> uartb_env;
+
+/* The interrupt controller and the error handler each depend on the other,
+   so the configuration must follow both.  */
 static erc32::Mec<RealEnv> mec (real_env);
 static erc32::ErrorHandler<RealEnv> error_handler (real_env);
 static erc32::Config<RealEnv> cfg (real_env, ram_geometry);
+
+static erc32::Timer<RealTimerEnv<rtc_intr>> rtc (rtc_env, rtc_spec);
+static erc32::Timer<RealTimerEnv<gpt_intr>> gpt (gpt_env, gpt_spec);
+static erc32::Watchdog<RealWatchdogEnv> wdog (wdog_env);
+static erc32::Uart<RealUartEnv<&porta>> uarta (uarta_env, uarta_spec);
+static erc32::Uart<RealUartEnv<&portb>> uartb (uartb_env, uartb_spec);
 
 bool
 RealEnv::Verbose ()
@@ -289,68 +331,18 @@ RealEnv::StartPowerDownTiming ()
   sregs->pwdstart = sregs->simtime;
 }
 
-/* The environment a timer runs against in the real board.  THUNK is the
-   event queue callback which ticks that timer, so the template itself never
-   names a C function.  */
-template <void (*Thunk) (int32)> struct RealTimerEnv
+uint64
+RealEnv::Now ()
 {
-  bool
-  Verbose ()
-  {
-    return sis_verbose != 0;
-  }
-  uint64
-  Now ()
-  {
-    return now ();
-  }
-  void
-  Irq (int level)
-  {
-    mec_irq (level);
-  }
-  void
-  ScheduleTick (uint64 delta)
-  {
-    event (Thunk, 0, delta);
-  }
-  void
-  Log (const char *msg)
-  {
-    fputs (msg, stdout);
-  }
-};
+  return now ();
+}
 
-/* The watchdog additionally issues the MEC's warm reset.  */
-struct RealWatchdogEnv : public RealTimerEnv<wdog_intr>
+void
+RealWatchdogEnv::WatchdogReset ()
 {
-  void
-  WatchdogReset ()
-  {
-    sys_reset ();
-    error_handler.SetResetCause (erc32::kResetWatchdog);
-  }
-};
-
-static RealTimerEnv<rtc_intr> rtc_env;
-static RealTimerEnv<gpt_intr> gpt_env;
-static RealWatchdogEnv wdog_env;
-
-static constexpr erc32::TimerSpec rtc_spec = { .scaler_mask = 0x0ff,
-					       .level = erc32::kRtcLevel,
-					       .ctrl_shift = 8,
-					       .reload_at_zero_reset = true,
-					       .name = "RTC" };
-
-static constexpr erc32::TimerSpec gpt_spec = { .scaler_mask = 0x0ffff,
-					       .level = erc32::kGptLevel,
-					       .ctrl_shift = 0,
-					       .reload_at_zero_reset = false,
-					       .name = "GPT" };
-
-static erc32::Timer<RealTimerEnv<rtc_intr>> rtc (rtc_env, rtc_spec);
-static erc32::Timer<RealTimerEnv<gpt_intr>> gpt (gpt_env, gpt_spec);
-static erc32::Watchdog<RealWatchdogEnv> wdog (wdog_env);
+  sys_reset ();
+  error_handler.SetResetCause (erc32::kResetWatchdog);
+}
 
 /* One-time init */
 
