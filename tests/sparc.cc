@@ -28,6 +28,7 @@
 #include "cpumem.h"
 
 #include <stddef.h>
+#include <limits>
 #include <string>
 
 using sis_tests::stdout_capture;
@@ -2910,4 +2911,140 @@ TEST_CASE_FIXTURE (sparc_fixture,
     }
 
   CHECK (!cap.str ().empty ());
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC an ordered double compare ranks both ways")
+{
+  /* The double precision compare reports greater as well as less, which the
+     single precision case above covers for its own operands.  */
+  sregs[0].psr |= PSR_EF;
+  fd (2) = 4.0;
+  fd (4) = 1.0;
+
+  CHECK (exec (fpop (FPOP1, 0, 2, OPF_FCMPd, 4)) == 0);
+  CHECK (((sregs[0].fsr >> 10) & 3) == FCC_G);
+
+  fd (2) = 1.0;
+  fd (4) = 4.0;
+  CHECK (exec (fpop (FPOP1, 0, 2, OPF_FCMPd, 4)) == 0);
+  CHECK (((sregs[0].fsr >> 10) & 3) == FCC_L);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC an unordered compare excepts only when asked to")
+{
+  /* Chapter 6: a compare against a value which is not a number reports
+     unordered.  The plain compare stops there, while the compare-and-except
+     form raises an IEEE exception, which the unit reports as a pending
+     exception and the next operation takes as a trap.  */
+  const float nanf_value = std::numeric_limits<float>::quiet_NaN ();
+  const double nand_value = std::numeric_limits<double>::quiet_NaN ();
+
+  sregs[0].psr |= PSR_EF;
+
+  SUBCASE ("single precision reports unordered")
+  {
+    fs (1) = nanf_value;
+    fs (2) = 1.0f;
+    CHECK (exec (fpop (FPOP1, 0, 1, OPF_FCMPs, 2)) == 0);
+    CHECK (((sregs[0].fsr >> 10) & 3) == FCC_U);
+    CHECK (sregs[0].fpstate == FP_EXE_MODE);
+  }
+
+  SUBCASE ("single precision excepts")
+  {
+    fs (1) = nanf_value;
+    fs (2) = 1.0f;
+    CHECK (exec (fpop (FPOP1, 0, 1, OPF_FCMPEs, 2)) == 0);
+    CHECK (((sregs[0].fsr >> 10) & 3) == FCC_U);
+    CHECK (sregs[0].fpstate == FP_EXC_PE);
+    CHECK ((sregs[0].fsr & FSR_TT) == FP_IEEE);
+    CHECK ((sregs[0].fsr & FSR_QNE) != 0);
+    CHECK (sregs[0].fpq[1] == fpop (FPOP1, 0, 1, OPF_FCMPEs, 2));
+
+    /* The pending exception is delivered on the next operation.  */
+    CHECK (exec (fpop (FPOP1, 3, 1, OPF_FADDs, 2)) == TRAP_FPEXC);
+  }
+
+  SUBCASE ("double precision reports unordered")
+  {
+    fd (2) = nand_value;
+    fd (4) = 1.0;
+    CHECK (exec (fpop (FPOP1, 0, 2, OPF_FCMPd, 4)) == 0);
+    CHECK (((sregs[0].fsr >> 10) & 3) == FCC_U);
+    CHECK (sregs[0].fpstate == FP_EXE_MODE);
+  }
+
+  SUBCASE ("double precision excepts")
+  {
+    fd (2) = nand_value;
+    fd (4) = 1.0;
+    CHECK (exec (fpop (FPOP1, 0, 2, OPF_FCMPEd, 4)) == 0);
+    CHECK (((sregs[0].fsr >> 10) & 3) == FCC_U);
+    CHECK (sregs[0].fpstate == FP_EXC_PE);
+    CHECK ((sregs[0].fsr & FSR_TT) == FP_IEEE);
+  }
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC a negative square root excepts")
+{
+  /* The square root of a negative number is an invalid operation, so the
+     unit reports an IEEE exception and leaves the destination alone rather
+     than writing a value which is not a number.  */
+  sregs[0].psr |= PSR_EF;
+
+  SUBCASE ("single precision")
+  {
+    fs (1) = -4.0f;
+    fs (3) = 1.0f;
+    CHECK (exec (fpop (FPOP1, 3, 0, OPF_FSQRTs, 1)) == 0);
+    CHECK (fs (3) == 1.0f);
+    CHECK (sregs[0].fpstate == FP_EXC_PE);
+    CHECK ((sregs[0].fsr & FSR_TT) == FP_IEEE);
+    CHECK ((sregs[0].fsr & 0x1f) == 0x10);
+  }
+
+  SUBCASE ("double precision")
+  {
+    fd (2) = -4.0;
+    fd (4) = 1.0;
+    CHECK (exec (fpop (FPOP1, 4, 0, OPF_FSQRTd, 2)) == 0);
+    CHECK (fd (4) == 1.0);
+    CHECK (sregs[0].fpstate == FP_EXC_PE);
+    CHECK ((sregs[0].fsr & FSR_TT) == FP_IEEE);
+    CHECK ((sregs[0].fsr & 0x1f) == 0x10);
+  }
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC an enabled trap takes the exception")
+{
+  /* The trap enable mask of the status register decides what an accrued
+     exception does: with the bit clear the exception only accumulates, with
+     it set the operation excepts and queues the instruction.  A quotient
+     which does not fit the format is inexact, which is the cheapest of them
+     to raise.  */
+  sregs[0].psr |= PSR_EF;
+  fs (1) = 1.0f;
+  fs (2) = 3.0f;
+
+  SUBCASE ("the exception only accumulates")
+  {
+    CHECK (exec (fpop (FPOP1, 3, 1, OPF_FDIVs, 2)) == 0);
+    CHECK (sregs[0].fpstate == FP_EXE_MODE);
+    CHECK ((sregs[0].fsr & 1) != 0);
+  }
+
+  SUBCASE ("the exception traps")
+  {
+    /* Bit 23 of the status register enables the inexact trap.  */
+    sregs[0].fsr |= 1u << 23;
+
+    CHECK (exec (fpop (FPOP1, 3, 1, OPF_FDIVs, 2)) == 0);
+    CHECK (sregs[0].fpstate == FP_EXC_PE);
+    CHECK ((sregs[0].fsr & FSR_TT) == FP_IEEE);
+    CHECK ((sregs[0].fsr & 0x1f) == 1);
+    CHECK ((sregs[0].fsr & FSR_QNE) != 0);
+    CHECK (sregs[0].fpq[1] == fpop (FPOP1, 3, 1, OPF_FDIVs, 2));
+  }
 }
