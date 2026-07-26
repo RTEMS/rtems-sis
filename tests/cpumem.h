@@ -9,8 +9,8 @@
    what a case sets up is exactly what the instruction sees.
 
    Memory is held the way a board holds it, as bytes in host word order with
-   sub-word addresses swapped on a little endian host, because that is the
-   layout the cores and arch->bswap expect.  */
+   sub-word addresses swapped by arch->bswap, so one window serves a big
+   endian and a little endian core without a rebuild.  */
 
 #ifndef SIS_TESTS_CPUMEM_H
 #define SIS_TESTS_CPUMEM_H

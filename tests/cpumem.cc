@@ -68,21 +68,18 @@ flat_write (uint32 addr, uint32 *data, int32 sz, int32 *ws)
       return 1;
     }
 
+  /* A sub-word address is swapped inside its word the way the boards do it,
+     by the architecture's own byte order rather than by the host's, so one
+     window serves both cores.  */
   *ws = 0;
   if (sz == 0)
     {
-      waddr = addr;
-#ifdef HOST_LITTLE_ENDIAN
-      waddr ^= 3;
-#endif
+      waddr = addr ^ (uint32) arch->bswap;
       flatmem_bytes[waddr] = (char) (*data & 0x0ff);
     }
   else if (sz == 1)
     {
-      waddr = addr & ~1u;
-#ifdef HOST_LITTLE_ENDIAN
-      waddr ^= 2;
-#endif
+      waddr = (addr & ~1u) ^ ((uint32) arch->bswap & 2);
       uint16 half = (uint16) (*data & 0x0ffff);
       memcpy (&flatmem_bytes[waddr], &half, 2);
     }
