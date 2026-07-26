@@ -1831,7 +1831,7 @@ fpexec (uint32 op3, uint32 rd, uint32 rs1, uint32 rs2, struct pstate *sregs)
 	{
 	  sregs->fpstate = FP_EXC_PE;
 	  sregs->fsr = (sregs->fsr & ~FSR_TT) | FP_IEEE;
-	  sregs->fsr = (sregs->fsr & 0x1f) | 0x10;
+	  sregs->fsr = (sregs->fsr & ~0x1f) | 0x10;
 	  break;
 	}
       sregs->fs[rd] = sqrtf (sregs->fs[rs2]);
@@ -1843,7 +1843,7 @@ fpexec (uint32 op3, uint32 rd, uint32 rs1, uint32 rs2, struct pstate *sregs)
 	{
 	  sregs->fpstate = FP_EXC_PE;
 	  sregs->fsr = (sregs->fsr & ~FSR_TT) | FP_IEEE;
-	  sregs->fsr = (sregs->fsr & 0x1f) | 0x10;
+	  sregs->fsr = (sregs->fsr & ~0x1f) | 0x10;
 	  break;
 	}
       sregs->fd[rd >> 1] = sqrt (sregs->fd[rs2 >> 1]);
