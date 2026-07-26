@@ -35,7 +35,10 @@ enum
   kErrFpuCmpError = 1u << 4,   /* FPUCMP */
   kErrMecHwError = 1u << 5,    /* MECHE, an internal parity error */
   kErrSysAvailable = 1u << 12, /* SYSAV */
-  kErrHalted = 1u << 13	       /* HLT */
+  kErrHalted = 1u << 13,       /* HLT */
+
+  /* The error bits together, writable only for fault injection.  */
+  kErsrErrorBits = 0x3fu
 };
 
 /* Reset cause, ERSR bits 15-14.  A reset initialises every MEC register but
@@ -192,14 +195,25 @@ public:
     sfsr_ = kSfsrReset;
   }
 
-  /* The error bits are writable for fault injection, which the error write
-     enable bit of the test control register arms.  */
+  /* The system availability bit is always writable.  The error bits are
+     writable only for fault injection, which the error write enable bit of
+     the test control register arms, and an error injected that way is
+     handled like a real one.  Everything else is read only, so the halt bit
+     and the reset cause survive a write.  */
   void
   WriteErsr (uint32 data)
   {
-    if (env_.ErrorWriteEnabled () && (data & 0xffffefc0u))
-      MecHwError ();
-    ersr_ = data & 0x103fu;
+    uint32 writable = kErrSysAvailable;
+    bool injecting = env_.ErrorWriteEnabled ();
+
+    if (injecting)
+      writable |= kErsrErrorBits;
+
+    ersr_ = (ersr_ & ~writable) | (data & writable);
+    if (injecting && (data & 0xffffefc0u))
+      ersr_ |= kErrMecHwError;
+    if (injecting)
+      Decode ();
   }
 
   /* Latch a memory exception.  Only an IU data access updates the registers;
