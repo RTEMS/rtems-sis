@@ -48,6 +48,7 @@ namespace
 const uint32 MEC = 0x01f80000;
 const uint32 R_MCR = 0x000;
 const uint32 R_SFR = 0x004;
+const uint32 R_PWDR = 0x008;
 const uint32 R_MEMCFG = 0x010;
 const uint32 R_IOCR = 0x014;
 const uint32 R_WCR = 0x018;
@@ -1109,6 +1110,33 @@ TEST_CASE_FIXTURE (mec_fixture, "MEC ticks the watchdog from the event queue")
   CHECK ((rd (R_IPR) & (1u << 15)) != 0); /* timed out at level 15 */
 }
 
+TEST_CASE_FIXTURE (mec_fixture,
+		   "MEC watchdog resets the processor unacknowledged")
+{
+  /* As above, but nothing acknowledges the timeout.  The reset counter of
+     the program register is zero, so the reset comes one scaler period after
+     the timeout.  */
+  stdout_capture cap;
+
+  wr (R_TRAPD, 0);
+  advance_time (256);
+  wr (R_WDOG, 0x00000001u); /* scaler 0, counter 1, no reset delay */
+  advance_time (258);
+  REQUIRE ((rd (R_IPR) & (1u << 15)) != 0); /* timed out */
+
+  /* Nothing acknowledged the timeout, so the next tick resets the
+     processor.  */
+  advance_time (259);
+
+  std::string out = cap.str ();
+  CHECK (out.find ("Watchdog reset!") != std::string::npos);
+
+  /* The reset leaves the cause behind in the error and reset status
+     register, which survives it.  */
+  CHECK ((rd (R_ERSR) & 0xc000) == 0xc000);
+  CHECK (sregs[0].trap == 256);
+}
+
 TEST_CASE_FIXTURE (mec_fixture, "MEC timer writes reject their reserved bits")
 {
   /* The scaler and control writes route their reserved bits through the
@@ -1999,6 +2027,93 @@ TEST_CASE_FIXTURE (mec_fixture, "MEC decodes an 8-bit ROM configuration")
   CHECK (out.find ("RAM size") != std::string::npos);
   CHECK (out.find ("Waitstates") != std::string::npos);
   rom8 = saved_rom8;
+}
+
+TEST_CASE_FIXTURE (mec_fixture, "MEC halts the processor on an unmasked error")
+{
+  /* Every error is unmasked and set to halt after reset, so the IU entering
+     error mode halts the processor and the halt is recorded.  */
+  ms->error_mode (0);
+
+  CHECK (sregs[0].trap == 257);
+  CHECK ((rd (R_ERSR) & 0x2000) != 0); /* HLT */
+  CHECK ((rd (R_ERSR) & 0x1) != 0);    /* IU error mode */
+}
+
+TEST_CASE_FIXTURE (mec_fixture, "MEC resets the processor when told to")
+{
+  /* With the reset-or-halt bit of the IU error mode source set, the same
+     error resets instead, and the register is left holding the cause.  */
+  wr (R_MCR, 1u << 6);
+  ms->error_mode (0);
+
+  CHECK (sregs[0].trap == 256);
+  CHECK (rd (R_ERSR) == 0x8000); /* error reset */
+}
+
+TEST_CASE_FIXTURE (mec_fixture, "MEC boot loader programs the memory map")
+{
+  ms->boot_init ();
+
+  /* The whole ROM and RAM of the board, zero waitstates, the stack at the
+     top of the RAM and power down allowed.  */
+  CHECK (rd (R_MEMCFG) == ((7u << 18) | (6u << 10) | 0x20000));
+  CHECK ((rd (R_MCR) & 0x1) != 0);
+  CHECK (sregs[0].r[30] == 0x03000000);
+  CHECK (sregs[0].wim == 2);
+}
+
+TEST_CASE_FIXTURE (mec_fixture, "MEC puts the console in and out of UART mode")
+{
+  /* Descriptor 0 is a regular file under the feed, so the terminal calls act
+     on that and fail harmlessly.  */
+  stdin_feed feed ("");
+
+  ms->init_stdio ();
+  ms->restore_stdio ();
+}
+
+TEST_CASE_FIXTURE (mec_fixture, "MEC flushes and releases its ports on exit")
+{
+  stdout_capture cap;
+  stdin_feed feed ("");
+
+  wr (R_UARTA, 'q');
+  ms->sim_halt (); /* flushes what the UART buffered */
+  ms->exit_sim (); /* the console is shared, so it stays open */
+
+  CHECK (cap.str ().find ('q') != std::string::npos);
+}
+
+TEST_CASE_FIXTURE (mec_fixture, "MEC power down register")
+{
+  int saved_mode = sregs[0].pwd_mode;
+
+  /* Writing the power down register enters power down mode, but only once
+     the control register allows it.  */
+  wr (R_MCR, MCR_HWERR_IRQ);
+  sregs[0].pwd_mode = 0;
+  wr (R_PWDR, 0);
+  CHECK (sregs[0].pwd_mode == 0);
+
+  wr (R_MCR, MCR_HWERR_IRQ | 0x1);
+  wr (R_PWDR, 0);
+  CHECK (sregs[0].pwd_mode == 1);
+
+  sregs[0].pwd_mode = saved_mode;
+}
+
+TEST_CASE_FIXTURE (mec_fixture, "MEC UART reads need the supervisor ASI")
+{
+  uint32 d;
+  int32 ws;
+
+  /* A UART data register is a MEC register, so a user mode read of one
+     faults like any other.  */
+  sregs[0].psr &= ~0x80;
+  CHECK (ms->memory_read (MEC + R_UARTA, &d, &ws) == 1);
+  CHECK (ms->memory_read (MEC + R_UARTB, &d, &ws) == 1);
+  sregs[0].psr |= 0x80;
 }
 
 TEST_CASE_FIXTURE (mec_fixture, "MEC software reset register")
