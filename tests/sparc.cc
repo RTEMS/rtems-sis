@@ -33,6 +33,10 @@
 
 using sis_tests::stdout_capture;
 
+/* The coverage bitmap of func.cc, one byte per word of memory.  It has no
+   declaration in sis.h because nothing outside func.cc reads it.  */
+extern unsigned char covram[];
+
 namespace
 {
 
@@ -3189,4 +3193,170 @@ TEST_CASE_FIXTURE (sparc_fixture,
     arch->display_ctrl (&sregs[0]);
     CHECK (cap.str ().find ("power-down mode") != std::string::npos);
   }
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC a load delays its user by a cycle")
+{
+  /* The result of a load is not ready for the instruction after it, so the
+     unit inserts an idle cycle when that instruction reads the register the
+     load is filling.  Both operand forms check it, and an instruction which
+     reads neither runs on.  */
+  sregs[0].simtime = 0;
+  sregs[0].ildtime = 100;
+  sregs[0].ildreg = 1;
+  set (1, 4);
+  set (2, 4);
+
+  sregs[0].hold = 0;
+  CHECK (exec (f3i (OP_ARITH, 3, ADD, 1, 5)) == 0);
+  CHECK (sregs[0].hold == 1);
+
+  sregs[0].hold = 0;
+  CHECK (exec (f3r (OP_ARITH, 3, ADD, 2, 1)) == 0);
+  CHECK (sregs[0].hold == 1);
+
+  sregs[0].hold = 0;
+  CHECK (exec (f3i (OP_ARITH, 3, ADD, 2, 5)) == 0);
+  CHECK (sregs[0].hold == 0);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC a floating point load delays its user too")
+{
+  /* The same dependency across the two units: an operation which reads the
+     register a floating point load is filling waits a cycle.  A single
+     operand instruction has no first source, so only its second is
+     checked.  */
+  sregs[0].psr |= PSR_EF;
+  sregs[0].simtime = 0;
+  sregs[0].ftime = 0;
+  sregs[0].ltime = 0;
+  sregs[0].hold = 0;
+
+  set (1, 0x40);
+  CHECK (exec (f3i (OP_MEM, 1, LDF, 1, 0)) == 0);
+  CHECK (sregs[0].ltime > sregs[0].simtime);
+
+  CHECK (exec (fpop (FPOP1, 3, 0, OPF_FiTOs, 1)) == 0);
+  CHECK (sregs[0].fhold == 1);
+
+  /* A register the load does not fill costs nothing, once the unit is free
+     again.  */
+  sregs[0].ftime = 0;
+  sregs[0].ltime = 100;
+  CHECK (exec (fpop (FPOP1, 3, 0, OPF_FiTOs, 5)) == 0);
+  CHECK (sregs[0].fhold == 0);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC a resumed store is not repeated under gdb")
+{
+  /* The stub reports a write watchpoint after the write has gone through and
+     leaves the program counter on the store, so the store must not run a
+     second time when the user continues.  */
+  int saved = sis_gdb_break;
+
+  sis_gdb_break = 1;
+  ebase.wphit = 1;
+  set (1, 0x40);
+  set (3, 0x11);
+  sis_tests::flatmem_poke (0x40, 0x12345678);
+
+  CHECK (exec (f3i (OP_MEM, 3, ST, 1, 0)) == 0);
+  CHECK (sis_tests::flatmem_peek (0x40) == 0x12345678);
+  CHECK (ebase.wphit == 0);
+
+  /* With the hit cleared the next store goes through.  */
+  CHECK (exec (f3i (OP_MEM, 3, ST, 1, 0)) == 0);
+  CHECK (sis_tests::flatmem_peek (0x40) == 0x11);
+
+  sis_gdb_break = saved;
+}
+
+namespace
+{
+
+int intack_level;
+int intack_calls;
+
+void
+count_intack (int32 level, int32 cpu)
+{
+  (void) cpu;
+  intack_level = level;
+  intack_calls++;
+}
+
+} /* namespace */
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC an interrupt trap is acknowledged")
+{
+  /* Chapter 7 numbers the interrupt traps 17 to 31 for levels 1 to 15, and
+     the interrupt controller has to be told the level was taken so it stops
+     asserting it.  A trap which is not an interrupt leaves it alone.  */
+  sregs[0].intack = count_intack;
+  sregs[0].psr |= PSR_ET;
+  intack_calls = 0;
+
+  sregs[0].trap = 17 + 4;
+  CHECK (sparc32.execute_trap (&sregs[0]) == 0);
+  CHECK (intack_calls == 1);
+  CHECK (intack_level == 5);
+
+  sregs[0].psr |= PSR_ET;
+  sregs[0].trap = TRAP_UNIMP;
+  CHECK (sparc32.execute_trap (&sregs[0]) == 0);
+  CHECK (intack_calls == 1);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC a trap can share one vector")
+{
+  /* Bit 13 of the ancillary register selects single vector trapping, where
+     every trap enters at the base of the table rather than at its own
+     entry.  */
+  sregs[0].psr |= PSR_ET;
+  sregs[0].tbr = 0x40000000;
+  sregs[0].trap = TRAP_UNIMP;
+  sregs[0].asr17 = 1u << 13;
+
+  CHECK (sparc32.execute_trap (&sregs[0]) == 0);
+  CHECK (sregs[0].pc == 0x40000000);
+  CHECK (sregs[0].npc == 0x40000004);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC a trap is recorded for coverage")
+{
+  /* With coverage collection on, the jump into the trap table is recorded
+     like any other jump, so a report shows the handler was entered.  */
+  uint32 saved = ebase.coven;
+
+  sregs[0].psr |= PSR_ET;
+  sregs[0].tbr = 0x40000000;
+  sregs[0].trap = TRAP_UNIMP;
+  sregs[0].pc = 0x2000;
+  covram[0x2000 >> 2] = 0;
+  ebase.coven = 1;
+
+  CHECK (sparc32.execute_trap (&sregs[0]) == 0);
+  CHECK (covram[0x2000 >> 2] != 0);
+
+  ebase.coven = saved;
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC power-down can wait for the wall clock")
+{
+  /* Ancillary register 19 puts a LEON into power-down.  With the simulator
+     told to keep pace with real time, entering it is where it catches up.  */
+  int saved = sync_rt;
+
+  cputype = CPU_LEON3;
+  sync_rt = 1;
+  sregs[0].pwd_mode = 0;
+  sregs[0].hold = 0;
+
+  CHECK (exec (f3i (OP_ARITH, 19, WRY, 0, 0)) == 0);
+  CHECK (sregs[0].pwd_mode == 1);
+
+  sync_rt = saved;
 }
