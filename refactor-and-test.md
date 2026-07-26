@@ -66,7 +66,7 @@ against real descriptors the way `tests/sisio.cc` does.
 ## Where the tree stands
 
 Measured with `./waf configure --enable-coverage && ./waf`, branch metric,
-776 of 6145 arcs (12%). The totals move as headers join the filter, so compare
+771 of 6141 arcs (13%). The totals move as headers join the filter, so compare
 per file rather than against an older total.
 
 | Area | Arcs | Taken |
@@ -74,7 +74,7 @@ per file rather than against an older total.
 | `sparc.cc`, `riscv.cc` | 2274 | 17 |
 | `grlib.cc`, `grspw.cc`, `gr1553.cc`, `greth.cc`, `memscrub.cc`, `tap.cc` | 1071 | 0 |
 | `sis.cc`, `remote.cc`, `interf.cc` | 546 | 0 |
-| `erc32.cc` | 363 | 284 |
+| `erc32.cc` | 325 | 246 |
 | `leon2.cc`, `leon3.cc`, `gr740.cc`, `rv32.cc` | 353 | 0 |
 | graduated: `erc32_cfg.h`, `erc32_error.h`, `erc32_mec.h`, `erc32_timer.h`, `exec.cc`, `help.cc`, `sisio.cc` | | 100% |
 
@@ -96,7 +96,8 @@ Done, graduated in `tests/covered.txt`:
 - **`erc32_cfg.h`** the MEC control, memory configuration, waitstate, I/O
   configuration and access protection segment registers, and the eleven
   globals their decode used to write. The memory access path reads what they
-  decode to through accessors.
+  decode to through accessors, and asks `WriteProtected` whether a RAM write
+  is allowed.
 
 `erc32.cc` instantiates each of these on its single `RealEnv`, except the
 timers, which need a per-instance event thunk and so take a
@@ -317,6 +318,14 @@ Hard-won here, so the next person does not rediscover them.
   boot loader with it left every run green and the fingerprints unmoved. When
   a spec fix breaks the world, check whether a caller was compensating before
   concluding that RTEMS depends on the bug.
+
+- **Move a check to where its registers already are.** The write protection
+  segments were in `erc32_cfg.h` but the comparison against them stayed in
+  `memory_write`, reading the segments back one accessor at a time. Moving it
+  in as `WriteProtected` is what surfaced that it masked the address to 23
+  bits, repeating every segment through the 16 Mbyte RAM. Reading the check
+  next to the register description is what made the wrong mask visible.
+  Guard the call at the call site so the hot path keeps its single test.
 
 - **Spec-driven testing earns its keep.** The one real bug found while covering
   `erc32.cc` (the GPT scaler read was gated on the wrong enable bit) surfaced

@@ -212,6 +212,11 @@ is write-only, so reading it is a memory exception. The two PROM fields encode
 no waitstates both at zero and at one, so their count is one below the field
 from two upwards.
 
+With `-rom8` a word is fetched from the PROM in four accesses, and the
+simulator charges `5 + 4 * PRR` cycles for a PROM read, where PRR is the
+decoded waitstate count. The specification gives no timing for this case, so
+the formula is the simulator's own. The PROM write path is not scaled.
+
 The memory protection scheme is implemented. Each of the two segments covers
 the words from 0x02000000 + SEGBASE * 4 up to but not including 0x02000000 +
 SEGEND * 4, and its two mode bits decide whether the protection applies to
