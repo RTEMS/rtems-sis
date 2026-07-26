@@ -1150,3 +1150,236 @@ TEST_CASE_FIXTURE (sparc_fixture,
   CHECK (exec (f3i (OP_MEM, 2, LDDF, 1, 0)) == TRAP_UNALI);
   CHECK (exec (f3i (OP_MEM, 2, STDF, 1, 0)) == TRAP_UNALI);
 }
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC floating point branches test every condition")
+{
+  /* Appendix B.22: each condition is a function of the two bit condition
+     field of the status register.  */
+  sregs[0].psr |= PSR_EF;
+
+  const uint32 conds[16] = { FBN, FBNE, FBLG, FBUL, FBL,   FBUG, FBG,	FBU,
+			     FBA, FBE,	FBUE, FBGE, FBUGE, FBLE, FBULE, FBO };
+
+  for (uint32 fcc = 0; fcc < 4; fcc++)
+    {
+      bool e = fcc == FCC_E;
+      bool l = fcc == FCC_L;
+      bool g = fcc == FCC_G;
+      bool u = fcc == FCC_U;
+
+      bool want[16] = { false,	       /* fbn */
+			l || g || u,   /* fbne */
+			l || g,	       /* fblg */
+			u || l,	       /* fbul */
+			l,	       /* fbl */
+			u || g,	       /* fbug */
+			g,	       /* fbg */
+			u,	       /* fbu */
+			true,	       /* fba */
+			e,	       /* fbe */
+			u || e,	       /* fbue */
+			e || g,	       /* fbge */
+			u || e || g,   /* fbuge */
+			e || l,	       /* fble */
+			u || e || l,   /* fbule */
+			e || l || g }; /* fbo */
+
+      for (int i = 0; i < 16; i++)
+	{
+	  sregs[0].fsr = (sregs[0].fsr & ~0xc00) | (fcc << 10);
+	  sregs[0].pc = 0x1000;
+	  sregs[0].npc = 0x1004;
+
+	  CHECK (exec ((FPBCC << 22) | (conds[i] << 25) | 4) == 0);
+
+	  INFO ("condition ", i, " with fcc ", fcc);
+	  CHECK (sregs[0].npc == (want[i] ? 0x1010 : 0x1008));
+	}
+    }
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC the alternate space forms of every access")
+{
+  const uint32 addr = 0x2000;
+  const uint32 asi = 0xb << 5;
+
+  set (1, addr);
+  set (2, 0x11223344);
+  set (3, 0x55667788);
+
+  CHECK (exec (f3r (OP_MEM, 2, STDA, 1, 0) | asi) == 0);
+  CHECK (sis_tests::flatmem_peek (addr) == 0x11223344);
+  CHECK (sis_tests::flatmem_peek (addr + 4) == 0x55667788);
+
+  CHECK (exec (f3r (OP_MEM, 4, LDDA, 1, 0) | asi) == 0);
+  CHECK (get (4) == 0x11223344);
+  CHECK (get (5) == 0x55667788);
+
+  set (2, 0x99);
+  CHECK (exec (f3r (OP_MEM, 2, STBA, 1, 0) | asi) == 0);
+  CHECK (exec (f3r (OP_MEM, 6, LDUBA, 1, 0) | asi) == 0);
+  CHECK (get (6) == 0x99);
+  CHECK (exec (f3r (OP_MEM, 6, LDSBA, 1, 0) | asi) == 0);
+  CHECK (get (6) == 0xffffff99);
+
+  set (2, 0x8001);
+  CHECK (exec (f3r (OP_MEM, 2, STHA, 1, 0) | asi) == 0);
+  CHECK (exec (f3r (OP_MEM, 6, LDUHA, 1, 0) | asi) == 0);
+  CHECK (get (6) == 0x8001);
+  CHECK (exec (f3r (OP_MEM, 6, LDSHA, 1, 0) | asi) == 0);
+  CHECK (get (6) == 0xffff8001);
+
+  set (2, 0x12345678);
+  CHECK (exec (f3r (OP_MEM, 2, STA, 1, 0) | asi) == 0);
+  set (6, 0x0);
+  CHECK (exec (f3r (OP_MEM, 6, SWAPA, 1, 0) | asi) == 0);
+  CHECK (get (6) == 0x12345678);
+  CHECK (sis_tests::flatmem_peek (addr) == 0);
+
+  CHECK (exec (f3r (OP_MEM, 6, LDSTUBA, 1, 0) | asi) == 0);
+  CHECK (get (6) == 0);
+  CHECK ((sis_tests::flatmem_peek (addr) >> 24) == 0xff);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC casa compares and swaps")
+{
+  const uint32 addr = 0x2000;
+
+  set (1, addr);
+  set (2, 0xaaaaaaaa);
+  CHECK (exec (f3i (OP_MEM, 2, ST, 1, 0)) == 0);
+
+  /* The swap happens when the memory word matches rs2.  */
+  set (3, 0x55555555);
+  set (4, 0xaaaaaaaa);
+  CHECK (exec (f3r (OP_MEM, 3, CASA, 1, 4) | (0xb << 5)) == 0);
+  CHECK (sis_tests::flatmem_peek (addr) == 0x55555555);
+  CHECK (get (3) == 0xaaaaaaaa);
+
+  /* With a mismatch the memory keeps its value and the register takes it.  */
+  set (3, 0x99999999);
+  set (4, 0);
+  CHECK (exec (f3r (OP_MEM, 3, CASA, 1, 4) | (0xb << 5)) == 0);
+  CHECK (sis_tests::flatmem_peek (addr) == 0x55555555);
+  CHECK (get (3) == 0x55555555);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC a trap enters through the table")
+{
+  /* Chapter 7: a trap disables further traps, drops to the next window and
+     enters the table at the base plus the type times sixteen.  */
+  uint32 cwp = sregs[0].psr & PSR_CWP;
+
+  sregs[0].psr |= PSR_ET;
+  sregs[0].tbr = 0x4000;
+  sregs[0].pc = 0x1000;
+  sregs[0].npc = 0x1004;
+  sregs[0].trap = TRAP_UNIMP;
+
+  CHECK (arch->execute_trap (&sregs[0]) == 0);
+
+  CHECK ((sregs[0].psr & PSR_ET) == 0);
+  CHECK ((sregs[0].psr & PSR_S) != 0);
+  CHECK ((sregs[0].psr & PSR_CWP) == ((cwp - 1) & PSR_CWP));
+  CHECK (sregs[0].pc == 0x4000 + (TRAP_UNIMP << 4));
+  CHECK (sregs[0].npc == 0x4004 + (TRAP_UNIMP << 4));
+
+  /* The interrupted pair is saved in the local registers of the new
+     window.  */
+  CHECK (get (17) == 0x1000);
+  CHECK (get (18) == 0x1004);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC a trap with traps disabled is an error")
+{
+  sregs[0].psr &= ~PSR_ET;
+  sregs[0].trap = TRAP_UNIMP;
+
+  CHECK (arch->execute_trap (&sregs[0]) == ERROR_MODE);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC the simulator traps above the table")
+{
+  /* The simulator uses trap numbers above the architecture's for its own
+     purposes.  A reset restarts at zero and the rest report their reason.  */
+  sregs[0].trap = 256;
+  CHECK (arch->execute_trap (&sregs[0]) == 0);
+  CHECK (sregs[0].pc == 0);
+  CHECK (sregs[0].npc == 4);
+  CHECK (sregs[0].trap == 0);
+
+  sregs[0].trap = ERROR_TRAP;
+  CHECK (arch->execute_trap (&sregs[0]) == ERROR_MODE);
+
+  sregs[0].trap = WPT_TRAP;
+  CHECK (arch->execute_trap (&sregs[0]) == WPT_HIT);
+
+  sregs[0].trap = NULL_TRAP;
+  CHECK (arch->execute_trap (&sregs[0]) == NULL_HIT);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC an interrupt is taken above the level")
+{
+  sregs[0].psr |= PSR_ET;
+  sregs[0].psr &= ~PSR_PIL;
+  sregs[0].trap = 0;
+
+  /* No request, no interrupt.  */
+  ext_irl[0] = 0;
+  CHECK (arch->check_interrupts (&sregs[0]) == 0);
+
+  /* A request above the level is taken.  */
+  ext_irl[0] = 5;
+  CHECK (arch->check_interrupts (&sregs[0]) == 5);
+
+  /* At or below the level it is held off.  */
+  sregs[0].psr |= 7 << 8;
+  CHECK (arch->check_interrupts (&sregs[0]) == 0);
+
+  /* Level fifteen is non-maskable.  */
+  ext_irl[0] = 15;
+  CHECK (arch->check_interrupts (&sregs[0]) == 15);
+
+  /* With traps disabled nothing is taken.  */
+  sregs[0].psr &= ~PSR_ET;
+  CHECK (arch->check_interrupts (&sregs[0]) == 0);
+
+  ext_irl[0] = 0;
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC an interrupt leaves power down mode")
+{
+  sregs[0].psr |= PSR_ET;
+  sregs[0].psr &= ~PSR_PIL;
+  sregs[0].trap = 0;
+  sregs[0].pwd_mode = 1;
+  sregs[0].pwdstart = 0;
+  sregs[0].simtime = 100;
+  ext_irl[0] = 5;
+
+  CHECK (arch->check_interrupts (&sregs[0]) == 5);
+  CHECK (sregs[0].pwd_mode == 0);
+  CHECK (sregs[0].pwdtime == 100);
+
+  ext_irl[0] = 0;
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC an interrupt waits for a pending trap")
+{
+  sregs[0].psr |= PSR_ET;
+  sregs[0].psr &= ~PSR_PIL;
+  ext_irl[0] = 5;
+
+  /* A trap already pending takes precedence, so the interrupt is not
+     reported yet.  */
+  sregs[0].trap = TRAP_UNIMP;
+  CHECK (arch->check_interrupts (&sregs[0]) == 0);
+
+  sregs[0].trap = 0;
+  ext_irl[0] = 0;
+}
