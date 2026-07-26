@@ -560,3 +560,90 @@ TEST_CASE_FIXTURE (riscv_fixture, "RISC-V an unassigned opcode is illegal")
   CHECK (exec (opcode (0x0a)) == TRAP_ILLEG);
   CHECK (exec (opcode (0x1e)) == TRAP_ILLEG);
 }
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the multiplies")
+{
+  /* The M extension: the low word of the product, and the high word for
+     each of the three signedness combinations.  */
+  set (1, 0x00010000);
+  set (2, 0x00010000);
+
+  CHECK (exec (rtype (OP_REG, 3, 0, 1, 2, 1)) == 0);
+  CHECK (get (3) == 0);
+  CHECK (exec (rtype (OP_REG, 3, 3, 1, 2, 1)) == 0);
+  CHECK (get (3) == 1);
+
+  set (1, 0xffffffff); /* minus one signed, the largest word unsigned */
+  set (2, 2);
+
+  CHECK (exec (rtype (OP_REG, 3, 0, 1, 2, 1)) == 0);
+  CHECK (get (3) == 0xfffffffe);
+  CHECK (exec (rtype (OP_REG, 3, 1, 1, 2, 1)) == 0);
+  CHECK (get (3) == 0xffffffff); /* signed by signed */
+  CHECK (exec (rtype (OP_REG, 3, 2, 1, 2, 1)) == 0);
+  CHECK (get (3) == 0xffffffff); /* signed by unsigned */
+  CHECK (exec (rtype (OP_REG, 3, 3, 1, 2, 1)) == 0);
+  CHECK (get (3) == 1); /* unsigned by unsigned */
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the divides")
+{
+  set (1, 100);
+  set (2, 7);
+
+  CHECK (exec (rtype (OP_REG, 3, 4, 1, 2, 1)) == 0);
+  CHECK (get (3) == 14);
+  CHECK (exec (rtype (OP_REG, 3, 5, 1, 2, 1)) == 0);
+  CHECK (get (3) == 14);
+  CHECK (exec (rtype (OP_REG, 3, 6, 1, 2, 1)) == 0);
+  CHECK (get (3) == 2);
+  CHECK (exec (rtype (OP_REG, 3, 7, 1, 2, 1)) == 0);
+  CHECK (get (3) == 2);
+
+  /* A negative dividend, where the signed and unsigned forms part.  */
+  set (1, (uint32) -100);
+  CHECK (exec (rtype (OP_REG, 3, 4, 1, 2, 1)) == 0);
+  CHECK (get (3) == (uint32) -14);
+  CHECK (exec (rtype (OP_REG, 3, 6, 1, 2, 1)) == 0);
+  CHECK (get (3) == (uint32) -2);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture,
+		   "RISC-V a divide by zero has a defined result")
+{
+  /* The M extension defines division by zero rather than trapping: the
+     quotient is all ones, the unsigned quotient the largest word, and the
+     remainder is the dividend.  */
+  set (1, 100);
+  set (2, 0);
+
+  CHECK (exec (rtype (OP_REG, 3, 4, 1, 2, 1)) == 0);
+  CHECK (get (3) == 0xffffffff);
+  CHECK (exec (rtype (OP_REG, 3, 5, 1, 2, 1)) == 0);
+  CHECK (get (3) == 0xffffffff);
+  CHECK (exec (rtype (OP_REG, 3, 6, 1, 2, 1)) == 0);
+  CHECK (get (3) == 100);
+  CHECK (exec (rtype (OP_REG, 3, 7, 1, 2, 1)) == 0);
+  CHECK (get (3) == 100);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture,
+		   "RISC-V a divide overflow has a defined result")
+{
+  /* The most negative word divided by minus one does not fit, and the
+     extension defines the answer rather than trapping: the quotient is the
+     dividend and the remainder is zero.  The unsigned forms have no such
+     case and compute the ordinary answer.  */
+  set (1, 0x80000000);
+  set (2, 0xffffffff);
+
+  CHECK (exec (rtype (OP_REG, 3, 4, 1, 2, 1)) == 0);
+  CHECK (get (3) == 0x80000000);
+  CHECK (exec (rtype (OP_REG, 3, 6, 1, 2, 1)) == 0);
+  CHECK (get (3) == 0);
+
+  CHECK (exec (rtype (OP_REG, 3, 5, 1, 2, 1)) == 0);
+  CHECK (get (3) == 0);
+  CHECK (exec (rtype (OP_REG, 3, 7, 1, 2, 1)) == 0);
+  CHECK (get (3) == 0x80000000);
+}
