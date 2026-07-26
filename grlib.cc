@@ -1064,12 +1064,10 @@ static struct uart_port porta = UART_PORT_INIT;
 /* UART status register */
 static int32 Ucontrol;
 
-static unsigned char aq[UARTBUF], bq[UARTBUF];
+static unsigned char aq[UARTBUF];
 static int32 anum, aind = 0;
-static int32 bnum, bind = 0;
-static char wbufa[UARTBUF], wbufb[UARTBUF];
+static char wbufa[UARTBUF];
 static unsigned wnuma;
-static unsigned wnumb;
 #ifndef O_NONBLOCK
 #define O_NONBLOCK 0
 #endif
@@ -1329,8 +1327,8 @@ uart_irq_start (void)
 static void
 apbuart_reset (void)
 {
-  wnuma = wnumb = 0;
-  anum = aind = bnum = bind = 0;
+  wnuma = 0;
+  anum = aind = 0;
   uart_stat_reg = UARTA_SRE | UARTA_HRE;
 
   uart_irq_start ();
