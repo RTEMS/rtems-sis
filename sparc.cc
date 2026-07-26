@@ -1151,7 +1151,7 @@ sparc_dispatch_instruction (struct pstate *sregs)
 	      sregs->trap = TRAP_DEXC;
 	      break;
 	    }
-	  if (op3 == LDSB)
+	  if ((op3 == LDSB) || (op3 == LDSBA))
 	    data = extract_byte_signed (data, address);
 	  else
 	    data = extract_byte (data, address);
@@ -1176,7 +1176,7 @@ sparc_dispatch_instruction (struct pstate *sregs)
 	      sregs->trap = TRAP_DEXC;
 	      break;
 	    }
-	  if (op3 == LDSH)
+	  if ((op3 == LDSH) || (op3 == LDSHA))
 	    data = extract_short_signed (data, address);
 	  else
 	    data = extract_short (data, address);
