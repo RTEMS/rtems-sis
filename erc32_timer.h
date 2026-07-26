@@ -42,10 +42,21 @@ concept TimerEnv = requires (E e) {
   { e.Log ("") };
 };
 
+/* Everything which distinguishes one MEC timer from the other: the width of
+   its scaler, its interrupt level, where its field sits in the timer control
+   register, and the reset value of its counter reload bit.  */
+struct TimerSpec
+{
+  uint32 scaler_mask;
+  int level;
+  unsigned ctrl_shift;
+  bool reload_at_zero_reset;
+  const char *name;
+};
+
 /* One MEC timer: a down counting scaler driving a down counting 32 bit
    counter.  The real time clock and the general purpose timer share this
-   logic and differ only in scaler width, interrupt level, and where their
-   control bits sit in the timer control register.
+   logic and differ only by their TimerSpec.
 
    The scaler is modelled as an elapsed time delta rather than as a register
    that counts down every clock, so a tick is scheduled scaler + 1 clocks
@@ -53,11 +64,7 @@ concept TimerEnv = requires (E e) {
 template <TimerEnv Env> class Timer
 {
 public:
-  Timer (Env &env, uint32 scaler_mask, int level, unsigned ctrl_shift,
-	 bool reload_at_zero_reset, const char *name)
-      : env_ (env), scaler_mask_ (scaler_mask), level_ (level),
-	ctrl_shift_ (ctrl_shift), reload_at_zero_reset_ (reload_at_zero_reset),
-	name_ (name)
+  Timer (Env &env, const TimerSpec &spec) : env_ (env), spec_ (spec)
   {
     Reset ();
   }
@@ -73,10 +80,10 @@ public:
   {
     counter_ = 0xffffffffu;
     reload_ = 0xffffffffu;
-    scaler_ = scaler_mask_;
+    scaler_ = spec_.scaler_mask;
     scaler_start_ = 0;
     enabled_ = false;
-    reload_at_zero_ = reload_at_zero_reset_;
+    reload_at_zero_ = spec_.reload_at_zero_reset;
     scaler_enabled_ = false;
   }
 
@@ -121,7 +128,7 @@ public:
   void
   SetScaler (uint32 val)
   {
-    scaler_ = val & scaler_mask_;
+    scaler_ = val & spec_.scaler_mask;
   }
 
   void
@@ -138,7 +145,7 @@ public:
   void
   WriteControl (uint32 val)
   {
-    uint32 bits = val >> ctrl_shift_;
+    uint32 bits = val >> spec_.ctrl_shift;
 
     reload_at_zero_ = (bits & 1) != 0;
     if (bits & 2)
@@ -155,7 +162,7 @@ public:
     if (env_.Verbose ())
       {
 	char msg[48];
-	snprintf (msg, sizeof msg, "%s started (period %d)\n\r", name_,
+	snprintf (msg, sizeof msg, "%s started (period %d)\n\r", spec_.name,
 		  scaler_ + 1);
 	env_.Log (msg);
       }
@@ -171,7 +178,7 @@ public:
   {
     if (counter_ == 0)
       {
-	env_.Irq (level_);
+	env_.Irq (spec_.level);
 	if (reload_at_zero_)
 	  counter_ = reload_;
 	else
@@ -191,7 +198,7 @@ public:
 	if (env_.Verbose ())
 	  {
 	    char msg[32];
-	    snprintf (msg, sizeof msg, "%s stopped\n\r", name_);
+	    snprintf (msg, sizeof msg, "%s stopped\n\r", spec_.name);
 	    env_.Log (msg);
 	  }
 	enabled_ = false;
@@ -201,11 +208,7 @@ public:
 private:
   Env &env_;
 
-  const uint32 scaler_mask_;
-  const int level_;
-  const unsigned ctrl_shift_;
-  const bool reload_at_zero_reset_;
-  const char *const name_;
+  const TimerSpec spec_;
 
   uint32 counter_;
   uint32 reload_;
@@ -228,8 +231,9 @@ concept WatchdogEnv = requires (E e) {
 };
 
 /* The states of Figure 7 of the manual.  The watchdog runs from reset; a
-   write to the trap door disables it, but only before it has been
-   programmed, and a write to the program register re-arms it for good.  */
+   write to the trap door disables it, but only before it has been programmed
+   and before it has elapsed, and a write to the program register re-arms it
+   for good.  */
 enum class WatchdogState
 {
   Init,

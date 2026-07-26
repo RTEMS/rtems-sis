@@ -83,12 +83,21 @@ const uint32 TC_RTC_RELOAD = 0x100;
 const uint32 TC_RTC_LOAD = 0x200;
 const uint32 TC_RTC_SCALER_EN = 0x400;
 
-/* The two timers as erc32.cc instantiates them: scaler width, and where each
-   one's control bits sit in the timer control register.  */
-const uint32 RTC_SCALER_MASK = 0x0ff;
-const uint32 GPT_SCALER_MASK = 0x0ffff;
-const unsigned RTC_CTRL_SHIFT = 8;
-const unsigned GPT_CTRL_SHIFT = 0;
+/* The two timers as erc32.cc instantiates them.  The manual gives the real
+   time clock an 8 bit scaler and the general purpose timer a 16 bit one, and
+   puts their control fields at bit 8 and bit 0 of the timer control
+   register.  */
+constexpr erc32::TimerSpec RTC_SPEC = { .scaler_mask = 0x0ff,
+					.level = erc32::kRtcLevel,
+					.ctrl_shift = 8,
+					.reload_at_zero_reset = true,
+					.name = "RTC" };
+
+constexpr erc32::TimerSpec GPT_SPEC = { .scaler_mask = 0x0ffff,
+					.level = erc32::kGptLevel,
+					.ctrl_shift = 0,
+					.reload_at_zero_reset = false,
+					.name = "GPT" };
 
 /* Store-size encoding for a word and the test-mode / IFR-enable bit of the
    MEC test control register.  */
@@ -454,10 +463,8 @@ TEST_CASE_FIXTURE (mec_fixture, "MEC dispatches the interrupt registers")
 TEST_CASE ("Timer resets to the values the manual documents")
 {
   TimerTestEnv env;
-  erc32::Timer<TimerTestEnv> rtc (env, RTC_SCALER_MASK, erc32::kRtcLevel,
-				  RTC_CTRL_SHIFT, true, "RTC");
-  erc32::Timer<TimerTestEnv> gpt (env, GPT_SCALER_MASK, erc32::kGptLevel,
-				  GPT_CTRL_SHIFT, false, "GPT");
+  erc32::Timer<TimerTestEnv> rtc (env, RTC_SPEC);
+  erc32::Timer<TimerTestEnv> gpt (env, GPT_SPEC);
 
   /* Counter and programmed counter reset to FFFFFFFF, and the timer is not
      running: the manual states it must be programmed after reset.  */
@@ -486,10 +493,8 @@ TEST_CASE ("Timer resets to the values the manual documents")
 TEST_CASE ("Timer truncates a scaler to its programmed width")
 {
   TimerTestEnv env;
-  erc32::Timer<TimerTestEnv> rtc (env, RTC_SCALER_MASK, erc32::kRtcLevel,
-				  RTC_CTRL_SHIFT, true, "RTC");
-  erc32::Timer<TimerTestEnv> gpt (env, GPT_SCALER_MASK, erc32::kGptLevel,
-				  GPT_CTRL_SHIFT, false, "GPT");
+  erc32::Timer<TimerTestEnv> rtc (env, RTC_SPEC);
+  erc32::Timer<TimerTestEnv> gpt (env, GPT_SPEC);
 
   /* Bits above the scaler width are not part of the register.  */
   rtc.SetScaler (0x1a5);
@@ -502,8 +507,7 @@ TEST_CASE ("Timer truncates a scaler to its programmed width")
 TEST_CASE ("Timer control loads the counter from its programmed value")
 {
   TimerTestEnv env;
-  erc32::Timer<TimerTestEnv> rtc (env, RTC_SCALER_MASK, erc32::kRtcLevel,
-				  RTC_CTRL_SHIFT, true, "RTC");
+  erc32::Timer<TimerTestEnv> rtc (env, RTC_SPEC);
 
   rtc.SetReload (0x1234);
   CHECK (rtc.reload () == 0x1234);
@@ -518,10 +522,8 @@ TEST_CASE ("Timer control loads the counter from its programmed value")
 TEST_CASE ("Timer control reads its own field of the control register")
 {
   TimerTestEnv env;
-  erc32::Timer<TimerTestEnv> rtc (env, RTC_SCALER_MASK, erc32::kRtcLevel,
-				  RTC_CTRL_SHIFT, true, "RTC");
-  erc32::Timer<TimerTestEnv> gpt (env, GPT_SCALER_MASK, erc32::kGptLevel,
-				  GPT_CTRL_SHIFT, false, "GPT");
+  erc32::Timer<TimerTestEnv> rtc (env, RTC_SPEC);
+  erc32::Timer<TimerTestEnv> gpt (env, GPT_SPEC);
 
   /* One register carries both timers, so the general purpose timer's bits
      must leave the real time clock alone and the other way round.  */
@@ -548,8 +550,7 @@ TEST_CASE ("Timer control reads its own field of the control register")
 TEST_CASE ("Timer start schedules one scaler period ahead")
 {
   TimerTestEnv env;
-  erc32::Timer<TimerTestEnv> gpt (env, GPT_SCALER_MASK, erc32::kGptLevel,
-				  GPT_CTRL_SHIFT, false, "GPT");
+  erc32::Timer<TimerTestEnv> gpt (env, GPT_SPEC);
 
   /* The counter is decremented once per scaler period, so the timeout is
      counter times scaler plus one clocks.  */
@@ -569,8 +570,7 @@ TEST_CASE ("Timer start schedules one scaler period ahead")
 TEST_CASE ("Timer scaler reads down while running")
 {
   TimerTestEnv env;
-  erc32::Timer<TimerTestEnv> gpt (env, GPT_SCALER_MASK, erc32::kGptLevel,
-				  GPT_CTRL_SHIFT, false, "GPT");
+  erc32::Timer<TimerTestEnv> gpt (env, GPT_SPEC);
 
   env.time = 100;
   gpt.SetScaler (50);
@@ -587,8 +587,7 @@ TEST_CASE ("Timer scaler reads down while running")
 TEST_CASE ("Timer scaler reads its programmed value while stopped")
 {
   TimerTestEnv env;
-  erc32::Timer<TimerTestEnv> rtc (env, RTC_SCALER_MASK, erc32::kRtcLevel,
-				  RTC_CTRL_SHIFT, true, "RTC");
+  erc32::Timer<TimerTestEnv> rtc (env, RTC_SPEC);
 
   env.time = 900;
   rtc.SetScaler (0x20);
@@ -598,8 +597,7 @@ TEST_CASE ("Timer scaler reads its programmed value while stopped")
 TEST_CASE ("Timer tick counts a non-zero counter down and re-arms")
 {
   TimerTestEnv env;
-  erc32::Timer<TimerTestEnv> rtc (env, RTC_SCALER_MASK, erc32::kRtcLevel,
-				  RTC_CTRL_SHIFT, true, "RTC");
+  erc32::Timer<TimerTestEnv> rtc (env, RTC_SPEC);
 
   rtc.SetScaler (7);
   rtc.SetReload (5);
@@ -619,10 +617,8 @@ TEST_CASE ("Timer tick counts a non-zero counter down and re-arms")
 TEST_CASE ("Timer tick at zero interrupts at the level of the timer")
 {
   TimerTestEnv env;
-  erc32::Timer<TimerTestEnv> rtc (env, RTC_SCALER_MASK, erc32::kRtcLevel,
-				  RTC_CTRL_SHIFT, true, "RTC");
-  erc32::Timer<TimerTestEnv> gpt (env, GPT_SCALER_MASK, erc32::kGptLevel,
-				  GPT_CTRL_SHIFT, false, "GPT");
+  erc32::Timer<TimerTestEnv> rtc (env, RTC_SPEC);
+  erc32::Timer<TimerTestEnv> gpt (env, GPT_SPEC);
 
   /* Table 5 of the manual assigns the real time clock interrupt level 13 and
      the general purpose timer level 12.  */
@@ -644,8 +640,7 @@ TEST_CASE ("Timer tick at zero interrupts at the level of the timer")
 TEST_CASE ("Timer reloads at zero and keeps running when told to")
 {
   TimerTestEnv env;
-  erc32::Timer<TimerTestEnv> gpt (env, GPT_SCALER_MASK, erc32::kGptLevel,
-				  GPT_CTRL_SHIFT, false, "GPT");
+  erc32::Timer<TimerTestEnv> gpt (env, GPT_SPEC);
 
   gpt.SetScaler (3);
   gpt.SetReload (9);
@@ -667,8 +662,7 @@ TEST_CASE ("Timer reloads at zero and keeps running when told to")
 TEST_CASE ("Timer stops at zero when reload is not set")
 {
   TimerTestEnv env;
-  erc32::Timer<TimerTestEnv> gpt (env, GPT_SCALER_MASK, erc32::kGptLevel,
-				  GPT_CTRL_SHIFT, false, "GPT");
+  erc32::Timer<TimerTestEnv> gpt (env, GPT_SPEC);
 
   gpt.SetScaler (2);
   gpt.SetReload (0);
@@ -687,8 +681,7 @@ TEST_CASE ("Timer narrates its start and stop when verbose")
 {
   TimerTestEnv env;
   env.verbose = true;
-  erc32::Timer<TimerTestEnv> rtc (env, RTC_SCALER_MASK, erc32::kRtcLevel,
-				  RTC_CTRL_SHIFT, true, "RTC");
+  erc32::Timer<TimerTestEnv> rtc (env, RTC_SPEC);
 
   rtc.SetScaler (9);
   rtc.SetReload (0);

@@ -243,7 +243,7 @@ static erc32::Mec<RealEnv> mec (real_env);
 /* The environment a timer runs against in the real board.  THUNK is the
    event queue callback which ticks that timer, so the template itself never
    names a C function.  */
-template <void (*Thunk) (int32)> struct TimerEnv
+template <void (*Thunk) (int32)> struct RealTimerEnv
 {
   bool
   Verbose ()
@@ -273,7 +273,7 @@ template <void (*Thunk) (int32)> struct TimerEnv
 };
 
 /* The watchdog additionally issues the MEC's warm reset.  */
-struct WatchdogEnv : public TimerEnv<wdog_intr>
+struct RealWatchdogEnv : public RealTimerEnv<wdog_intr>
 {
   void
   WatchdogReset ()
@@ -283,18 +283,25 @@ struct WatchdogEnv : public TimerEnv<wdog_intr>
   }
 };
 
-static TimerEnv<rtc_intr> rtc_env;
-static TimerEnv<gpt_intr> gpt_env;
-static WatchdogEnv wdog_env;
+static RealTimerEnv<rtc_intr> rtc_env;
+static RealTimerEnv<gpt_intr> gpt_env;
+static RealWatchdogEnv wdog_env;
 
-/* The real time clock has an 8 bit scaler and its control bits at bit 8 of
-   the timer control register; the general purpose timer has a 16 bit scaler
-   and its control bits at bit 0.  */
-static erc32::Timer<TimerEnv<rtc_intr>> rtc (rtc_env, 0x0ff, erc32::kRtcLevel,
-					     8, true, "RTC");
-static erc32::Timer<TimerEnv<gpt_intr>>
-    gpt (gpt_env, 0x0ffff, erc32::kGptLevel, 0, false, "GPT");
-static erc32::Watchdog<WatchdogEnv> wdog (wdog_env);
+static constexpr erc32::TimerSpec rtc_spec = { .scaler_mask = 0x0ff,
+					       .level = erc32::kRtcLevel,
+					       .ctrl_shift = 8,
+					       .reload_at_zero_reset = true,
+					       .name = "RTC" };
+
+static constexpr erc32::TimerSpec gpt_spec = { .scaler_mask = 0x0ffff,
+					       .level = erc32::kGptLevel,
+					       .ctrl_shift = 0,
+					       .reload_at_zero_reset = false,
+					       .name = "GPT" };
+
+static erc32::Timer<RealTimerEnv<rtc_intr>> rtc (rtc_env, rtc_spec);
+static erc32::Timer<RealTimerEnv<gpt_intr>> gpt (gpt_env, gpt_spec);
+static erc32::Watchdog<RealWatchdogEnv> wdog (wdog_env);
 
 /* One-time init */
 
