@@ -85,7 +85,9 @@ uart_port_raw (struct uart_port *port)
   sis_console_raw (1);
 
 #ifdef HAVE_TERMIOS_H
-  if (port->ifd == 0 && port->open)
+  /* Only a port on the console has a terminal.  Opening one is what sets the
+     descriptor to zero, so there is nothing else to test.  */
+  if (port->ifd == 0)
     {
       tcsetattr (0, TCSANOW, &port->raw);
       tcflush (port->ifd, TCIFLUSH);
@@ -104,7 +106,8 @@ uart_port_restore (struct uart_port *port)
   sis_console_raw (0);
 
 #ifdef HAVE_TERMIOS_H
-  if (port->ifd == 0 && port->open && tty_setup)
+  /* Without -tty nothing was saved, so there is nothing to put back.  */
+  if (port->ifd == 0 && tty_setup)
     tcsetattr (0, TCSANOW, &port->saved);
 #else
   (void) port;
