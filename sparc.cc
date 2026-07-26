@@ -1951,6 +1951,7 @@ sparc_execute_trap (struct pstate *sregs)
 
   if (sregs->trap >= 256)
     {
+      assert (sregs->trap <= NULL_TRAP);
       switch (sregs->trap)
 	{
 	case 256:
@@ -1960,7 +1961,7 @@ sparc_execute_trap (struct pstate *sregs)
 	  break;
 	case ERROR_TRAP:
 	  return (ERROR_MODE);
-	case WPT_TRAP:
+	default: /* a watchpoint, which is what a debugger session hits */
 	  return (WPT_HIT);
 	case NULL_TRAP:
 	  return (NULL_HIT);
@@ -2136,16 +2137,21 @@ sparc_get_regi (struct pstate *sregs, int32 reg, char *buf, int length)
   uint32 cwp;
   uint32 rval = 0;
 
+  /* The numbering runs the globals, the window, the floating point
+     registers and then the control registers, so each range only has to
+     rule out the one above it.  */
+  assert (reg >= 0);
+
   cwp = ((sregs->psr & 0x7) << 4);
-  if ((reg >= 0) && (reg < 8))
+  if (reg < 8)
     {
       rval = sregs->g[reg];
     }
-  else if ((reg >= 8) && (reg < 32))
+  else if (reg < 32)
     {
       rval = sregs->r[(cwp + reg) & 0x7f];
     }
-  else if ((reg >= 32) && (reg < 64))
+  else if (reg < 64)
     {
 #ifdef HOST_LITTLE_ENDIAN
       reg ^= 1;
@@ -2463,20 +2469,10 @@ regdec (char *st, int r)
     strcat (st, "%sp");
   else
     {
-      switch ((r >> 3) & 3)
-	{
-	case 0:
-	  ch = 'g';
-	  break;
-	case 1:
-	  ch = 'o';
-	  break;
-	case 2:
-	  ch = 'l';
-	  break;
-	case 3:
-	  ch = 'i';
-	}
+      /* The window names the four groups of eight registers in order.  */
+      static const char group[4] = { 'g', 'o', 'l', 'i' };
+
+      ch = group[(r >> 3) & 3];
       sprintf (regst, "%%%c%d", ch, r & 7);
       strcat (st, regst);
     }
@@ -2487,47 +2483,45 @@ simm13dec (char *st, struct insn_type insn, int hex, int merge)
 {
   char tmp[32];
 
-  if (insn.i)
+  /* Only the immediate form of an instruction has an immediate to print,
+     which is the branch its one caller reaches this from.  */
+  assert (insn.i);
+
+  if (!hex)
     {
-      if (!hex)
+      /* Only the address of a jump merges its immediate into an expression,
+	 and an address is always printed in hex.  */
+      if (!insn.rs1)
+	sprintf (tmp, "%d", insn.simm);
+      else
+	sprintf (tmp, ", %d", insn.simm);
+    }
+  else if (merge)
+    {
+      if (insn.simm < 0)
 	{
-	  /* Only the address of a jump merges its immediate into an
-	     expression, and an address is always printed in hex.  */
+	  insn.simm = -insn.simm;
 	  if (!insn.rs1)
-	    sprintf (tmp, "%d", insn.simm);
+	    sprintf (tmp, "-0x%x", insn.simm);
 	  else
-	    sprintf (tmp, ", %d", insn.simm);
+	    sprintf (tmp, " - 0x%x", insn.simm);
 	}
       else
 	{
-	  if (merge)
-	    {
-	      if (insn.simm < 0)
-		{
-		  insn.simm = -insn.simm;
-		  if (!insn.rs1)
-		    sprintf (tmp, "-0x%x", insn.simm);
-		  else
-		    sprintf (tmp, " - 0x%x", insn.simm);
-		}
-	      else
-		{
-		  if (!insn.rs1)
-		    sprintf (tmp, "0x%x", insn.simm);
-		  else
-		    sprintf (tmp, " + 0x%x", insn.simm);
-		}
-	    }
+	  if (!insn.rs1)
+	    sprintf (tmp, "0x%x", insn.simm);
 	  else
-	    {
-	      if (!insn.rs1)
-		sprintf (tmp, "0x%x", insn.simm);
-	      else
-		sprintf (tmp, ", 0x%x", insn.simm);
-	    }
+	    sprintf (tmp, " + 0x%x", insn.simm);
 	}
-      strcat (st, tmp);
     }
+  else
+    {
+      if (!insn.rs1)
+	sprintf (tmp, "0x%x", insn.simm);
+      else
+	sprintf (tmp, ", 0x%x", insn.simm);
+    }
+  strcat (st, tmp);
 }
 
 static void
@@ -2834,7 +2828,7 @@ sparc_disas (char *st, unsigned pc, unsigned int inst)
 	      strcpy (st, "clr  ");
 	      regdec (st, insn.rd);
 	    }
-	  else if (((insn.i == '1') && (!insn.simm)) || (!insn.rs1))
+	  else if (((insn.i == 1) && (!insn.simm)) || (!insn.rs1))
 	    {
 	      strcpy (st, "mov  ");
 	      regres (st, insn, 0);
