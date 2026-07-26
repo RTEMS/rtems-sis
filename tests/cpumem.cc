@@ -14,6 +14,7 @@ namespace
 
 char flatmem_bytes[sis_tests::FLATMEM_SIZE];
 int flatmem_mexc;
+uint32 flatmem_ro = ~0u;
 
 bool
 inside (uint32 addr, uint32 size)
@@ -54,6 +55,13 @@ flat_write (uint32 addr, uint32 *data, int32 sz, int32 *ws)
   uint32 waddr = addr & ~3u;
 
   if (!inside (addr, size))
+    {
+      flatmem_mexc++;
+      *ws = 1;
+      return 1;
+    }
+
+  if ((addr & ~3u) == flatmem_ro)
     {
       flatmem_mexc++;
       *ws = 1;
@@ -144,6 +152,13 @@ flatmem_clear ()
 {
   memset (flatmem_bytes, 0, sizeof flatmem_bytes);
   flatmem_mexc = 0;
+  flatmem_ro = ~0u;
+}
+
+void
+flatmem_fail_write (uint32 addr)
+{
+  flatmem_ro = addr & ~3u;
 }
 
 void

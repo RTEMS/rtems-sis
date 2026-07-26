@@ -40,6 +40,13 @@ uint32 flatmem_peek (uint32 addr);
    cleared.  */
 int flatmem_faults ();
 
+/* Refuse every write to the word at ADDR, while reads of it still succeed.
+   A board can protect a word it lets a program read, and the atomic
+   instructions have a fault path for exactly that case which no address of a
+   plain window reaches.  An address of ~0 turns the refusal off, which
+   flatmem_clear also does.  */
+void flatmem_fail_write (uint32 addr);
+
 } /* namespace sis_tests */
 
 #endif

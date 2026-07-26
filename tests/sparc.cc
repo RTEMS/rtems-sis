@@ -3048,3 +3048,145 @@ TEST_CASE_FIXTURE (sparc_fixture, "SPARC an enabled trap takes the exception")
     CHECK (sregs[0].fpq[1] == fpop (FPOP1, 3, 1, OPF_FDIVs, 2));
   }
 }
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC the unassigned opcodes are unimplemented")
+{
+  /* Appendix B leaves part of both op3 spaces unassigned, and chapter 7 has
+     the processor take the unimplemented instruction trap for them.  Sweep
+     both spaces and check that every opcode either does something or takes
+     that trap, and that at least one of each space does.  */
+  int unimp[2] = { 0, 0 };
+
+  sregs[0].psr |= PSR_EF;
+
+  for (uint32 op3 = 0; op3 < 0x40; op3++)
+    {
+      /* The trap on condition and the write to the state registers are left
+	 out: the first raises a software trap by design and the second
+	 changes the mode the following opcodes run in.  */
+      if (op3 == TICC || op3 == WRPSR || op3 == WRWIM || op3 == WRTBR ||
+	  op3 == WRY || op3 == RETT)
+	continue;
+
+      for (int i = 0; i < 2; i++)
+	{
+	  uint32 op = i == 0 ? OP_ARITH : OP_MEM;
+
+	  if (exec (f3i (op, 3, op3, 0, 0)) == TRAP_UNIMP)
+	    unimp[i]++;
+	}
+    }
+
+  CHECK (unimp[0] > 0);
+  CHECK (unimp[1] > 0);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC an atomic instruction reports a refused write")
+{
+  /* The atomic instructions read and then write one word, so a word which
+     reads but does not write leaves them half done and they report a data
+     access exception.  */
+  const uint32 address = 0x40;
+
+  sis_tests::flatmem_poke (address, 0x12345678);
+  sis_tests::flatmem_fail_write (address);
+  set (1, address);
+
+  set (3, 0x11);
+  CHECK (exec (f3i (OP_MEM, 3, SWAP, 1, 0)) == TRAP_DEXC);
+  CHECK (sis_tests::flatmem_peek (address) == 0x12345678);
+
+  set (3, 0x11);
+  CHECK (exec (f3i (OP_MEM, 3, LDSTUB, 1, 0)) == TRAP_DEXC);
+
+  /* The compare and swap writes only when the word matches, so it reports
+     the refusal for a match and completes for a mismatch.  */
+  set (2, 0x12345678);
+  set (3, 0x11);
+  CHECK (exec (f3r (OP_MEM, 3, CASA, 1, 2) | (0xa << 5)) == TRAP_DEXC);
+
+  set (2, 0);
+  set (3, 0x11);
+  CHECK (exec (f3r (OP_MEM, 3, CASA, 1, 2) | (0xa << 5)) == 0);
+  CHECK (get (3) == 0x12345678);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC the debugger reads a cached stack")
+{
+  /* The register windows hold the top of the stack, so a debugger reading
+     one of those addresses out of memory would see whatever the program last
+     wrote rather than the register.  save_sp records where each window's
+     stack pointer is, and gdb_sp_read answers from the window instead.  */
+  char buf[4];
+
+  sregs[0].wim = 2; /* window one is invalid, so it has no stack pointer */
+  for (int win = 0; win < NWIN; win++)
+    sregs[0].r[win * 16 + 14] = 0x3000 + win * 0x100;
+  save_sp (&sregs[0]);
+
+  CHECK (sregs[0].sp[0] == 0x3000);
+  CHECK (sregs[0].sp[1] == 0);
+
+  /* The first word of window zero's stack frame is the first register of the
+     window above it.  */
+  sregs[0].r[16] = 0xdeadbeef;
+  CHECK (gdb_sp_read (0x3000, buf, 4) == 4);
+  CHECK (((buf[0] & 0xff) << 24 | (buf[1] & 0xff) << 16 |
+	  (buf[2] & 0xff) << 8 | (buf[3] & 0xff)) == (int) 0xdeadbeef);
+
+  /* An address no window covers is left to memory.  */
+  CHECK (gdb_sp_read (0x9000, buf, 4) == 0);
+
+  SUBCASE ("the hit is reported when verbose")
+  {
+    stdout_capture cap;
+
+    sis_verbose = 1;
+    CHECK (gdb_sp_read (0x3000, buf, 4) == 4);
+    CHECK (cap.str ().find ("gdb_sp_read") != std::string::npos);
+  }
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC a register is set by its number")
+{
+  /* The debugger names a register by its number, which runs the globals, the
+     window, the floating point registers and then the control registers.  */
+  arch->set_register (&sregs[0], NULL, 0x11, 1);
+  CHECK (sregs[0].g[1] == 0x11);
+
+  arch->set_register (&sregs[0], NULL, 0x22, 8);
+  CHECK (get (8) == 0x22);
+
+  arch->set_register (&sregs[0], NULL, 0x33, 32 + 3);
+  CHECK (fsi (3) == 0x33);
+
+  arch->set_register (&sregs[0], NULL, 0x44, 64);
+  CHECK (sregs[0].y == 0x44);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC the control display reports a stopped core")
+{
+  /* The control register display says why the core stopped, so a user who
+     asked for it after a run sees the reason without asking again.  */
+  SUBCASE ("error mode")
+  {
+    stdout_capture cap;
+
+    sregs[0].err_mode = 1;
+    arch->display_ctrl (&sregs[0]);
+    CHECK (cap.str ().find ("error mode") != std::string::npos);
+  }
+
+  SUBCASE ("power-down mode")
+  {
+    stdout_capture cap;
+
+    sregs[0].err_mode = 0;
+    sregs[0].pwd_mode = 1;
+    arch->display_ctrl (&sregs[0]);
+    CHECK (cap.str ().find ("power-down mode") != std::string::npos);
+  }
+}
