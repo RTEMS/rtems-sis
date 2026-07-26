@@ -1243,6 +1243,135 @@ TEST_CASE ("Config protects while either segment has a mode")
   CHECK (cfg.access_protect () == false);
 }
 
+/* The segment write protection.  The manual makes a segment one range, from
+   0x02000000 + SEGBASE * 4 up to but not including 0x02000000 + SEGEND * 4,
+   and gives each segment a mode bit per processor mode.  */
+
+TEST_CASE ("Config protects everything outside the segments")
+{
+  ConfigTestEnv env;
+  erc32::Config<ConfigTestEnv> cfg (env, TEST_GEOMETRY);
+
+  /* Words 0x100 to 0x200, which is RAM byte offset 0x400 to 0x800, protected
+     for supervisor accesses.  */
+  cfg.WriteSegmentBase (
+      0, 0x100 | (erc32::kSegSupervisor << erc32::kSegModeShift));
+  cfg.WriteSegmentEnd (0, 0x200);
+
+  CHECK (cfg.WriteProtected (0x02000600, true, 2) == false); /* inside */
+  CHECK (cfg.WriteProtected (0x02000400, true, 2) == false); /* first word */
+  CHECK (cfg.WriteProtected (0x020007fc, true, 2) == false); /* last word */
+  CHECK (cfg.WriteProtected (0x020003fc, true, 2));	     /* just below */
+  CHECK (cfg.WriteProtected (0x02000800, true, 2));	     /* just above */
+}
+
+TEST_CASE ("Config protects a segment once, not every 8 Mbyte")
+{
+  ConfigTestEnv env;
+  erc32::Config<ConfigTestEnv> cfg (env, TEST_GEOMETRY);
+
+  cfg.WriteSegmentBase (
+      0, 0x100 | (erc32::kSegSupervisor << erc32::kSegModeShift));
+  cfg.WriteSegmentEnd (0, 0x200);
+
+  /* The same offset 8 Mbyte higher is a different address and lies outside
+     the segment, so it is protected.  */
+  CHECK (cfg.WriteProtected (0x02800600, true, 2));
+  CHECK (cfg.WriteProtected (0x02800400, true, 2));
+}
+
+TEST_CASE ("Config protects each mode separately")
+{
+  ConfigTestEnv env;
+  erc32::Config<ConfigTestEnv> cfg (env, TEST_GEOMETRY);
+
+  /* A segment enabled for supervisor accesses only leaves a user access
+     matching no segment, so the user write is protected either way.  */
+  cfg.WriteSegmentBase (
+      0, 0x100 | (erc32::kSegSupervisor << erc32::kSegModeShift));
+  cfg.WriteSegmentEnd (0, 0x200);
+
+  CHECK (cfg.WriteProtected (0x02000600, true, 2) == false);
+  CHECK (cfg.WriteProtected (0x02000600, false, 2));
+
+  /* Enabled for both modes, either access is allowed inside it.  */
+  cfg.WriteSegmentBase (0, 0x100 | ((erc32::kSegSupervisor | erc32::kSegUser)
+				    << erc32::kSegModeShift));
+  CHECK (cfg.WriteProtected (0x02000600, true, 2) == false);
+  CHECK (cfg.WriteProtected (0x02000600, false, 2) == false);
+}
+
+TEST_CASE ("Config catches a double word write leaving a segment")
+{
+  ConfigTestEnv env;
+  erc32::Config<ConfigTestEnv> cfg (env, TEST_GEOMETRY);
+
+  /* A segment ending on an odd word, so its last word is 0x1fe.  */
+  cfg.WriteSegmentBase (
+      0, 0x100 | (erc32::kSegSupervisor << erc32::kSegModeShift));
+  cfg.WriteSegmentEnd (0, 0x1ff);
+
+  /* A double word is eight byte aligned and covers two words, so one placed
+     on the last word of the segment writes one word past its end.  The word
+     write at the same address stays inside.  */
+  CHECK (cfg.WriteProtected (0x020007f8, true, 2) == false);
+  CHECK (cfg.WriteProtected (0x020007f8, true, 3));
+}
+
+TEST_CASE ("Config inverts the protection for block protection")
+{
+  ConfigTestEnv env;
+  erc32::Config<ConfigTestEnv> cfg (env, TEST_GEOMETRY);
+
+  cfg.WriteSegmentBase (
+      0, 0x100 | (erc32::kSegSupervisor << erc32::kSegModeShift));
+  cfg.WriteSegmentEnd (0, 0x200);
+  cfg.WriteMcr (erc32::kMcrBlockProtect);
+
+  /* Inside the segment is now the protected part and everything else is
+     writable.  */
+  CHECK (cfg.WriteProtected (0x02000600, true, 2));
+  CHECK (cfg.WriteProtected (0x020003fc, true, 2) == false);
+  CHECK (cfg.WriteProtected (0x02800600, true, 2) == false);
+}
+
+TEST_CASE ("Config protects nothing while no segment is enabled")
+{
+  ConfigTestEnv env;
+  erc32::Config<ConfigTestEnv> cfg (env, TEST_GEOMETRY);
+
+  /* A segment with neither mode bit set disables the protection, so a write
+     anywhere is allowed even though the addresses fall inside it.  */
+  cfg.WriteSegmentBase (0, 0x100);
+  cfg.WriteSegmentEnd (0, 0x200);
+  CHECK (cfg.access_protect () == false);
+  CHECK (cfg.WriteProtected (0x02000600, true, 2) == false);
+}
+
+TEST_CASE ("Config protects across both segments")
+{
+  ConfigTestEnv env;
+  erc32::Config<ConfigTestEnv> cfg (env, TEST_GEOMETRY);
+
+  /* Two enabled segments leave everything outside both protected.  */
+  cfg.WriteSegmentBase (
+      0, 0x100 | (erc32::kSegSupervisor << erc32::kSegModeShift));
+  cfg.WriteSegmentEnd (0, 0x200);
+  cfg.WriteSegmentBase (
+      1, 0x300 | (erc32::kSegSupervisor << erc32::kSegModeShift));
+  cfg.WriteSegmentEnd (1, 0x400);
+
+  CHECK (cfg.WriteProtected (0x02000600, true, 2) == false); /* segment 1 */
+  CHECK (cfg.WriteProtected (0x02000e00, true, 2) == false); /* segment 2 */
+  CHECK (cfg.WriteProtected (0x02000a00, true, 2));	     /* between */
+
+  /* With block protection, both segments are the protected part.  */
+  cfg.WriteMcr (erc32::kMcrBlockProtect);
+  CHECK (cfg.WriteProtected (0x02000600, true, 2));
+  CHECK (cfg.WriteProtected (0x02000e00, true, 2));
+  CHECK (cfg.WriteProtected (0x02000a00, true, 2) == false);
+}
+
 TEST_CASE ("Config takes the block protection bit from the control register")
 {
   ConfigTestEnv env;
