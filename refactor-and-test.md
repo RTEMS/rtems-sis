@@ -144,7 +144,10 @@ all of the concepts; each test file holds a small `TestEnv` per subsystem.
    to settle first: the manual makes bits 31-8 of a RX/TX register reserved and
    read zero, and SIS returns 0x700 or 0x600 there, mirroring the data ready,
    send empty and hold empty bits of the status register into the data
-   register. Find out whether RTEMS depends on it before changing it.
+   register. Settled: keep it, and it now has a line in `doc/erc32.md`. The
+   end-to-end suite gives no signal either way, because the ERC32 binaries
+   never read a UART data register at all, so a green `test-run` would not
+   have meant the change was safe.
 6. **`erc32_mem.h`** memory access dispatch. The only step with a performance
    obligation. Keep the implementation in an out-of-line global function
    reached by a static template call, never inlined and never indirect.
@@ -376,6 +379,21 @@ Hard-won here, so the next person does not rediscover them.
   stdin that never closes makes a run hang in the emulated UART and looks like a
   hang in target code. Before believing a regression or an improvement from a
   behavioral change, run it against an unmodified tree.
+
+- **A green `test-run` only counts if the run reaches the code.** Removing
+  the status bits the ERC32 UART data register returns left `test-run` fully
+  green, which looked like proof that nothing depended on them. It was not:
+  probing the read showed the ERC32 binaries never read that register once.
+  Before concluding a spec fix is safe because the runs pass, check that the
+  runs execute the code at all.
+
+- **Run the unit tests under the address sanitizer once per file.** Building
+  with `CXXFLAGS='-fsanitize=address -g -O1' LINKFLAGS=-fsanitize=address`
+  found a read one byte past the ERC32 receive buffer, on the path taken when
+  the buffer has been drained completely. Ordinary runs never noticed, because
+  the byte read belongs to the next buffer. It also reports 131 kB leaked in
+  five allocations from `read_elf_body` in `elf.cc`, which is untouched and
+  waiting for that file's step.
 
 - **Code that is never compiled rots, and nothing tells you.** `FAST_UART`
   was defined unconditionally by the build and by the autotools build before

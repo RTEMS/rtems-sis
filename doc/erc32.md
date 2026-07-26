@@ -104,6 +104,15 @@ The UARTs generate interrupt 4 and 5 after each received or transmitted
 character. The error interrupt is generated if overflow occurs - other errors
 cannot occur.
 
+The status register is as specified, with the framing, parity and overrun
+error bits never set because those errors cannot arise. The RX and TX
+registers deviate: the specification reserves their bits 31-8 and reads them
+as zero, while the simulator mirrors the data ready, send empty and hold empty
+bits of the status register into bits 8, 9 and 10, so a program can read a
+character and see whether it was valid in one access. A read with nothing
+buffered returns the last character delivered, as the receive holding register
+does.
+
 ## Real-time clock and general purpose timer A
 
 Both timers are a scaler driving a 32-bit down counter, as in the MEC
