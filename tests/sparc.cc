@@ -120,14 +120,24 @@ struct sparc_fixture
 
     /* A clear condition field and supervisor mode, so a case only has to set
        what it is about.  */
-    /* init_regs leaves the register file alone, so clear it here or a case
-       inherits whatever the one before it left.  */
+    /* init_regs leaves the register file alone and keeps the low bits of the
+       processor state register, so a case inherits whatever the one before
+       it left.  Clear all of it here.  */
     for (int i = 0; i < 8; i++)
       sregs[0].g[i] = 0;
     for (int i = 0; i < 128; i++)
       sregs[0].r[i] = 0;
+    for (int i = 0; i < 32; i++)
+      sregs[0].fd[i] = 0;
 
-    sregs[0].psr = (sregs[0].psr & ~PSR_CC) | PSR_S;
+    /* Supervisor mode, window zero, traps and the floating point unit
+       disabled, and the implementation and version of the ERC32.  */
+    sregs[0].psr = 0x11000080;
+    sregs[0].wim = 0;
+    sregs[0].tbr = 0;
+    sregs[0].y = 0;
+    sregs[0].fsr = 0;
+    sregs[0].fpstate = FP_EXE_MODE;
     sregs[0].pc = 0x1000;
     sregs[0].npc = 0x1004;
     sregs[0].trap = 0;
@@ -1530,4 +1540,203 @@ TEST_CASE_FIXTURE (sparc_fixture,
   CHECK (out.find ("ld") != std::string::npos);
   CHECK (out.find ("st") != std::string::npos);
   CHECK (out.find ("save") != std::string::npos);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC rett returns from a trap")
+{
+  uint32 cwp = sregs[0].psr & PSR_CWP;
+
+  /* rett runs with traps disabled, moves up a window, restores the previous
+     supervisor state and re-enables traps.  */
+  sregs[0].psr &= ~PSR_ET;
+  sregs[0].psr |= PSR_S | PSR_PS;
+  sregs[0].wim = 0;
+  set (1, 0x3000);
+
+  CHECK (exec (f3i (OP_ARITH, 0, RETT, 1, 0)) == 0);
+  CHECK ((sregs[0].psr & PSR_CWP) == ((cwp + 1) & PSR_CWP));
+  CHECK ((sregs[0].psr & PSR_ET) != 0);
+  CHECK ((sregs[0].psr & PSR_S) != 0);
+  CHECK (sregs[0].npc == 0x3000);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC rett drops to user mode")
+{
+  /* The previous supervisor bit decides what to return to.  */
+  sregs[0].psr &= ~(PSR_ET | PSR_PS);
+  sregs[0].psr |= PSR_S;
+  sregs[0].wim = 0;
+  set (1, 0x3000);
+
+  CHECK (exec (f3i (OP_ARITH, 0, RETT, 1, 0)) == 0);
+  CHECK ((sregs[0].psr & PSR_S) == 0);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC rett refuses the wrong conditions")
+{
+  set (1, 0x3000);
+
+  /* With traps already enabled it is unimplemented.  */
+  sregs[0].psr |= PSR_ET | PSR_S;
+  CHECK (exec (f3i (OP_ARITH, 0, RETT, 1, 0)) == TRAP_UNIMP);
+
+  /* In user mode it is privileged.  */
+  sregs[0].psr &= ~(PSR_ET | PSR_S);
+  CHECK (exec (f3i (OP_ARITH, 0, RETT, 1, 0)) == TRAP_PRIVI);
+
+  /* Returning into an invalid window underflows.  */
+  sregs[0].psr |= PSR_S;
+  sregs[0].wim = 1u << (((sregs[0].psr & PSR_CWP) + 1) & PSR_CWP);
+  CHECK (exec (f3i (OP_ARITH, 0, RETT, 1, 0)) == TRAP_WUFL);
+
+  /* The address must be word aligned.  */
+  sregs[0].wim = 0;
+  set (1, 0x3001);
+  CHECK (exec (f3i (OP_ARITH, 0, RETT, 1, 0)) == TRAP_UNALI);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC rett to a null address halts")
+{
+  /* The simulator stops rather than following a null pointer.  */
+  sregs[0].psr &= ~PSR_ET;
+  sregs[0].psr |= PSR_S;
+  sregs[0].wim = 0;
+  set (1, 0);
+
+  CHECK (exec (f3i (OP_ARITH, 0, RETT, 1, 0)) == NULL_TRAP);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC the ancillary registers on a LEON")
+{
+  /* On a LEON the read-y opcode also reaches the ancillary registers: the
+     implementation register and the two halves of the cycle counter.  */
+  int saved = cputype;
+  cputype = CPU_LEON3;
+
+  sregs[0].y = 0x11111111;
+  sregs[0].asr17 = 0x22222222;
+  sregs[0].simtime = 0x3333333344444444ull;
+
+  CHECK (exec (f3r (OP_ARITH, 3, RDY, 0, 0)) == 0);
+  CHECK (get (3) == 0x11111111);
+
+  CHECK (exec (f3r (OP_ARITH, 3, RDY, 17, 0)) == 0);
+  CHECK (get (3) == 0x22222222);
+
+  CHECK (exec (f3r (OP_ARITH, 3, RDY, 22, 0)) == 0);
+  CHECK (get (3) == 0x33333333);
+
+  CHECK (exec (f3r (OP_ARITH, 3, RDY, 23, 0)) == 0);
+  CHECK (get (3) == 0x44444444);
+
+  cputype = saved;
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC a store outside memory traps")
+{
+  set (1, sis_tests::FLATMEM_SIZE + 0x1000);
+  set (2, 0);
+
+  CHECK (exec (f3i (OP_MEM, 2, ST, 1, 0)) == TRAP_DEXC);
+  CHECK (exec (f3i (OP_MEM, 2, STB, 1, 0)) == TRAP_DEXC);
+  CHECK (exec (f3i (OP_MEM, 2, STH, 1, 0)) == TRAP_DEXC);
+  CHECK (exec (f3i (OP_MEM, 2, STD, 1, 0)) == TRAP_DEXC);
+  CHECK (exec (f3i (OP_MEM, 2, LDD, 1, 0)) == TRAP_DEXC);
+  CHECK (exec (f3i (OP_MEM, 2, LDUB, 1, 0)) == TRAP_DEXC);
+  CHECK (exec (f3i (OP_MEM, 2, LDUH, 1, 0)) == TRAP_DEXC);
+  CHECK (exec (f3i (OP_MEM, 2, SWAP, 1, 0)) == TRAP_DEXC);
+  CHECK (exec (f3i (OP_MEM, 2, LDSTUB, 1, 0)) == TRAP_DEXC);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC a floating point access outside memory traps")
+{
+  sregs[0].psr |= PSR_EF;
+  set (1, sis_tests::FLATMEM_SIZE + 0x1000);
+
+  CHECK (exec (f3i (OP_MEM, 2, LDF, 1, 0)) == TRAP_DEXC);
+  CHECK (exec (f3i (OP_MEM, 2, STF, 1, 0)) == TRAP_DEXC);
+  CHECK (exec (f3i (OP_MEM, 2, LDDF, 1, 0)) == TRAP_DEXC);
+  CHECK (exec (f3i (OP_MEM, 2, STDF, 1, 0)) == TRAP_DEXC);
+  CHECK (exec (f3i (OP_MEM, 0, LDFSR, 1, 0)) == TRAP_DEXC);
+  CHECK (exec (f3i (OP_MEM, 0, STFSR, 1, 0)) == TRAP_DEXC);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC the floating point queue store")
+{
+  sregs[0].psr |= PSR_EF;
+  set (1, 0x2000);
+
+  /* An empty queue is reported as a sequence error rather than a trap,
+     which the manual allows.  */
+  CHECK (exec (f3i (OP_MEM, 0, STDFQ, 1, 0)) == 0);
+  CHECK ((sregs[0].fsr & FSR_TT) == FP_SEQ_ERR);
+
+  /* The address must be double word aligned.  */
+  set (1, 0x2004);
+  CHECK (exec (f3i (OP_MEM, 0, STDFQ, 1, 0)) == TRAP_UNALI);
+
+  /* With the unit disabled it is the disabled trap.  */
+  sregs[0].psr &= ~PSR_EF;
+  CHECK (exec (f3i (OP_MEM, 0, STDFQ, 1, 0)) == TRAP_FPDIS);
+
+  /* The manual makes it privileged, so user mode traps before either.  */
+  sregs[0].psr &= ~PSR_S;
+  CHECK (exec (f3i (OP_MEM, 0, STDFQ, 1, 0)) == TRAP_PRIVI);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC a floating point exception is deferred")
+{
+  sregs[0].psr |= PSR_EF;
+
+  /* An operation the unit cannot do puts it in the pending exception state,
+     and the next operation reports the exception.  */
+  CHECK (exec (fpop (FPOP1, 3, 1, 0x1ff, 2)) == 0);
+  CHECK (sregs[0].fpstate == FP_EXC_PE);
+  CHECK ((sregs[0].fsr & FSR_TT) == FP_UNIMP);
+
+  CHECK (exec (fpop (FPOP1, 3, 1, OPF_FADDs, 2)) == TRAP_FPEXC);
+  CHECK (sregs[0].fpstate == FP_EXC_MODE);
+
+  /* While in the exception state an operation is a sequence error.  */
+  CHECK (exec (fpop (FPOP1, 3, 1, OPF_FADDs, 2)) == 0);
+  CHECK ((sregs[0].fsr & FSR_TT) == FP_SEQ_ERR);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC single to double multiply")
+{
+  /* The single to double multiply is a LEON instruction; the ERC32 floating
+     point unit reports it unimplemented.  */
+  int saved = cputype;
+
+  sregs[0].psr |= PSR_EF;
+  CHECK (exec (fpop (FPOP1, 4, 2, OPF_FsMULd, 3)) == 0);
+  CHECK ((sregs[0].fsr & FSR_TT) == FP_UNIMP);
+
+  cputype = CPU_LEON3;
+  sregs[0].fpstate = FP_EXE_MODE;
+  sregs[0].fsr = 0;
+  fs (2) = 3.0f;
+  fs (3) = 4.0f;
+
+  CHECK (exec (fpop (FPOP1, 4, 2, OPF_FsMULd, 3)) == 0);
+  CHECK (fd (4) == 12.0);
+
+  cputype = saved;
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC compare-and-except reports unordered")
+{
+  sregs[0].psr |= PSR_EF;
+  fs (1) = 1.0f;
+  fs (2) = 2.0f;
+
+  CHECK (exec (fpop (FPOP2, 0, 1, OPF_FCMPEs, 2)) == 0);
+  CHECK (((sregs[0].fsr >> 10) & 3) == FCC_L);
+
+  fd (2) = 1.0;
+  fd (4) = 2.0;
+  CHECK (exec (fpop (FPOP2, 0, 2, OPF_FCMPEd, 4)) == 0);
+  CHECK (((sregs[0].fsr >> 10) & 3) == FCC_L);
 }
