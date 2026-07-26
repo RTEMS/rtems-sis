@@ -2291,3 +2291,140 @@ TEST_CASE_FIXTURE (sparc_fixture,
   CHECK (exec (f3r (OP_ARITH, 10, ADD, 9, 8)) == 0);
   CHECK (get (10) == 15);
 }
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC without a unit every operation is disabled")
+{
+  /* The -nfp option removes the floating point unit, so every operation
+     takes the disabled trap even with the enable bit set.  */
+  sregs[0].psr |= PSR_EF;
+  sregs[0].fpu_pres = 0;
+  set (1, 0x2000);
+
+  CHECK (exec (fpop (FPOP1, 3, 1, OPF_FADDs, 2)) == TRAP_FPDIS);
+  CHECK (exec ((FPBCC << 22) | (FBA << 25) | 4) == TRAP_FPDIS);
+  CHECK (exec (f3i (OP_MEM, 2, LDF, 1, 0)) == TRAP_FPDIS);
+  CHECK (exec (f3i (OP_MEM, 2, LDDF, 1, 0)) == TRAP_FPDIS);
+  CHECK (exec (f3i (OP_MEM, 0, LDFSR, 1, 0)) == TRAP_FPDIS);
+  CHECK (exec (f3i (OP_MEM, 0, STFSR, 1, 0)) == TRAP_FPDIS);
+  CHECK (exec (f3i (OP_MEM, 2, STF, 1, 0)) == TRAP_FPDIS);
+  CHECK (exec (f3i (OP_MEM, 2, STDF, 1, 0)) == TRAP_FPDIS);
+  CHECK (exec (f3i (OP_MEM, 0, STDFQ, 1, 0)) == TRAP_FPDIS);
+
+  sregs[0].fpu_pres = 1;
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC a floating point store waits for its register")
+{
+  const uint32 addr = 0x2000;
+
+  sregs[0].psr |= PSR_EF;
+  set (1, addr);
+
+  /* A store of a register an operation is still producing waits for it.  */
+  sregs[0].simtime = 0;
+  sregs[0].ftime = 50;
+  sregs[0].frd = 2;
+  CHECK (exec (f3i (OP_MEM, 2, STF, 1, 0)) == 0);
+
+  sregs[0].simtime = 0;
+  sregs[0].ftime = 50;
+  CHECK (exec (f3i (OP_MEM, 0, STFSR, 1, 0)) == 0);
+
+  sregs[0].simtime = 0;
+  sregs[0].ftime = 50;
+  CHECK (exec (f3i (OP_MEM, 0, LDFSR, 1, 0)) == 0);
+
+  sregs[0].simtime = 0;
+  sregs[0].ftime = 50;
+  sregs[0].frd = 4;
+  sregs[0].frs1 = 4;
+  sregs[0].frs2 = 4;
+  CHECK (exec (f3i (OP_MEM, 4, STDF, 1, 0)) == 0);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC the status register access must be aligned")
+{
+  sregs[0].psr |= PSR_EF;
+  set (1, 0x2001);
+
+  CHECK (exec (f3i (OP_MEM, 0, LDFSR, 1, 0)) == TRAP_UNALI);
+  CHECK (exec (f3i (OP_MEM, 0, STFSR, 1, 0)) == TRAP_UNALI);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC the deferred trap queue is stored when full")
+{
+  const uint32 addr = 0x2000;
+
+  sregs[0].psr |= PSR_EF;
+  set (1, addr);
+
+  /* Provoke a deferred exception so the queue holds an entry, then store
+     it.  */
+  CHECK (exec (fpop (FPOP1, 3, 1, 0x1ff, 2)) == 0);
+  REQUIRE ((sregs[0].fsr & FSR_QNE) != 0);
+
+  CHECK (exec (f3i (OP_MEM, 0, STDFQ, 1, 0)) == 0);
+  CHECK (sis_tests::flatmem_peek (addr) == sregs[0].fpq[0]);
+  CHECK (sis_tests::flatmem_peek (addr + 4) == sregs[0].fpq[1]);
+
+  /* The store into unmapped memory faults.  */
+  CHECK (exec (fpop (FPOP1, 3, 1, 0x1ff, 2)) == 0);
+  sregs[0].fpstate = FP_EXE_MODE;
+  set (1, sis_tests::FLATMEM_SIZE + 0x1000);
+  CHECK (exec (f3i (OP_MEM, 0, STDFQ, 1, 0)) == TRAP_DEXC);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC the queue store checks the window")
+{
+  sregs[0].psr |= PSR_EF | 0x18;
+  CHECK (exec (f3i (OP_MEM, 0, STDFQ, 1, 0)) == TRAP_UNIMP);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC a LEON writes its cache control through an ASI")
+{
+  int saved = cputype;
+  cputype = CPU_LEON3;
+
+  /* A store into address space two sets the cache control register.  */
+  set (1, 0);
+  set (2, 0x0f);
+  CHECK (exec (f3r (OP_MEM, 2, STA, 1, 0) | (2 << 5)) == 0);
+  CHECK (sregs[0].cache_ctrl == 0x0f);
+
+  cputype = saved;
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC a double access to a window register pair")
+{
+  const uint32 addr = 0x2000;
+
+  set (1, addr);
+  set (16, 0x11223344);
+  set (17, 0x55667788);
+
+  /* An odd destination above the globals rounds down within the window.  */
+  CHECK (exec (f3i (OP_MEM, 17, STD, 1, 0)) == 0);
+  CHECK (sis_tests::flatmem_peek (addr) == 0x11223344);
+
+  set (16, 0);
+  set (17, 0);
+  CHECK (exec (f3i (OP_MEM, 17, LDD, 1, 0)) == 0);
+  CHECK (get (16) == 0x11223344);
+  CHECK (get (17) == 0x55667788);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC a byte store outside memory traps")
+{
+  set (1, sis_tests::FLATMEM_SIZE - 1);
+  set (2, 0);
+
+  /* The last byte of the window is inside it, the one after is not.  */
+  CHECK (exec (f3i (OP_MEM, 2, STB, 1, 0)) == 0);
+  CHECK (exec (f3i (OP_MEM, 2, STB, 1, 1)) == TRAP_DEXC);
+}
