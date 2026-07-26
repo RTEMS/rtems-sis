@@ -232,6 +232,34 @@ public:
     return seg_mode_[seg];
   }
 
+  /* Whether a RAM write at ADDR is protected.  A segment names a range of
+     words counted from the start of the RAM and the modes it applies to.
+     Normally everything outside every enabled segment is protected; the block
+     protection bit of the control register inverts that, so a write inside a
+     segment is the one that faults.  A double word write is caught when
+     either of its two words is.
+
+     The caller checks access_protect first, so this stays off the hot path
+     while no segment is enabled.  */
+  bool
+  WriteProtected (uint32 addr, bool supervisor, int sz) const
+  {
+    if (!access_protect_)
+      return false;
+
+    uint32 mode = supervisor ? kSegSupervisor : kSegUser;
+    uint32 waddr = (addr & 0x7fffffu) >> 2;
+    bool hit[kSegments];
+
+    for (int i = 0; i < kSegments; i++)
+      hit[i] = (seg_mode_[i] & mode) && (waddr >= seg_base_[i]) &&
+	       ((waddr | (sz == 3)) < seg_end_[i]);
+
+    if (block_protect_)
+      return hit[0] || hit[1];
+    return !((seg_mode_[0] && hit[0]) || (seg_mode_[1] && hit[1]));
+  }
+
   /* The read-back value of a segment base register: its address and its two
      mode bits.  */
   uint32

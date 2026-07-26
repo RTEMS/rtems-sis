@@ -1334,8 +1334,6 @@ memory_write (uint32 addr, uint32 *data, int32 sz, int32 *ws)
   uint32 waddr;
   uint32 *ram;
   int32 mexc;
-  int i;
-  int wphit[2];
   int asi;
 
   if ((addr >= cfg.ram_start ()) &&
@@ -1343,24 +1341,13 @@ memory_write (uint32 addr, uint32 *data, int32 sz, int32 *ws)
     {
       if (cfg.access_protect ())
 	{
+	  bool super = (sregs->psr & 0x080) != 0;
 
-	  waddr = (addr & 0x7fffff) >> 2;
-	  asi = (sregs->psr & 0x080) ? 11 : 10;
-	  for (i = 0; i < 2; i++)
-	    wphit[i] =
-		(((asi == 0xa) && (cfg.seg_mode (i) & erc32::kSegUser)) ||
-		 ((asi == 0xb) &&
-		  (cfg.seg_mode (i) & erc32::kSegSupervisor))) &&
-		((waddr >= cfg.seg_base (i)) &&
-		 ((waddr | (sz == 3)) < cfg.seg_end (i)));
-
-	  if (((cfg.block_protect ()) && (wphit[0] || wphit[1])) ||
-	      ((!cfg.block_protect ()) && !((cfg.seg_mode (0) && wphit[0]) ||
-					    (cfg.seg_mode (1) && wphit[1]))))
+	  if (cfg.WriteProtected (addr, super, sz))
 	    {
 	      if (sis_verbose)
 		printf ("Memory access protection error at 0x%08x\n", addr);
-	      set_sfsr (erc32::kFaultProtection, addr, asi, 0);
+	      set_sfsr (erc32::kFaultProtection, addr, super ? 0xb : 0xa, 0);
 	      *ws = MEM_EX_WS;
 	      return 1;
 	    }
@@ -1459,9 +1446,9 @@ sis_memory_read (uint32 addr, char *data, uint32 length)
 static void
 boot_init (void)
 {
-  mec_write (MEC_WCR, 0);			 /* zero waitstates */
-  mec_write (MEC_TRAPD, 0);			 /* turn off watch-dog */
-  mec_write (MEC_RTC_SCALER, ebase.freq - 1);	 /* generate 1 MHz RTC tick */
+  mec_write (MEC_WCR, 0);		      /* zero waitstates */
+  mec_write (MEC_TRAPD, 0);		      /* turn off watch-dog */
+  mec_write (MEC_RTC_SCALER, ebase.freq - 1); /* generate 1 MHz RTC tick */
   /* Decode all of the ROM and RAM the board has, which is what the stack
      pointer set below assumes.  */
   mec_write (MEC_MEMCFG, (7 << 18) | (6 << 10)); /* 16 MB ROM, 16 MB RAM */
