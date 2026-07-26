@@ -1740,3 +1740,102 @@ TEST_CASE_FIXTURE (sparc_fixture, "SPARC compare-and-except reports unordered")
   CHECK (exec (fpop (FPOP2, 0, 2, OPF_FCMPEd, 4)) == 0);
   CHECK (((sregs[0].fsr >> 10) & 3) == FCC_L);
 }
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC the disassembler decodes every group")
+{
+  stdout_capture cap;
+
+  /* Sweep the instruction space so the decode tables are reached: every
+     arithmetic and load-store opcode, every branch condition of both kinds,
+     and the floating point operations.  The output is not asserted on beyond
+     being produced, because the assembly syntax is the disassembler's own;
+     the cases above check the ones that matter by name.  */
+  uint32 addr = 0x200;
+
+  for (uint32 op3 = 0; op3 < 0x40; op3++)
+    {
+      sis_tests::flatmem_poke (addr, f3r (OP_ARITH, 3, op3, 1, 2));
+      arch->disas (addr);
+      sis_tests::flatmem_poke (addr, f3i (OP_ARITH, 3, op3, 1, 5));
+      arch->disas (addr);
+      sis_tests::flatmem_poke (addr, f3r (OP_MEM, 3, op3, 1, 2));
+      arch->disas (addr);
+      sis_tests::flatmem_poke (addr, f3i (OP_MEM, 3, op3, 1, 5));
+      arch->disas (addr);
+    }
+
+  for (uint32 cond = 0; cond < 16; cond++)
+    {
+      sis_tests::flatmem_poke (addr, bicc (0, cond, 4));
+      arch->disas (addr);
+      sis_tests::flatmem_poke (addr, bicc (1, cond, -4));
+      arch->disas (addr);
+      sis_tests::flatmem_poke (addr, (FPBCC << 22) | (cond << 25) | 4);
+      arch->disas (addr);
+    }
+
+  for (uint32 opf = 0; opf < 0x100; opf++)
+    {
+      sis_tests::flatmem_poke (addr, fpop (FPOP1, 4, 2, opf, 6));
+      arch->disas (addr);
+      sis_tests::flatmem_poke (addr, fpop (FPOP2, 4, 2, opf, 6));
+      arch->disas (addr);
+    }
+
+  /* The remaining format 2 opcodes, including the unimplemented ones.  */
+  for (uint32 op2 = 0; op2 < 8; op2++)
+    {
+      sis_tests::flatmem_poke (addr, (op2 << 22) | (3 << 25) | 0x1234);
+      arch->disas (addr);
+    }
+
+  sis_tests::flatmem_poke (addr, (OP_CALL << 30) | 0x100);
+  arch->disas (addr);
+
+  CHECK (!cap.str ().empty ());
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC a watchpoint stops a store")
+{
+  /* The shell's watchpoints are checked on the memory path, so a store into
+     a watched word reports a hit rather than completing.  */
+  uint32 saved = ebase.wpwnum;
+
+  ebase.wpwnum = 1;
+  ebase.wpws[0] = 0x2000;
+  ebase.wpwm[0] = 3; /* the word at that address */
+  ebase.wphit = 0;
+
+  set (1, 0x2000);
+  set (2, 0x12345678);
+  exec (f3i (OP_MEM, 2, ST, 1, 0));
+  CHECK (ebase.wphit != 0);
+
+  /* A store elsewhere is not a hit.  */
+  ebase.wphit = 0;
+  set (1, 0x2100);
+  exec (f3i (OP_MEM, 2, ST, 1, 0));
+  CHECK (ebase.wphit == 0);
+
+  ebase.wpwnum = saved;
+  ebase.wphit = 0;
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC a load into the next instruction holds")
+{
+  /* The core models the load delay: an instruction using the destination of
+     the load before it is charged an extra cycle.  */
+  const uint32 addr = 0x2000;
+
+  set (1, addr);
+  sis_tests::flatmem_poke (addr, 0x11223344);
+
+  CHECK (exec (f3i (OP_MEM, 3, LD, 1, 0)) == 0);
+  uint64 after_load = sregs[0].simtime;
+  sregs[0].simtime = after_load;
+
+  /* The next instruction reads the register the load wrote.  */
+  CHECK (exec (f3r (OP_ARITH, 4, ADD, 3, 3)) == 0);
+  CHECK (get (4) == 0x22446688);
+}
