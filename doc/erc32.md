@@ -106,17 +106,30 @@ cannot occur.
 
 ## Real-time clock and general purpose timer A
 
+Both timers are a scaler driving a 32-bit down counter, as in the MEC
+specification: the real-time clock has an 8-bit scaler and interrupts at level
+13, the general purpose timer has a 16-bit scaler and interrupts at level 12.
+
+The scaler is modelled as an elapsed-time delta rather than as a register
+counting down on every clock: a counter tick is scheduled scaler + 1 clocks
+ahead, and a read of a running scaler returns its programmed value less the
+time since the last tick. The timing a program observes is the same, but there
+is no scaler register to reload, so the two scaler load bits of the timer
+control register (GSL, bit 3, and RTCSL, bit 11) are accepted and have no
+effect. Every other bit of that register behaves as specified, including RTCCR
+resetting to one.
+
 The following registers are implemented:
 
-| Register                                 | Address    |
-|------------------------------------------|------------|
-| Real-time clock timer                    | 0x01f80080 |
-| Real-time clock scaler program register  | 0x01f80084 |
-| Real-time clock counter program register | 0x01f80080 |
-| General purpose timer                    | 0x01f80088 |
-| Real-time clock scaler program register  | 0x01f8008c |
-| General purpose timer counter register   | 0x01f80088 |
-| Timer control register                   | 0x01f80098 |
+| Register                                    | Address    |
+|---------------------------------------------|------------|
+| Real-time clock timer                       | 0x01f80080 |
+| Real-time clock counter program register    | 0x01f80080 |
+| Real-time clock scaler program register     | 0x01f80084 |
+| General purpose timer                       | 0x01f80088 |
+| General purpose timer counter register      | 0x01f80088 |
+| General purpose timer scaler program reg.   | 0x01f8008c |
+| Timer control register                      | 0x01f80098 |
 
 ## Interrupt controller
 
@@ -183,8 +196,12 @@ The following registers are implemented:
 
 ## Watchdog
 
-The watchdog is implemented as in the specification. The input clock is always
-the system clock regardless of WDCS bit in MEC configuration register.
+The watchdog is implemented as in the specification, including the trap door
+window, which is open from reset until either the program register is written
+or the watchdog elapses. The input clock is always the system clock regardless
+of WDCS bit in MEC configuration register, so the scaler is not divided by 16
+and the timeout formula of the specification reduces to (WDS + 1) * (WDC + 1)
+system clocks.
 
 The following registers are implemented:
 
