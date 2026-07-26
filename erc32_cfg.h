@@ -249,15 +249,14 @@ public:
 
     uint32 mode = supervisor ? kSegSupervisor : kSegUser;
     uint32 waddr = (addr & geom_.ram_mask) >> 2;
-    bool hit[kSegments];
+    bool inside = false;
 
     for (int i = 0; i < kSegments; i++)
-      hit[i] = (seg_mode_[i] & mode) && (waddr >= seg_base_[i]) &&
-	       ((waddr | (sz == 3)) < seg_end_[i]);
+      inside |= (seg_mode_[i] & mode) && (waddr >= seg_base_[i]) &&
+		((waddr | (sz == 3)) < seg_end_[i]);
 
     /* Block protection inverts the criterion, so the two cases are exactly
        each other's negation.  */
-    bool inside = hit[0] || hit[1];
     return block_protect_ ? inside : !inside;
   }
 
