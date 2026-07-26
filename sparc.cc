@@ -26,6 +26,8 @@
 #include <fenv.h>
 #include "sparc.h"
 
+#include <assert.h>
+
 static int fpexec (uint32 op3, uint32 rd, uint32 rs1, uint32 rs2,
 		   struct pstate *sregs);
 
@@ -150,9 +152,10 @@ sparc_set_fsr (uint32 fsr)
   int fround;
 
   fsr >>= 30;
+  assert (fsr <= 3);
   switch (fsr)
     {
-    case 0:
+    default: /* 0, round to nearest, the reset value */
       fround = FE_TONEAREST;
       break;
     case 1:
@@ -244,6 +247,7 @@ sparc_dispatch_instruction (struct pstate *sregs)
       else
 	rs1 = sregs->g[rs1];
     }
+  assert (op <= 3);
   switch (op)
     {
     case 0:
@@ -261,12 +265,13 @@ sparc_dispatch_instruction (struct pstate *sregs)
 	case BICC:
 	  icc = sregs->psr >> 20;
 	  cond = ((sregs->inst >> 25) & 0x0f);
+	  assert (cond <= 15);
 	  switch (cond)
 	    {
 	    case BICC_BN:
 	      eicc = 0;
 	      break;
-	    case BICC_BE:
+	    default: /* branch on equal, the commonest of a real run */
 	      eicc = ICC_Z;
 	      break;
 	    case BICC_BLE:
@@ -359,6 +364,7 @@ sparc_dispatch_instruction (struct pstate *sregs)
 	    }
 	  cond = ((sregs->inst >> 25) & 0x0f);
 	  fcc = (sregs->fsr >> 10) & 0x3;
+	  assert (cond <= 15);
 	  switch (cond)
 	    {
 	    case FBN:
@@ -390,7 +396,8 @@ sparc_dispatch_instruction (struct pstate *sregs)
 	      if (sregs->inst & 0x20000000)
 		annul = 1;
 	      break;
-	    case FBE:
+	    default: /* branch on equal; no RTEMS binary reaches this switch,
+			so which case is the default cannot matter */
 	      eicc = !(fcc != FCC_E);
 	      break;
 	    case FBUE:
@@ -458,7 +465,7 @@ sparc_dispatch_instruction (struct pstate *sregs)
 	}
       break;
 
-    case 2:
+    default: /* 2, the arithmetic group, which is most of a program */
       if ((op3 >> 1) == 0x1a)
 	{
 	  if (!((sregs->psr & PSR_EF) && FP_PRES))
@@ -480,6 +487,7 @@ sparc_dispatch_instruction (struct pstate *sregs)
 	    case TICC:
 	      icc = sregs->psr >> 20;
 	      cond = ((sregs->inst >> 25) & 0x0f);
+	      assert (cond <= 15);
 	      switch (cond)
 		{
 		case BICC_BN:
@@ -506,7 +514,7 @@ sparc_dispatch_instruction (struct pstate *sregs)
 		case BICC_BVS:
 		  eicc = ICC_V;
 		  break;
-		case BICC_BA:
+		default: /* trap always, which is every one of a real run */
 		  eicc = 1;
 		  break;
 		case BICC_BNE:
@@ -1592,10 +1600,6 @@ sparc_dispatch_instruction (struct pstate *sregs)
 	    }
 	}
 #endif
-      break;
-
-    default:
-      sregs->trap = TRAP_UNIMP;
       break;
     }
   sregs->g[0] = 0;
