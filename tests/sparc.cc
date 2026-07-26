@@ -2136,3 +2136,158 @@ TEST_CASE_FIXTURE (sparc_fixture,
   CHECK (exec (f3r (OP_ARITH, 3, TADDCCTV, 1, 2)) == TRAP_TAG);
   CHECK (exec (f3r (OP_ARITH, 3, TSUBCCTV, 1, 2)) == 0);
 }
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC save and restore into a global register")
+{
+  /* A global destination is not in a window, so save and restore write it
+     where it is rather than in the window they move to.  */
+  set (1, 100);
+
+  CHECK (exec (f3i (OP_ARITH, 3, SAVE, 1, 5)) == 0);
+  CHECK (get (3) == 105);
+
+  CHECK (exec (f3i (OP_ARITH, 4, RESTORE, 1, 5)) == 0);
+  CHECK (get (4) == 105);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC multiply and divide set their codes")
+{
+  /* The condition codes come from the lower word of the product and from
+     the quotient.  */
+  set (1, (uint32) -1);
+  set (2, 1);
+  CHECK (exec (f3r (OP_ARITH, 3, SMULCC, 1, 2)) == 0);
+  CHECK (icc () == N);
+
+  set (1, 0);
+  CHECK (exec (f3r (OP_ARITH, 3, SMULCC, 1, 2)) == 0);
+  CHECK (icc () == Z);
+
+  set (1, 0x80000000);
+  set (2, 2);
+  CHECK (exec (f3r (OP_ARITH, 3, UMULCC, 1, 2)) == 0);
+  CHECK (icc () == Z);
+
+  sregs[0].y = 0;
+  set (1, 0);
+  set (2, 7);
+  CHECK (exec (f3r (OP_ARITH, 3, UDIVCC, 1, 2)) == 0);
+  CHECK (icc () == Z);
+
+  sregs[0].y = 0xffffffff;
+  set (1, (uint32) -7);
+  set (2, 7);
+  CHECK (exec (f3r (OP_ARITH, 3, SDIVCC, 1, 2)) == 0);
+  CHECK (icc () == N);
+
+  sregs[0].y = 0;
+  set (1, 0);
+  CHECK (exec (f3r (OP_ARITH, 3, SDIVCC, 1, 2)) == 0);
+  CHECK (icc () == Z);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC multiply step shifts without adding")
+{
+  /* With the shifted out bit of y clear nothing is added, which is the
+     other half of the step.  */
+  sregs[0].y = 0;
+  set (1, 0x10);
+  set (2, 8);
+
+  CHECK (exec (f3r (OP_ARITH, 3, MULScc, 1, 2)) == 0);
+  CHECK (get (3) == 8);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC the rounding mode reaches the host")
+{
+  const uint32 addr = 0x2000;
+
+  sregs[0].psr |= PSR_EF;
+  set (1, addr);
+
+  /* The two most significant bits of the status register select the
+     rounding, and a load of the register hands it to the host.  */
+  for (uint32 mode = 0; mode < 4; mode++)
+    {
+      set (2, mode << 30);
+      CHECK (exec (f3i (OP_MEM, 2, ST, 1, 0)) == 0);
+      CHECK (exec (f3i (OP_MEM, 0, LDFSR, 1, 0)) == 0);
+      CHECK ((sregs[0].fsr >> 30) == mode);
+    }
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC a watchpoint covers each access size")
+{
+  uint32 saved = ebase.wpwnum;
+
+  ebase.wpwnum = 1;
+  ebase.wpws[0] = 0x2000;
+  ebase.wpwm[0] = 3;
+
+  set (1, 0x2000);
+  set (2, 0);
+
+  /* The mask a watchpoint uses comes from the access size, so each store
+     kind reaches the check.  */
+  for (uint32 op3 : { ST, STB, STH, STD })
+    {
+      ebase.wphit = 0;
+      exec (f3i (OP_MEM, 2, op3, 1, 0));
+      INFO ("store opcode ", op3);
+      CHECK (ebase.wphit != 0);
+    }
+
+  ebase.wpwnum = saved;
+  ebase.wphit = 0;
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC a floating point load waits for the unit")
+{
+  const uint32 addr = 0x2000;
+
+  sregs[0].psr |= PSR_EF;
+  set (1, addr);
+
+  /* A load into a register an operation still in the pipe is using has to
+     wait for it.  */
+  sregs[0].simtime = 0;
+  sregs[0].ftime = 50;
+  sregs[0].frd = 2;
+  sregs[0].frs1 = 2;
+  sregs[0].frs2 = 2;
+
+  CHECK (exec (f3i (OP_MEM, 2, LDF, 1, 0)) == 0);
+  CHECK (sregs[0].fhold > 0);
+
+  sregs[0].simtime = 0;
+  sregs[0].ftime = 50;
+  CHECK (exec (f3i (OP_MEM, 2, LDDF, 1, 0)) == 0);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC a load feeding the next instruction is held")
+{
+  const uint32 addr = 0x2000;
+
+  sis_tests::flatmem_poke (addr, 0x00000005);
+  set (1, addr);
+
+  /* The core records which register a load wrote and when it lands, and
+     charges the instruction after it if that register is a source.  */
+  CHECK (exec (f3i (OP_MEM, 8, LD, 1, 0)) == 0);
+  sregs[0].simtime = 0;
+  sregs[0].ildtime = 50;
+  sregs[0].ildreg = 8;
+
+  CHECK (exec (f3r (OP_ARITH, 9, ADD, 8, 8)) == 0);
+  CHECK (get (9) == 10);
+
+  /* And when the register is the second source.  */
+  sregs[0].simtime = 0;
+  sregs[0].ildtime = 50;
+  sregs[0].ildreg = 8;
+  CHECK (exec (f3r (OP_ARITH, 10, ADD, 9, 8)) == 0);
+  CHECK (get (10) == 15);
+}
