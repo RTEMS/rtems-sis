@@ -25,7 +25,7 @@
 namespace erc32
 {
 
-/* Error and Reset Status Register bits.  */
+/* Error and Reset Status Register bits and fields.  */
 enum
 {
   kErrIuErrorMode = 1u << 0,   /* IUEM */
@@ -38,13 +38,10 @@ enum
   kErrHalted = 1u << 13,       /* HLT */
 
   /* The error bits together, writable only for fault injection.  */
-  kErsrErrorBits = 0x3fu
-};
+  kErsrErrorBits = 0x3fu,
 
-/* Reset cause, ERSR bits 15-14.  A reset initialises every MEC register but
-   this one, which is left holding the cause.  */
-enum
-{
+  /* Reset cause, bits 15-14.  A reset initialises every MEC register but
+     this one, which is left holding the cause.  */
   kResetSystem = 0u << 14,
   kResetSoftware = 1u << 14,
   kResetError = 2u << 14,
