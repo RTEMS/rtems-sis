@@ -902,12 +902,14 @@ riscv_dispatch_instruction (struct pstate *sregs)
 		  sregs->icnt = T_MUL;
 		  break;
 		case 1: /* MULH */
-		  sop64a = (int64) op1 * (int64) op2;
+		  /* The operands are signed, so widen through the signed
+		     word rather than zero extending the unsigned one.  */
+		  sop64a = (int64) (int32) op1 * (int64) (int32) op2;
 		  sregs->r[rd] = (sop64a >> 32) & 0xffffffff;
 		  sregs->icnt = T_MUL;
 		  break;
 		case 2: /* MULHSU */
-		  sop64a = (int64) op1 * (uint64) op2;
+		  sop64a = (int64) (int32) op1 * (int64) op2;
 		  sregs->r[rd] = (sop64a >> 32) & 0xffffffff;
 		  sregs->icnt = T_MUL;
 		  break;
