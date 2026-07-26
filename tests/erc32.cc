@@ -25,6 +25,7 @@
 #include "erc32_error.h"
 #include "erc32_mec.h"
 #include "erc32_timer.h"
+#include "erc32_uart.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -240,6 +241,65 @@ struct ErrorTestEnv
    the PROM width of the board, the error count, and what the configuration
    asked the rest of the machine to do, so a case drives erc32::Config with no
    simulator globals.  */
+/* A test environment for the UART template: it owns the bytes the host has
+   for the channel and the bytes the channel sent, so a case drives
+   erc32::Uart with no host port and no simulator globals.  */
+struct UartTestEnv
+{
+  bool port_open = true;
+  std::string input;  /* what the host has waiting */
+  std::string output; /* what the channel has sent */
+  std::vector<int> irqs;
+  int short_writes = 0;	      /* make the next N writes partial */
+  bool refuse_writes = false; /* make every write take nothing */
+
+  void
+  Irq (int level)
+  {
+    irqs.push_back (level);
+  }
+  bool
+  PortOpen ()
+  {
+    return port_open;
+  }
+  int
+  PortRead (char *buf, int len)
+  {
+    int n = (int) input.size ();
+    if (n > len)
+      n = len;
+    memcpy (buf, input.data (), n);
+    input.erase (0, n);
+    return n;
+  }
+  int
+  PortWrite (const char *buf, int len)
+  {
+    /* A host port is opened non-blocking, so a write can be short or can
+       take nothing at all.  */
+    if (refuse_writes)
+      return 0;
+    if (short_writes > 0 && len > 1)
+      {
+	--short_writes;
+	len = 1;
+      }
+    output.append (buf, len);
+    return len;
+  }
+};
+
+/* The two channels as erc32.cc instantiates them.  */
+constexpr erc32::UartSpec UART_A_SPEC = { .level = erc32::kUartALevel,
+					  .status_shift = 0,
+					  .name = "A" };
+
+constexpr erc32::UartSpec UART_B_SPEC = { .level = erc32::kUartBLevel,
+					  .status_shift =
+					      erc32::kUartStatusBLevel,
+					  .name = "B" };
+
 struct ConfigTestEnv
 {
   bool verbose = false;
@@ -2331,6 +2391,283 @@ TEST_CASE_FIXTURE (mec_fixture, "MEC UART control write is accepted")
 
   wr (R_UART_CTRL, 0x01000000); /* reserved control bits */
   CHECK ((rd (R_IPR) & (1u << 1)) != 0);
+}
+
+/* One MEC UART channel, driven in isolation.  The expectations come from the
+   TSC693E manual, section 3.15 and the register descriptions for 01F8 00E0,
+   01F8 00E4 and 01F8 00E8, except for the two deviations doc/erc32.md
+   records: a read of a RX and TX register reports the status bits the manual
+   reserves, and the framing, parity and overrun errors of the status register
+   cannot arise.  */
+
+TEST_CASE ("Uart resets with nothing buffered")
+{
+  UartTestEnv env;
+  erc32::Uart<UartTestEnv> uart (env, UART_A_SPEC);
+
+  CHECK (uart.buffered () == 0);
+  CHECK (uart.pending () == 0);
+
+  /* The transmitter is always ready, and there is no data to report.  */
+  CHECK (uart.StatusBits () ==
+	 (erc32::kUartSendEmpty | erc32::kUartHoldEmpty));
+}
+
+TEST_CASE ("Uart delivers what the host has, in order")
+{
+  UartTestEnv env;
+  env.input = "AB";
+  erc32::Uart<UartTestEnv> uart (env, UART_A_SPEC);
+
+  uint32 first = uart.ReadData ();
+  CHECK ((first & 0xff) == 'A');
+  CHECK ((first & erc32::kUartDataValid) != 0);
+
+  /* A character behind it interrupts, so a driver keeps reading.  */
+  REQUIRE (env.irqs.size () == 1);
+  CHECK (env.irqs[0] == erc32::kUartALevel);
+
+  uint32 second = uart.ReadData ();
+  CHECK ((second & 0xff) == 'B');
+  CHECK ((second & erc32::kUartDataValid) != 0);
+
+  /* Nothing behind the last one, so no further interrupt.  */
+  CHECK (env.irqs.size () == 1);
+}
+
+TEST_CASE ("Uart reports no data and holds the last character")
+{
+  UartTestEnv env;
+  env.input = "Z";
+  erc32::Uart<UartTestEnv> uart (env, UART_A_SPEC);
+
+  CHECK ((uart.ReadData () & 0xff) == 'Z');
+
+  /* Drained.  The receive register keeps the last character and reports it
+     as invalid.  */
+  uint32 empty = uart.ReadData ();
+  CHECK ((empty & erc32::kUartDataValid) == 0);
+  CHECK ((empty & 0xff) == 'Z');
+}
+
+TEST_CASE ("Uart reads zero before anything has arrived")
+{
+  UartTestEnv env;
+  erc32::Uart<UartTestEnv> uart (env, UART_A_SPEC);
+
+  /* No character has been delivered, so there is none to hold.  */
+  uint32 empty = uart.ReadData ();
+  CHECK ((empty & erc32::kUartDataValid) == 0);
+  CHECK ((empty & 0xff) == 0);
+}
+
+TEST_CASE ("Uart read reports the transmitter ready either way")
+{
+  UartTestEnv env;
+  env.input = "Q";
+  erc32::Uart<UartTestEnv> uart (env, UART_A_SPEC);
+
+  const uint32 ready = erc32::kUartDataSendEmpty | erc32::kUartDataHoldEmpty;
+  CHECK ((uart.ReadData () & ready) == ready);
+  CHECK ((uart.ReadData () & ready) == ready);
+}
+
+TEST_CASE ("Uart takes nothing from a port which is not open")
+{
+  UartTestEnv env;
+  env.input = "A";
+  env.port_open = false;
+  erc32::Uart<UartTestEnv> uart (env, UART_A_SPEC);
+
+  CHECK ((uart.ReadData () & erc32::kUartDataValid) == 0);
+  CHECK (uart.StatusBits () ==
+	 (erc32::kUartSendEmpty | erc32::kUartHoldEmpty));
+  CHECK (env.input == "A"); /* still waiting on the host */
+}
+
+TEST_CASE ("Uart refills the whole buffer at once")
+{
+  UartTestEnv env;
+  env.input = std::string (erc32::kUartBufSize + 4, 'x');
+  erc32::Uart<UartTestEnv> uart (env, UART_A_SPEC);
+
+  /* One refill takes as much as the buffer holds and no more.  */
+  uart.ReadData ();
+  CHECK (uart.buffered () == erc32::kUartBufSize - 1);
+  CHECK (env.input.size () == 4);
+}
+
+TEST_CASE ("Uart status reports data ready and interrupts")
+{
+  UartTestEnv env;
+  env.input = "Q";
+  erc32::Uart<UartTestEnv> uart (env, UART_A_SPEC);
+
+  /* Reading the status takes what the host has, so a driver polling the
+     status sees input arrive without reading the data register.  */
+  uint32 status = uart.StatusBits ();
+  CHECK ((status & erc32::kUartDataReady) != 0);
+  REQUIRE (env.irqs.size () == 1);
+  CHECK (env.irqs[0] == erc32::kUartALevel);
+
+  /* Already buffered, so a second read of the status reports it without
+     interrupting again.  */
+  CHECK ((uart.StatusBits () & erc32::kUartDataReady) != 0);
+  CHECK (env.irqs.size () == 1);
+
+  CHECK ((uart.ReadData () & 0xff) == 'Q');
+}
+
+TEST_CASE ("Uart status never reports an error")
+{
+  UartTestEnv env;
+  env.input = "Q";
+  erc32::Uart<UartTestEnv> uart (env, UART_A_SPEC);
+
+  /* The framing, parity and overrun errors cannot arise in the simulator.  */
+  const uint32 errors = erc32::kUartFramingError | erc32::kUartParityError |
+			erc32::kUartOverrunError;
+  CHECK ((uart.StatusBits () & errors) == 0);
+}
+
+TEST_CASE ("Uart puts channel B in the upper half of the status")
+{
+  UartTestEnv env;
+  env.input = "Q";
+  erc32::Uart<UartTestEnv> uart (env, UART_B_SPEC);
+
+  /* Channel B's field starts at bit 16 and its interrupt is one level
+     above channel A's.  */
+  uint32 status = uart.StatusBits ();
+  CHECK (
+      status ==
+      ((erc32::kUartDataReady | erc32::kUartSendEmpty | erc32::kUartHoldEmpty)
+       << 16));
+  REQUIRE (env.irqs.size () == 1);
+  CHECK (env.irqs[0] == erc32::kUartBLevel);
+}
+
+TEST_CASE ("Uart buffers what is written and sends it on a flush")
+{
+  UartTestEnv env;
+  erc32::Uart<UartTestEnv> uart (env, UART_A_SPEC);
+
+  uart.WriteData ('h');
+  uart.WriteData ('i');
+
+  /* The transmitter is free at once, so each write interrupts.  */
+  CHECK (env.irqs.size () == 2);
+  CHECK (env.irqs[0] == erc32::kUartALevel);
+
+  /* Nothing reaches the host until the flush.  */
+  CHECK (env.output.empty ());
+  CHECK (uart.pending () == 2);
+
+  uart.Flush ();
+  CHECK (env.output == "hi");
+  CHECK (uart.pending () == 0);
+}
+
+TEST_CASE ("Uart sends the buffer when it fills")
+{
+  UartTestEnv env;
+  erc32::Uart<UartTestEnv> uart (env, UART_A_SPEC);
+
+  for (int i = 0; i < erc32::kUartBufSize; i++)
+    uart.WriteData ('x');
+  CHECK (env.output.empty ());
+
+  /* The write which does not fit sends what is buffered first.  */
+  uart.WriteData ('y');
+  CHECK (env.output.size () == (size_t) erc32::kUartBufSize);
+  CHECK (uart.pending () == 1);
+}
+
+TEST_CASE ("Uart keeps writing until the host takes everything")
+{
+  UartTestEnv env;
+  env.short_writes = 2;
+  erc32::Uart<UartTestEnv> uart (env, UART_A_SPEC);
+
+  uart.WriteData ('a');
+  uart.WriteData ('b');
+  uart.WriteData ('c');
+  uart.Flush ();
+
+  CHECK (env.output == "abc");
+  CHECK (uart.pending () == 0);
+}
+
+TEST_CASE ("Uart keeps what a wedged host would not take")
+{
+  UartTestEnv env;
+  env.refuse_writes = true;
+  erc32::Uart<UartTestEnv> uart (env, UART_A_SPEC);
+
+  uart.WriteData ('a');
+  uart.Flush ();
+
+  /* The host took nothing, so the character is still buffered and the flush
+     returned rather than asking forever.  */
+  CHECK (env.output.empty ());
+  CHECK (uart.pending () == 1);
+
+  /* Once the host takes bytes again the buffer goes out.  */
+  env.refuse_writes = false;
+  uart.Flush ();
+  CHECK (env.output == "a");
+}
+
+TEST_CASE ("Uart drops a character when the buffer cannot be emptied")
+{
+  UartTestEnv env;
+  env.refuse_writes = true;
+  erc32::Uart<UartTestEnv> uart (env, UART_A_SPEC);
+
+  for (int i = 0; i < erc32::kUartBufSize; i++)
+    uart.WriteData ('x');
+  REQUIRE (uart.pending () == (unsigned) erc32::kUartBufSize);
+
+  /* The buffer is full and the host will not take it, so the character is
+     lost rather than stored past the end of the buffer.  */
+  uart.WriteData ('y');
+  CHECK (uart.pending () == (unsigned) erc32::kUartBufSize);
+
+  env.refuse_writes = false;
+  uart.Flush ();
+  CHECK (env.output == std::string (erc32::kUartBufSize, 'x'));
+}
+
+TEST_CASE ("Uart drops a write to a port which is not open")
+{
+  UartTestEnv env;
+  env.port_open = false;
+  erc32::Uart<UartTestEnv> uart (env, UART_A_SPEC);
+
+  uart.WriteData ('x');
+  uart.Flush ();
+
+  /* Nothing is buffered and nothing is sent, but the transmit interrupt is
+     raised, because the emulated transmitter is still free.  */
+  CHECK (uart.pending () == 0);
+  CHECK (env.output.empty ());
+  CHECK (env.irqs.size () == 1);
+}
+
+TEST_CASE ("Uart reset forgets both directions")
+{
+  UartTestEnv env;
+  env.input = "abc";
+  erc32::Uart<UartTestEnv> uart (env, UART_A_SPEC);
+
+  uart.ReadData ();
+  uart.WriteData ('z');
+  REQUIRE (uart.buffered () > 0);
+  REQUIRE (uart.pending () > 0);
+
+  uart.Reset ();
+  CHECK (uart.buffered () == 0);
+  CHECK (uart.pending () == 0);
 }
 
 TEST_CASE_FIXTURE (mec_fixture, "MEC UART A receives buffered input")

@@ -12,6 +12,7 @@ erc32_cfg.h
 erc32_error.h
 erc32_mec.h
 erc32_timer.h
+erc32_uart.h
 exec.cc
 help.cc
 sisio.cc
