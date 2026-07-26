@@ -1,10 +1,9 @@
-# Refactor-and-test: driving a board file to 100% coverage
+# Refactor-and-test: driving SIS to 100% coverage
 
-A handoff for the ongoing work of testing the simulator's board files to 100%
-line and branch coverage by moving each subsystem behind a dependency-injected
-policy template as it is tested. `erc32.cc` is the file in progress and
-`erc32_mec.h` is the finished model. The same recipe applies to the other board
-files (`leon2.cc`, `leon3.cc`, `gr740.cc`, `rv32.cc`) afterwards.
+A handoff for the ongoing work of testing every simulator source to 100% line
+and branch coverage, moving each subsystem behind a dependency-injected policy
+template as it is tested. `erc32.cc` is the file in progress and `erc32_mec.h`
+is the finished model. The scope is the whole simulator, not one board.
 
 Read `CLAUDE.md`, sections "Refactoring for dependency injection" and the
 coverage paragraph under "Build", first. This file is the operational
@@ -20,12 +19,20 @@ list in the commit that finishes it, and nothing is ever removed. This keeps a
 finished file from silently regressing while the tree as a whole is still far
 from complete.
 
+Two properties are held alongside coverage:
+
+- **Spec-driven correctness.** Register fields, reset values, reserved-bit
+  behavior and interrupt levels come from the reference manuals under `ref/`.
+  A test that encodes what the code does cannot catch what the code gets wrong.
+- **No performance regression.** Neither in the simulated timing model nor in
+  the simulator's own throughput. See "Performance" below for how each is held.
+
 Two kinds of testing are in play and neither replaces the other:
 
 - Host unit tests (doctest cases under `tests/`, linked against `libsis.a`)
   drive individual subsystems and are what coverage measures.
 - End-to-end runs of real target binaries through the simulator
-  (`./waf test-run`) are the only proof the board still works. Every production
+  (`./waf test-run`) are the only proof a board still works. Every production
   change is checked against them.
 
 ## The mental model
@@ -44,13 +51,34 @@ dependencies are injected.
   its own state, so a case drives the subsystem in isolation with no globals to
   set up or restore.
 
-Because the template body lives in a header, gcovr is told to measure the header
-and it is graduated like a source file. gcovr merges the two instantiations
-(board and test) across translation units, but the requirement is that the test
-environment alone reaches 100%: graduation must never depend on exercising the
-board integration path.
+Because the template body lives in a header, gcovr is told to measure headers
+and each one is graduated like a source file. gcovr merges the two
+instantiations (board and test) across translation units, but the requirement is
+that the test environment alone reaches 100%: graduation must never depend on
+exercising the board integration path.
 
-## What is done and what remains
+The pattern is not universal. It applies where globals stand between the logic
+and a test. It does not apply to the CPU cores, which already take a
+`struct pstate *` and reach memory through the `memsys` vtable: those get a test
+harness, not a refactor. It does not apply to host I/O either, which is tested
+against real descriptors the way `tests/sisio.cc` does.
+
+## Where the tree stands
+
+Measured with `./waf configure --enable-coverage && ./waf`, branch metric,
+552 of 5499 arcs (10%).
+
+| Area | Arcs | Taken |
+|---|---|---|
+| `sparc.cc`, `riscv.cc` | 2274 | 17 |
+| `grlib.cc`, `grspw.cc`, `gr1553.cc`, `greth.cc`, `memscrub.cc`, `tap.cc` | 1071 | 0 |
+| `sis.cc`, `remote.cc`, `interf.cc` | 546 | 0 |
+| `erc32.cc` | 502 | 377 |
+| `leon2.cc`, `leon3.cc`, `gr740.cc`, `rv32.cc` | 353 | 0 |
+| graduated: `erc32_mec.h`, `exec.cc`, `help.cc`, `sisio.cc` | | 100% |
+
+`func.cc` and `elf.cc` are not in the table above only because they were not
+captured in that run. Measure them before planning their step.
 
 Done, in `erc32_mec.h`, graduated in `tests/covered.txt`:
 
@@ -60,100 +88,177 @@ Done, in `erc32_mec.h`, graduated in `tests/covered.txt`:
   `erc32.cc` instantiates `Mec<RealEnv>`; `tests/erc32.cc` drives `Mec<TestEnv>`
   with no globals.
 
-Not yet converted. These MEC subsystems are still tested through the
-global-poking `mec_fixture` in `tests/erc32.cc`, which sets up machine state and
-reads and writes registers through `ms->memory_read`/`memory_write`:
+## The order of work
 
-- Timers (RTC and GPT counters, scalers, reloads, control register).
-- Configuration and memory control (memory config, write protection, block
-  protection, ROM width, software reset, fault status).
-- Memory access dispatch (region decode, access-size stores, byte pointers).
-- The UART (transmit buffering, receive, status, control), which additionally
-  reaches host stdin through the `stdin_feed` helper.
+### ERC32 first
 
-`erc32.cc` itself is partially covered and is not yet graduated. Only
-`erc32_mec.h` is. Convert one subsystem at a time; graduate `erc32.cc` only once
-the last of its logic has moved into the header and both the header and the
-board file read 100%.
+`erc32.cc` is finished and graduated before any other file is opened. Its
+remaining arcs are exactly the shapes the recipe has not been proven against
+(host I/O setup, an error manager that resets the machine, a watchdog), so a
+pattern that survives them will survive `leon2.cc` and `grlib.cc`.
 
-To see the current numbers at any time:
+One subsystem per step, each its own header and template with its own narrow
+concept, all in `namespace erc32`. `erc32.cc` holds one `RealEnv` satisfying
+all of the concepts; each test file holds a small `TestEnv` per subsystem.
 
-```shell
-./waf configure --enable-coverage && ./waf
-gcovr --txt-metric branch --filter 'erc32.*'
-```
+1. **`erc32_timer.h`** RTC, GPT and watchdog. First, because it validates the
+   scheduling and interrupt injection every later subsystem needs, on the
+   subsystem with the cleanest spec.
+2. **`erc32_error.h`** ERSR, SFSR, FFAR, `mecparerror`, `decode_ersr`. The
+   largest single uncovered block, and it validates `SysReset`/`SysHalt`
+   injection. It also turns the already-shipped `RealEnv::ReportError` from a
+   hole into a tested call.
+3. **`erc32_cfg.h`** MEC control, memory configuration, waitstates, I/O
+   configuration, software reset, power down, the access protection segments.
+   Precedes the memory path, which reads the sizes and masks it computes.
+4. **The shared host UART port module.** `port_init`, `init_stdio`,
+   `restore_stdio` and the `DO_STDIO_READ` macro are near-identical in
+   `erc32.cc`, `leon2.cc` and `grlib.cc`. They become one plain `.cc` taking
+   explicit parameters, tested against real descriptors like `tests/sisio.cc`.
+   This is a restructuring step: it removes duplicated arcs from the tree
+   rather than covering the same code three times.
+5. **`erc32_uart.h`** the MEC UART register model, on top of step 4.
+6. **`erc32_mem.h`** memory access dispatch. The only step with a performance
+   obligation. Keep the implementation in an out-of-line global function
+   reached by a static template call, never inlined and never indirect.
+7. Leftovers (`boot_init`, `init_sim`/`reset`, halt and exit) and the commit
+   that adds `erc32.cc` to `tests/covered.txt`.
 
-## The recipe, one subsystem per commit
+### Then the rest of the simulator
 
-Do exactly one subsystem per change. The board is production code, so keep it
-working at every step.
+1. `sparc.cc`, then `riscv.cc`. The largest arc count, the best specs, and the
+   only place where a defect means a wrongly emulated program rather than a
+   wrong warning. They need a test-only flat-memory `memsys` under `tests/` and
+   a table-driven instruction harness, not a production refactor. Expect dozens
+   of commits; `sparc.cc` alone is larger than everything else here.
+2. `grlib.cc` and the GRLIB cores. One file behind four boards, and the GRLIB
+   manual in `ref/` is already scoped to the cores SIS models.
+3. `leon2.cc`, `leon3.cc`, `gr740.cc`, `rv32.cc`. Thin once `grlib.cc` and the
+   shared port module are done.
+4. `func.cc`, `elf.cc`, `interf.cc`, `remote.cc`, `sis.cc`. Simulator
+   infrastructure with no hardware spec; `doc/` and the GDB remote protocol are
+   the references. `func.cc` may deserve to move ahead of step 2 if its harness
+   unlocks the board work.
+5. `greth.cc`, `tap.cc`, `grspw.cc`, `gr1553.cc`. Last. They need host tap
+   devices and privileges, they model only what the GRLIB example applications
+   exercise, and they are where 100% is most likely to force a restructure
+   rather than a test.
 
-1. **Add the subsystem to the header behind the existing tests.** Move its
-   state and logic into `erc32_mec.h` (a new template, or new members and
-   methods on `Mec` if it shares the interrupt environment). Extend the `MecEnv`
-   concept, or add a second concept, for any new dependency the subsystem needs
-   from its environment. In `erc32.cc`, add the forwarding methods to `RealEnv`
-   and replace the old code with calls into the template. Do not touch the tests
-   yet. The pre-existing `mec_fixture` cases must still pass, proving the board
-   is unchanged.
+## The recipe, two commits per subsystem
+
+The board is production code, so keep it working at every step.
+
+1. **Move the subsystem into its header, behind the existing tests.** State and
+   logic into `erc32_<sub>.h` as a template on a new concept. In `erc32.cc`,
+   add the forwarding methods to `RealEnv` and replace the old code with calls
+   into the template. Add the header to the `gcovr.cfg` filter so it is
+   measured. **Do not touch the tests, and do not add the header to
+   `tests/covered.txt`.** The pre-existing cases must still pass, which is the
+   evidence that the board is unchanged.
 
 2. **Name the injected code Google style.** CamelCase types and methods,
    private members with a trailing underscore, cheap accessors named like the
-   member they return, all inside the `erc32` namespace. GNU `.clang-format`
-   layout is unchanged, so only the identifiers differ. Run
-   `uv run clang-format -i erc32_mec.h erc32.cc`.
+   member they return. GNU `.clang-format` layout is unchanged, so only the
+   identifiers differ. Run `uv run clang-format -i erc32_<sub>.h erc32.cc`.
 
-3. **Run the end-to-end tests.** `./waf test-run --fast`. This is the proof the
-   board still runs real binaries. Do it after every production change, not just
-   at the end. Drop `--fast` for the full set (adds crypt01) before the commit
+3. **Prove the board still works.** `./waf test-run --fast`, and
+   `./waf test-run --perf` with the fingerprints byte-identical. Do this after
+   every production change, not just at the end. Drop `--fast` before the commit
    that finishes the file.
 
-4. **Rewrite the subsystem's tests onto the test environment.** Replace its
-   `mec_fixture` cases with cases that construct the template on a `TestEnv` and
-   assert against exact values. Extend `TestEnv` with whatever the new
-   environment methods return. Assert the safe default state explicitly at the
-   start (reset values), the way the interrupt cases and the `mec_fixture`
-   constructor do with `REQUIRE (rd (R_IMR) == 0x7ffe)`. Keep one small
-   integration case that goes through `erc32.cc`'s register dispatch on the real
-   environment, so the board's dispatch arcs are covered; the bulk of the logic
-   coverage comes from the isolated cases.
+4. **Rewrite the subsystem's tests onto the test environment.** Its
+   `mec_fixture` cases become cases that construct the template on a `TestEnv`
+   and assert exact values from the manual. Assert the reset state explicitly
+   first, the way the interrupt cases do with `REQUIRE (rd (R_IMR) == 0x7ffe)`.
+   Keep one small integration case going through `erc32.cc`'s register dispatch
+   on the real environment, so the board's dispatch arcs are covered. The bulk
+   of the logic coverage comes from the isolated cases. The header joins
+   `tests/covered.txt` in this commit.
 
-5. **Test from the specification.** Register fields, reset values, reserved-bit
-   behavior and interrupt levels come from the reference manuals under `ref/`
-   (start at `ref/INDEX.md`; ERC32 and the SPARC IU manual for the MEC), not
-   from reading the implementation back to itself. A test that encodes what the
-   code does cannot catch what the code gets wrong.
+5. **A bug found on the way is its own commit, landing between 1 and 4.** The
+   defect surfaces while writing the spec tests, so it cannot precede the move,
+   but it must precede the test that covers it. Confirm against
+   `./waf test-run`, and A/B a behavioral change against an unmodified tree.
+   Never let a test bake in wrong behavior.
 
-6. **Fix bugs in their own commit, before the test that would catch them.** If
-   testing to spec uncovers a defect, the fix is a separate commit that precedes
-   the coverage test. Confirm the fix against `./waf test-run` and, when it is a
-   behavioral change, A/B it against the unmodified tree first. Do not let a
-   test bake in wrong behavior.
-
-7. **Handle dead branches by restructuring, not by marking.** A branch no test
-   can reach because it is genuinely unreachable is removed or the code is
-   restructured so the arc no longer exists. No coverage-suppression markers.
+6. **Dead branches are restructured away, not marked.** A branch no test can
+   reach because it is genuinely unreachable is removed, or the code is
+   reshaped so the arc no longer exists. No coverage-suppression markers.
    Confirm with `./waf test-run` that the restructure is behavior-neutral.
 
-8. **Confirm coverage and, when the file is finished, graduate it.** Build with
-   `--enable-coverage` and check that the subsystem's arcs are all covered by the
-   test environment alone. When the last subsystem has moved and both
-   `erc32_mec.h` and `erc32.cc` are at 100% line and branch, add `erc32.cc` to
-   `tests/covered.txt` (keep it sorted) in the finishing commit.
+### Environments
+
+An environment exposes named, intent-revealing methods. It never takes a C
+function pointer. A timer says
+
+    env_.ScheduleRtcTick (scaler + 1);
+
+and `RealEnv` turns that into `event (rtc_intr, 0, delta)`, where `rtc_intr` is
+a two-line thunk in `erc32.cc` calling back into the template. A `TestEnv`
+records the delta and the call count, and the case advances the subsystem by
+calling its tick method directly. The template never names a C function, and a
+test environment stays a handful of counters instead of a fake event queue.
+
+Where a subsystem schedules more than one kind of event, it gets one named
+method per kind rather than an enum or a callback.
+
+## When the manual and the code disagree
+
+The spec is the default authority. A deviation is legal only when it is
+deliberate, documented and tested as a deviation.
+
+- **The code is wrong and nothing depends on it.** Fix it, own commit, test
+  after.
+- **The code is wrong and `./waf test-run` goes red when it is fixed.** The
+  RTEMS binaries depend on the behavior. Do not fix it silently and do not bake
+  it into a test. Stop, and put the manual section and the failing run in front
+  of the maintainer. Whether RTEMS may rely on it is not a call to guess.
+- **The code deviates knowingly for simulation reasons.** `UART_TX_TIME` and
+  `UART_RX_TIME` at 1000 clocks, `MEC_WS` at zero waitstates, the trap entry
+  jitter, `SIM_LOAD` at `0x0F0` in an address range the MEC manual marks
+  unimplemented. The hardware has no such numbers. Test the simulator's
+  contract ("the UART schedules its transmit at the configured interval"), name
+  the spec section the test is not asserting in the test file header, and give
+  the deviation a line in `doc/`.
+
+## Performance
+
+Two different properties, each held where it has signal.
+
+- **The simulated timing model must not move.** A refactor is behavior-neutral
+  by construction, so `./waf test-run --perf` must return fingerprints
+  identical to the parent commit's. Movement means the move changed behavior.
+  That is a defect in the move, not a reason to re-bless
+  `tests/exe/perf-baseline.txt`.
+- **Host throughput is measured where it is at risk.** That is the memory
+  access dispatch step and, later, the decoders. `-O2` build, full
+  `./waf test-run` wall clock (crypt01 dominates), best of three, A/B against
+  the parent commit, and investigate anything worse than 2%.
+
+The dispatch-style question itself is settled and must not be re-benchmarked. A
+micro-benchmark and an end-to-end crypt01 run compared three styles for the hot
+memory path: today's function-pointer vtable (~108.8s), a template with an
+out-of-line global implementation (~109.1s, a tie), and a template with the body
+inlined into the loop (~119.4s, about 10% slower from register and instruction
+cache pressure). A monomorphic function-pointer call is already branch-predicted
+and costs nothing. So keep the `memsys`/`cpu_arch` vtables, and where a hot path
+is converted for testability, keep the body in a global function reached by a
+static template call.
 
 ## Build, gate and test commands
 
 ```shell
 # Coverage build and the per-file gate
 ./waf configure --enable-coverage && ./waf
-tests/check-coverage.py                 # runs gcovr via gcovr.cfg, fails on any regression
+tests/check-coverage.py                 # runs gcovr via gcovr.cfg
 
 # A readable branch report for one file
 gcovr --txt-metric branch --filter 'erc32.*'
 
-# End-to-end runs (the only proof the board still works)
+# End-to-end runs (the only proof a board still works)
 ./waf test-run --fast                   # skips crypt01
-./waf test-run                          # full set, before the finishing commit
+./waf test-run --perf                   # timing fingerprints, must not move
+./waf test-run                          # full set, before a finishing commit
 
 # Non-coverage build for normal development (coverage forces -O0)
 ./waf configure && ./waf
@@ -174,7 +279,14 @@ Gotchas that have cost time here:
 
 ## Lessons learned
 
-Hard-won on this file, so the next person does not rediscover them.
+Hard-won here, so the next person does not rediscover them.
+
+- **Check that the spec is actually in `ref/` before planning to test from it.**
+  The ERC32 work ran for several commits believing it had the manual. `ref/`
+  held the TSC691E Integer Unit manual, which documents the IU, its traps and
+  its pipeline. Every register the remaining subsystems implement lives in the
+  TSC693E Memory Controller manual, which was missing. It is there now, but the
+  same trap is waiting for any file whose peripheral spec nobody has opened.
 
 - **Spec-driven testing earns its keep.** The one real bug found while covering
   `erc32.cc` (the GPT scaler read was gated on the wrong enable bit) surfaced
@@ -182,15 +294,10 @@ Hard-won on this file, so the next person does not rediscover them.
   itself. Report the hardware's real ID, version and register values from the
   reference manuals; never invent a constant to make a test pass.
 
-- **The performance question is settled. Do not re-benchmark.** A micro-
-  benchmark and an end-to-end crypt01 run compared three dispatch styles for the
-  hot memory path: today's function-pointer vtable (~108.8s), a template with an
-  out-of-line global implementation (~109.1s, a tie), and a template with the
-  body inlined into the loop (~119.4s, about 10% slower from register and
-  instruction-cache pressure). A monomorphic function-pointer call is already
-  branch-predicted and costs nothing. So keep the `memsys`/`cpu_arch` vtables,
-  and where you convert a hot path for testability, keep the body in a global
-  function reached by a static template call, never inlined and never indirect.
+- **Look for the same code in three files before covering it once.** The host
+  UART port setup is triplicated across `erc32.cc`, `leon2.cc` and `grlib.cc`,
+  roughly 90 arcs of the same logic written three times. Deduplicating removes
+  arcs from the denominator instead of covering them repeatedly.
 
 - **`sis.h` is include-guarded now, keep it that way.** A subsystem header
   includes `sis.h`, so including it beside the board file's own `sis.h` used to
@@ -204,36 +311,38 @@ Hard-won on this file, so the next person does not rediscover them.
 
 - **UART cases share host and buffer state.** The emulated UART buffers and the
   real stdin are process-global across the shared test binary. Two interrupt-era
-  DI cases failed from cross-contamination until each got a fresh fixture and the
-  buffer was primed first. Isolate UART cases and prime, do not assume a clean
-  buffer.
+  DI cases failed from cross-contamination until each got a fresh fixture and
+  the buffer was primed first. Isolate UART cases and prime, do not assume a
+  clean buffer.
 
-- **SIS fakes a regression two ways, so A/B first.** A build piped into
-  `head` dies on SIGPIPE and leaves a stale `build/sis` that looks built; an
-  inherited stdin that never closes makes a run hang in the emulated UART and
-  looks like a hang in target code. Before believing a regression or an
-  improvement from a behavioral change, run it against an unmodified tree.
+- **SIS fakes a regression two ways, so A/B first.** A build piped into `head`
+  dies on SIGPIPE and leaves a stale `build/sis` that looks built; an inherited
+  stdin that never closes makes a run hang in the emulated UART and looks like a
+  hang in target code. Before believing a regression or an improvement from a
+  behavioral change, run it against an unmodified tree.
 
-- **A coverage number describes one build configuration.** The `--enable-coverage`
-  build is `-O0`; the shipping build is `-O2`. Do not compare timings across the
-  two, and see `doc/building-sis.md` for why a single percentage is
-  configuration-specific.
+- **A coverage number describes one build configuration.** The
+  `--enable-coverage` build is `-O0`; the shipping build is `-O2`. Do not
+  compare timings across the two, and see `doc/building-sis.md` for why a single
+  percentage is configuration-specific.
 
 ## Moving to another machine
 
-The work is going to a more powerful host. A fresh `git clone` brings the
-tracked tree but not everything this workflow needs:
+A fresh `git clone` brings the tracked tree but not everything this workflow
+needs:
 
 - **`ref/` is untracked and local-only.** The spec-driven step has no specs
   without it, and `ref/INDEX.md` and `ref/SOURCES.md` live inside it, so they go
-  too. Copy the whole `ref/` directory across by hand (for example
-  `rsync`/`scp`); git will not carry it. Bring any other untracked working files
-  that matter, such as `BUGS.md` and task notes.
+  too. Copy the whole `ref/` directory across by hand (for example `rsync` or
+  `scp`); git will not carry it. `ref/SOURCES.md` records where every document
+  came from, so a lost `ref/` can be rebuilt from it. Bring any other untracked
+  working files that matter, such as `BUGS.md` and task notes.
 
 - **Toolchain on the new box:** Python 3 (runs the vendored `waf`), a
   GCC-compatible C++20 compiler (GCC 10+ for concepts; `--enable-coverage` is
-  GCC-only), `gcovr` (the coverage gate), `uv` (pulls the pinned `clang-format`),
-  and `dtc` plus `xxd` only if you regenerate the RISC-V DTB.
+  GCC-only), `gcovr` (the coverage gate), `uv` (pulls the pinned `clang-format`,
+  and `pymupdf4llm` if a reference manual needs converting), and `dtc` plus
+  `xxd` only if you regenerate the RISC-V DTB.
 
 - **First thing after the move:** `./waf configure && ./waf`, then `./waf
   test-run`, and confirm the baseline is green before changing anything. Then
@@ -243,6 +352,6 @@ tracked tree but not everything this workflow needs:
 
 Follow `CLAUDE.md`: 50/72 rule, `<scope>: Sentence-case` subject, a
 `Signed-off-by:` trailer that only the human author adds, and an `Assisted-by:`
-trailer for assisted commits. One subsystem per commit; a bug fix is its own
-commit ahead of the test that covers it. Markdown changes are owned by
-`@approvers/docs` per `CODEOWNERS`.
+trailer for assisted commits. Two commits per subsystem as above, and a bug fix
+is its own commit ahead of the test that covers it. Markdown changes are owned
+by `@approvers/docs` per `CODEOWNERS`.
