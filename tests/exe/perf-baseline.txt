@@ -8,8 +8,9 @@
 #
 #   <board> <exe> <label> <value>
 #
-# Captured with the default build, after the trap entry jitter was
-# decorrelated from the simulated time.  Re-bless by
+# Captured with the default build, from the reference executables rebuilt
+# at RTEMS bc73eb7217, and after the trap entry jitter was decorrelated
+# from the simulated time.  Re-bless by
 # running ./waf test-run --perf and copying the current values here.
 
 # tmonetoone: cost of one task to task hand off per synchronisation primitive

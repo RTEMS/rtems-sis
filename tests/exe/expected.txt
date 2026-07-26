@@ -11,17 +11,9 @@
 # tests/exe/README.md for the full status table and the notes behind each
 # XFAIL.
 
-# ERC32 misses the interrupt critical section window in a handful of the
-# spintrcritical tests.  They report T_INTERRUPT_TEST_TIMEOUT: the bisection
-# of the framework never converges, because the trap entry jitter is wide
-# enough to flip the outcome of a given busy count.  Building with the jitter
-# forced to zero makes all of them pass, and they fail with the jitter the
-# simulator had before d708f4d as well, so they are a long standing limit of
-# the ERC32 model rather than a recent regression.  The other SPARC boards
-# tolerate the same jitter.
-erc32 spintrcritical01.exe XFAIL   # pre-existing, fails on unmodified SIS
-erc32 spintrcritical02.exe XFAIL   # pre-existing, fails on unmodified SIS
-erc32 spintrcritical03.exe XFAIL   # pre-existing, fails on unmodified SIS
-erc32 spintrcritical04.exe XFAIL   # pre-existing, fails on unmodified SIS
-erc32 spintrcritical05.exe XFAIL   # pre-existing, fails on unmodified SIS
-erc32 spintrcritical20.exe XFAIL   # pre-existing, fails on unmodified SIS
+# spintrcritical20 is a different case and stays.  The mainline tightened its
+# done condition to require the interrupt to land inside the action, where
+# the RTEMS 6 version accepted flags which accumulate over iterations, so the
+# mainline check is the stronger one and must not be relaxed.  ERC32 only
+# hits that narrower window when the trap entry jitter is forced to zero.
+erc32 spintrcritical20.exe XFAIL   # narrow window, see README

@@ -47,9 +47,12 @@ that follow either marker are the normal way RTEMS shuts down, not a failure.
 
 # Status
 
+Built from RTEMS bc73eb7217 with the RTEMS 7 tools (GCC 15.2.0), one
+configuration per board, and stripped of debug information with `strip -g`.
+
 | Board | PASS | XFAIL | Notes |
 | --- | ---: | ---: | --- |
-| `erc32` | 22 | 6 | interrupt window misses, see below |
+| `erc32` | 27 | 1 | one narrow window, see below |
 | `gr712rc` | 28 | 0 | clean |
 | `gr740` | 28 | 0 | clean |
 | `gr740_smp` | 33 | 0 | clean |
@@ -60,21 +63,40 @@ that follow either marker are the normal way RTEMS shuts down, not a failure.
 The non SMP boards carry 28 tests, the SMP boards add the five `smp*` tests for
 33.
 
-## erc32 interrupt window misses
+## erc32 spintrcritical20
 
-`erc32 spintrcritical01`, `02`, `03`, `04`, `05` and `20` report
-`T_INTERRUPT_TEST_TIMEOUT`: the bisection of `T_interrupt_test` runs its full
-`max_iteration_count` without converging. They fail with the jitter the
-simulator had before d708f4d as well, so they are a long standing limit of the
-ERC32 model, not a regression. The same tests pass on `leon3`, `gr740` and
-`leon2`, which tolerate the same jitter.
+`erc32 spintrcritical20` reports `T_INTERRUPT_TEST_TIMEOUT`: the bisection of
+`T_interrupt_test` runs its full `max_iteration_count` without converging.
 
-Building with the trap jitter forced to zero makes all six pass, which places
-the cause in the width of the jitter relative to the ERC32 interrupt window
-rather than in RTEMS. Whether the jitter earns its keep is a modelling
-question: it is original upstream code, it was mathematically broken from the
-start until d708f4d, and nothing else in the cost model is stochastic.
-Removing it is a one line change and would turn these six `XPASS`.
+`spintrcritical01` to `05` used to fail the same way. That was an RTEMS bug,
+not a simulator one. The five share `spintrcritical01impl.h`, whose interrupt
+handler must classify the interrupt only while the action is in progress:
+
+```c
+if ( T_interrupt_test_get_state() != T_INTERRUPT_TEST_ACTION ) {
+  return T_INTERRUPT_TEST_CONTINUE;
+}
+```
+
+Without it the handler classifies and releases the semaphore on every tick,
+so the bisection is fed samples which say nothing about the race. The check
+is on the RTEMS 6 branch as afb30a1056, "spintrcritical0[1-5]: Fix sporadic
+test failures", and had never reached the mainline. Proven both ways:
+deleting it from an RTEMS 6 build reproduces the failure exactly, `F:1` after
+about ten seconds, and restoring it turns all five `F:0` in about forty
+milliseconds. `leon3` is unaffected either way. These executables carry the
+restored check and all five pass.
+
+**`spintrcritical20` is a different case, and not an RTEMS bug.** The mainline
+tightened its done
+condition to require the interrupt to land inside the action window, where
+the RTEMS 6 version accepted three flags which accumulate over iterations and
+are never reset, so it could report done without a single in-window hit. The
+mainline check is the stronger one and must not be relaxed. ERC32 reaches
+that narrower window only when the trap entry jitter is forced to zero, so
+this one is a simulator question: the jitter is original upstream code, it
+was mathematically broken from the start until d708f4d, and nothing else in
+the cost model is stochastic. Removing it is a one line change.
 
 ## erc32 spintrcritical24, fixed
 
