@@ -102,20 +102,6 @@
 #define UART_FLUSH_TIME 3000
 
 /* New uart defines */
-#define UARTA_DR  0x1
-#define UARTA_SRE 0x2
-#define UARTA_HRE 0x4
-#define UARTA_OR  0x40
-#define UARTA_CLR 0x80
-#define UARTB_DR  0x10000
-#define UARTB_SRE 0x20000
-#define UARTB_HRE 0x40000
-#define UARTB_OR  0x400000
-#define UARTB_CLR 0x800000
-
-#define UART_DR	 0x100
-#define UART_TSE 0x200
-#define UART_THE 0x400
 
 /* MEC registers */
 
@@ -136,9 +122,6 @@ static unsigned wnumb;
 #ifndef O_NONBLOCK
 #define O_NONBLOCK 0
 #endif
-
-static uint32 uart_stat_reg;
-static uint32 uarta_data, uartb_data;
 
 /* Forward declarations */
 
@@ -405,9 +388,6 @@ mec_reset ()
   posted_irq = 0;
   wnuma = wnumb = 0;
   anum = aind = bnum = bind = 0;
-
-  uart_stat_reg = UARTA_SRE | UARTA_HRE | UARTB_SRE | UARTB_HRE;
-  uarta_data = uartb_data = UART_THE | UART_TSE;
 
   rtc.Reset ();
   gpt.Reset ();

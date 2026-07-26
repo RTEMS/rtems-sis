@@ -1049,10 +1049,7 @@ const struct grlib_ipcore gptimer = { gpt_init, gpt_reset, gpt_read, gpt_write,
 #define UART_FLUSH_TIME 5000
 
 /* New uart defines.  */
-#define UARTA_DR  0x1
-#define UARTA_SRE 0x2
-#define UARTA_HRE 0x4
-#define UARTA_OR  0x10
+#define UARTA_OR 0x10
 
 /* UART support variables.  */
 
@@ -1069,9 +1066,6 @@ static unsigned wnuma;
 #ifndef O_NONBLOCK
 #define O_NONBLOCK 0
 #endif
-
-static uint32 uart_stat_reg;
-static uint32 uarta_data;
 
 void
 apbuart_init_stdio (void)
@@ -1245,7 +1239,6 @@ apbuart_reset (void)
 {
   wnuma = 0;
   anum = aind = 0;
-  uart_stat_reg = UARTA_SRE | UARTA_HRE;
 
   uart_irq_start ();
 }

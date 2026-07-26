@@ -81,10 +81,7 @@
 #define UART_FLUSH_TIME 3000
 
 /* New uart defines.  */
-#define UARTA_DR  0x1
-#define UARTA_SRE 0x2
-#define UARTA_HRE 0x4
-#define UARTA_OR  0x10
+#define UARTA_OR 0x10
 
 /* IRQCTRL registers.  */
 
@@ -119,9 +116,6 @@ static unsigned wnuma;
 #ifndef O_NONBLOCK
 #define O_NONBLOCK 0
 #endif
-
-static uint32 uart_stat_reg;
-static uint32 uarta_data;
 
 /* Forward declarations. */
 
@@ -220,8 +214,6 @@ leon2_reset (void)
 
   wnuma = 0;
   anum = aind = 0;
-
-  uart_stat_reg = UARTA_SRE | UARTA_HRE;
 
   gpt_counter[0] = 0xffffffff;
   gpt_reload[0] = 0xffffffff;
