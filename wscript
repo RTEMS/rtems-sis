@@ -96,6 +96,12 @@ def configure(conf):
         level = '0'
         conf.env.append_value('CXXFLAGS', ['--coverage'])
         conf.env.append_value('LINKFLAGS', ['--coverage'])
+        # An assert states an invariant which is provably true, so the
+        # shipping build folds it away and it costs nothing there.  This
+        # build is unoptimized, where it survives as a branch whose failing
+        # side nothing can take, and the per-file gate would never pass.
+        # Turn asserts off here so what is measured is the code itself.
+        conf.env.append_value('DEFINES', ['NDEBUG'])
 
     if conf.env.CXX_NAME == 'msvc':
         msvc_opt = {'0': '/Od', '1': '/O1', 's': '/Os'}.get(level, '/O2')

@@ -29,8 +29,15 @@ instruction behaviour.
 Set the optimization level the compiler is invoked with. The default is 2.
 
 **`--enable-coverage`**  
-Instrument the build for gcov and force `-O0`. Needs a GCC compatible
-compiler. See [Unit tests](#unit-tests) below.
+Instrument the build for gcov, force `-O0` and define `NDEBUG`. Needs a GCC
+compatible compiler. See [Unit tests](#unit-tests) below.
+
+Asserts are turned off in this build on purpose. An assert in the simulator
+states an invariant which is provably true from the code around it, so the
+shipping build folds it away and it costs nothing there. Unoptimized it
+survives as a branch whose failing side nothing can take, which no test could
+ever cover, so leaving it in would put the per-file gate permanently out of
+reach.
 
 The simulator is C++17. On POSIX hosts it is built with GCC or Clang. Windows
 builds are native and target MSVC; no MSYS or Cygwin runtime is involved.
