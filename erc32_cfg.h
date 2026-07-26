@@ -357,22 +357,26 @@ private:
       }
   }
 
+  /* The two PROM waitstate fields encode no waitstates twice, at zero and at
+     one, so the count is one below the field from there on.  */
+  static uint32
+  PromWaitstates (uint32 field)
+  {
+    return field > 0 ? field - 1 : 0;
+  }
+
   /* The waitstate configuration register holds one field per memory area.  An
      8 bit PROM needs four accesses for a word, so its read waitstates are
-     four times the programmed value plus the access itself.  */
+     four times the decoded value plus the access itself.  */
   void
   DecodeWcr ()
   {
     ram_read_ws_ = wcr_ & 3;
     ram_write_ws_ = (wcr_ >> 2) & 3;
-    rom_read_ws_ = (wcr_ >> 4) & 0x0f;
+    rom_read_ws_ = PromWaitstates ((wcr_ >> 4) & 0x0f);
     if (env_.Rom8 ())
-      {
-	if (rom_read_ws_ > 0)
-	  rom_read_ws_--;
-	rom_read_ws_ = 5 + (4 * rom_read_ws_);
-      }
-    rom_write_ws_ = (wcr_ >> 8) & 0x0f;
+      rom_read_ws_ = 5 + (4 * rom_read_ws_);
+    rom_write_ws_ = PromWaitstates ((wcr_ >> 8) & 0x0f);
 
     if (env_.Verbose ())
       {
