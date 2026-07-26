@@ -17,4 +17,5 @@ erc32_uart.h
 exec.cc
 help.cc
 sisio.cc
+sparc.cc
 uartport.cc

@@ -3360,3 +3360,410 @@ TEST_CASE_FIXTURE (sparc_fixture,
 
   sync_rt = saved;
 }
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC a branch is recorded for coverage")
+{
+  /* A branch is recorded as taken or not taken so a report can tell which
+     way a program went, and the delay slot is recorded as executed.  */
+  uint32 saved = ebase.coven;
+
+  ebase.coven = 1;
+  sregs[0].pc = 0x2000;
+  sregs[0].npc = 0x2004;
+  covram[0x2004 >> 2] = 0;
+
+  CHECK (exec (bicc (0, BICC_BA, 4)) == 0);
+  CHECK (covram[0x2004 >> 2] != 0);
+
+  /* A floating point branch takes the same record.  */
+  sregs[0].psr |= PSR_EF;
+  covram[0x2004 >> 2] = 0;
+  sregs[0].pc = 0x2000;
+  sregs[0].npc = 0x2004;
+  CHECK (exec ((FPBCC << 22) | (FBA << 25) | 4) == 0);
+  CHECK (covram[0x2004 >> 2] != 0);
+
+  ebase.coven = saved;
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC only the planted encoding is a breakpoint")
+{
+  /* The debugger recognises its own breakpoint by the whole instruction
+     word, so a program which raises the same trap number by another
+     encoding still takes a software trap.  */
+  int saved = sis_gdb_break;
+
+  sis_gdb_break = 1;
+  set (1, 1);
+  CHECK (exec (f3i (OP_ARITH, BICC_BA, TICC, 1, 0)) == (int) (0x80 | 1));
+  CHECK (sregs[0].bphit == 0);
+
+  sis_gdb_break = saved;
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC only two ancillary registers do more than write")
+{
+  /* On a LEON, writing ancillary register 17 changes the cache control
+     bits and 19 enters power-down.  Every other one only sets the
+     multiply-and-divide register, as it does on the ERC32.  */
+  cputype = CPU_LEON3;
+  sregs[0].pwd_mode = 0;
+  sregs[0].asr17 = 0;
+
+  CHECK (exec (f3i (OP_ARITH, 20, WRY, 0, 0x234)) == 0);
+  CHECK (sregs[0].y == 0x234);
+  CHECK (sregs[0].asr17 == 0);
+  CHECK (sregs[0].pwd_mode == 0);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC a watchpoint without the stub reports the address")
+{
+  /* Without the debugger the shell reports the address a watchpoint caught,
+     so a run can be traced from the simulator prompt alone.  The debugger
+     wants the program counter left on the store instead.  */
+  int saved = sis_gdb_break;
+
+  set (1, 0x40);
+  set (3, 0x11);
+  ebase.wpwnum = 1;
+  ebase.wphit = 0;
+  ebase.wpws[0] = 0x40;
+  ebase.wpwm[0] = 3;
+
+  sis_gdb_break = 0;
+  CHECK (exec (f3i (OP_MEM, 3, ST, 1, 0)) == WPT_TRAP);
+
+  ebase.wphit = 0;
+  sis_gdb_break = 1;
+  CHECK (exec (f3i (OP_MEM, 3, ST, 1, 0)) == WPT_TRAP);
+
+  ebase.wpwnum = 0;
+  ebase.wphit = 0;
+  sis_gdb_break = saved;
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC a read watchpoint reports its size")
+{
+  /* A read watchpoint covers the word the load touches whatever the size of
+     the access, so a byte load inside a watched word is caught too.  */
+  set (1, 0x40);
+  ebase.wprnum = 1;
+  ebase.wphit = 0;
+  ebase.wprs[0] = 0x40;
+  ebase.wprm[0] = 3;
+
+  CHECK (exec (f3i (OP_MEM, 3, LD, 1, 0)) == WPT_TRAP);
+
+  ebase.wphit = 0;
+  CHECK (exec (f3i (OP_MEM, 3, LDUB, 1, 2)) == WPT_TRAP);
+
+  /* An address outside it is not.  */
+  ebase.wphit = 0;
+  set (1, 0x80);
+  CHECK (exec (f3i (OP_MEM, 3, LD, 1, 0)) == 0);
+
+  ebase.wprnum = 0;
+  ebase.wphit = 0;
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC a LEON reads its cache control")
+{
+  /* Address space two of a LEON holds the cache registers rather than
+     memory: the control register at zero and the tags above it, which the
+     simulator answers as an always valid line because it models no tags.  */
+  cputype = CPU_LEON3;
+  sregs[0].cache_ctrl = 0x0f000f;
+
+  set (1, 0);
+  CHECK (exec (f3r (OP_MEM, 3, LDA, 1, 0) | (2 << 5)) == 0);
+  CHECK (get (3) == 0x0f000f);
+
+  set (1, 4);
+  CHECK (exec (f3r (OP_MEM, 3, LDA, 1, 0) | (2 << 5)) == 0);
+  CHECK (get (3) == 1u << 27);
+
+  /* A store to it writes the control register whatever the address.  */
+  set (1, 0);
+  set (3, 0x11);
+  CHECK (exec (f3r (OP_MEM, 3, STA, 1, 0) | (2 << 5)) == 0);
+  CHECK (sregs[0].cache_ctrl == 0x11);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC compare-and-swap checks its address space")
+{
+  /* The two user address spaces are allowed unprivileged, and every other
+     one goes through the usual check, which refuses the immediate form.  */
+  set (1, 0x40);
+
+  CHECK (exec (f3i (OP_MEM, 3, CASA, 1, 0)) == TRAP_UNIMP);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC a floating point store waits for its operand")
+{
+  /* A store of a register the unit is still computing waits for it.  The
+     double store names its pair by the even register, so a pending odd
+     result holds it too.  */
+  sregs[0].psr |= PSR_EF;
+  sregs[0].simtime = 0;
+  set (1, 0x40);
+
+  SUBCASE ("a single store")
+  {
+    sregs[0].ftime = 20;
+    sregs[0].frd = 3;
+    sregs[0].fhold = 0;
+    CHECK (exec (f3i (OP_MEM, 3, STF, 1, 0)) == 0);
+    CHECK (sregs[0].fhold == 20);
+  }
+
+  SUBCASE ("a double store of the odd half")
+  {
+    sregs[0].ftime = 20;
+    sregs[0].frd = 1;
+    sregs[0].fhold = 0;
+    CHECK (exec (f3i (OP_MEM, 2, STDF, 1, 0)) == 0);
+    CHECK (sregs[0].fhold == 20);
+  }
+
+  SUBCASE ("a double load of the pair")
+  {
+    sregs[0].ftime = 20;
+    sregs[0].frs2 = 3;
+    sregs[0].fhold = 0;
+    CHECK (exec (f3i (OP_MEM, 2, LDDF, 1, 0)) == 0);
+    CHECK (sregs[0].fhold == 20);
+  }
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC a two operand instruction checks both sources")
+{
+  /* Only a one operand floating point instruction leaves its first source
+     out of the dependency check, so a two operand one waits for either.  */
+  sregs[0].psr |= PSR_EF;
+  sregs[0].simtime = 0;
+  sregs[0].ftime = 0;
+  sregs[0].ltime = 100;
+  sregs[0].flrd = REG_SWAP (1);
+  sregs[0].fhold = 0;
+
+  CHECK (exec (fpop (FPOP1, 3, 1, OPF_FADDs, 5)) == 0);
+  CHECK (sregs[0].fhold == 1);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC a software trap is not an interrupt")
+{
+  /* Only the traps numbered 17 to 31 are interrupts, so a software trap
+     above that range is not acknowledged to the controller.  */
+  sregs[0].intack = count_intack;
+  sregs[0].psr |= PSR_ET;
+  intack_calls = 0;
+
+  sregs[0].trap = 0x80 | 5;
+  CHECK (sparc32.execute_trap (&sregs[0]) == 0);
+  CHECK (intack_calls == 0);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC every register number is answered")
+{
+  /* The debugger asks for the whole file in one packet, which walks the
+     globals, the window, the floating point registers and the control
+     registers in order.  Setting each one back leaves the file as it
+     was.  */
+  char buf[72 * 4];
+
+  sregs[0].g[1] = 0x11;
+  sregs[0].y = 0x22;
+  set (8, 0x33);
+  fsi (2) = 0x44;
+
+  CHECK (arch->gdb_get_reg (buf) == 72 * 4);
+
+  for (int32 reg = 0; reg < 72; reg++)
+    {
+      uint32 value =
+	  ((buf[reg * 4] & 0xff) << 24) | ((buf[reg * 4 + 1] & 0xff) << 16) |
+	  ((buf[reg * 4 + 2] & 0xff) << 8) | (buf[reg * 4 + 3] & 0xff);
+
+      arch->set_register (&sregs[0], NULL, value, reg);
+    }
+
+  CHECK (sregs[0].g[0] == 0);
+  CHECK (sregs[0].g[1] == 0x11);
+  CHECK (sregs[0].y == 0x22);
+  CHECK (get (8) == 0x33);
+  CHECK (fsi (2) == 0x44);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC an address below a window is left to memory")
+{
+  /* The stack of a window runs upwards from its pointer, so an address
+     below it is memory like any other.  */
+  char buf[4];
+
+  sregs[0].wim = 0;
+  for (int win = 0; win < NWIN; win++)
+    sregs[0].r[win * 16 + 14] = 0x3000;
+  save_sp (&sregs[0]);
+
+  CHECK (gdb_sp_read (0x2000, buf, 4) == 0);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC the disassembler spells a negated register")
+{
+  stdout_capture cap;
+
+  /* xnor with a zero second source negates the first, which the assembler
+     spells not, and the same holds when the result names the source.  */
+  uint32 addr = 0x200;
+
+  sis_tests::flatmem_poke (addr, f3r (OP_ARITH, 3, IXNOR, 1, 0));
+  arch->disas (addr);
+  CHECK (cap.str ().find ("not") != std::string::npos);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC an annulled delay slot is recorded as skipped")
+{
+  /* An annulled branch which is not taken skips its delay slot, so the
+     coverage record starts again after it rather than counting the slot as
+     executed.  */
+  uint32 saved = ebase.coven;
+
+  ebase.coven = 1;
+  sregs[0].pc = 0x2000;
+  sregs[0].npc = 0x2004;
+  covram[0x2008 >> 2] = 0;
+
+  CHECK (exec (bicc (1, BICC_BN, 4)) == 0);
+  CHECK (covram[0x2008 >> 2] != 0);
+
+  /* A floating point branch is recorded the same way.  */
+  sregs[0].psr |= PSR_EF;
+  covram[0x2008 >> 2] = 0;
+  sregs[0].pc = 0x2000;
+  sregs[0].npc = 0x2004;
+  CHECK (exec ((1u << 29) | (FBN << 25) | (FPBCC << 22) | 4) == 0);
+  CHECK (covram[0x2008 >> 2] != 0);
+
+  /* With collection off nothing is recorded.  */
+  ebase.coven = 0;
+  covram[0x2008 >> 2] = 0;
+  sregs[0].pc = 0x2000;
+  sregs[0].npc = 0x2004;
+  CHECK (exec (bicc (1, BICC_BN, 4)) == 0);
+  CHECK (covram[0x2008 >> 2] == 0);
+
+  sregs[0].pc = 0x2000;
+  sregs[0].npc = 0x2004;
+  CHECK (exec ((1u << 29) | (FBN << 25) | (FPBCC << 22) | 4) == 0);
+  CHECK (covram[0x2008 >> 2] == 0);
+
+  ebase.coven = saved;
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC a LEON reaches memory through the other spaces")
+{
+  /* Only address space two is the cache on a LEON.  Every other space is
+     memory, as it is on the ERC32.  */
+  cputype = CPU_LEON3;
+  sregs[0].cache_ctrl = 0x0f000f;
+  sis_tests::flatmem_poke (0x40, 0x12345678);
+  set (1, 0x40);
+
+  CHECK (exec (f3r (OP_MEM, 3, LDA, 1, 0) | (0xb << 5)) == 0);
+  CHECK (get (3) == 0x12345678);
+
+  set (3, 0x11);
+  CHECK (exec (f3r (OP_MEM, 3, STA, 1, 0) | (0xb << 5)) == 0);
+  CHECK (sis_tests::flatmem_peek (0x40) == 0x11);
+  CHECK (sregs[0].cache_ctrl == 0x0f000f);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC a floating point access waits only on its own pair")
+{
+  /* The hold is charged for the register the unit is busy with and for no
+     other, so an access to a different pair runs at once.  */
+  sregs[0].psr |= PSR_EF;
+  sregs[0].simtime = 0;
+  sregs[0].ftime = 20;
+  set (1, 0x40);
+
+  SUBCASE ("a single store of another register")
+  {
+    sregs[0].frd = 5;
+    sregs[0].frs1 = 5;
+    sregs[0].frs2 = 5;
+    sregs[0].fhold = 0;
+    CHECK (exec (f3i (OP_MEM, 3, STF, 1, 0)) == 0);
+    CHECK (sregs[0].fhold == 0);
+  }
+
+  SUBCASE ("a double store of another pair")
+  {
+    sregs[0].frd = 6;
+    sregs[0].fhold = 0;
+    CHECK (exec (f3i (OP_MEM, 2, STDF, 1, 0)) == 0);
+    CHECK (sregs[0].fhold == 0);
+  }
+
+  SUBCASE ("a double load of another pair")
+  {
+    sregs[0].frd = 8;
+    sregs[0].frs1 = 8;
+    sregs[0].frs2 = 8;
+    sregs[0].fhold = 0;
+    CHECK (exec (f3i (OP_MEM, 2, LDDF, 1, 0)) == 0);
+    CHECK (sregs[0].fhold == 0);
+  }
+
+  SUBCASE ("a double load waits on the second source alone")
+  {
+    sregs[0].frd = 8;
+    sregs[0].frs1 = 8;
+    sregs[0].frs2 = 3;
+    sregs[0].fhold = 0;
+    CHECK (exec (f3i (OP_MEM, 2, LDDF, 1, 0)) == 0);
+    CHECK (sregs[0].fhold == 20);
+  }
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC compare-and-swap reaches the other spaces")
+{
+  /* An address space outside the two the manual allows unprivileged goes
+     through the usual check and then reaches memory like any other.  */
+  sis_tests::flatmem_poke (0x40, 0x12345678);
+  set (1, 0x40);
+  set (2, 0x12345678);
+  set (3, 0x11);
+
+  CHECK (exec (f3r (OP_MEM, 3, CASA, 1, 2) | (0xc << 5)) == 0);
+  CHECK (sis_tests::flatmem_peek (0x40) == 0x11);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC a one operand instruction has no first source")
+{
+  /* The single operand group leaves its first source out of the load
+     dependency check, so a pending load into the register the first source
+     field happens to name costs nothing.  */
+  sregs[0].psr |= PSR_EF;
+  sregs[0].simtime = 0;
+  sregs[0].ftime = 0;
+  sregs[0].ltime = 100;
+  sregs[0].flrd = REG_SWAP (1);
+  sregs[0].fhold = 0;
+
+  CHECK (exec (fpop (FPOP1, 3, 1, OPF_FSQRTs, 5)) == 0);
+  CHECK (sregs[0].fhold == 0);
+}
