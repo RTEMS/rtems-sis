@@ -66,7 +66,7 @@ against real descriptors the way `tests/sisio.cc` does.
 ## Where the tree stands
 
 Measured with `./waf configure --enable-coverage && ./waf`, branch metric,
-767 of 6137 arcs (12%). The totals move as headers join the filter, so compare
+776 of 6145 arcs (12%). The totals move as headers join the filter, so compare
 per file rather than against an older total.
 
 | Area | Arcs | Taken |
@@ -74,9 +74,9 @@ per file rather than against an older total.
 | `sparc.cc`, `riscv.cc` | 2274 | 17 |
 | `grlib.cc`, `grspw.cc`, `gr1553.cc`, `greth.cc`, `memscrub.cc`, `tap.cc` | 1071 | 0 |
 | `sis.cc`, `remote.cc`, `interf.cc` | 546 | 0 |
-| `erc32.cc` | 412 | 331 |
+| `erc32.cc` | 363 | 284 |
 | `leon2.cc`, `leon3.cc`, `gr740.cc`, `rv32.cc` | 353 | 0 |
-| graduated: `erc32_error.h`, `erc32_mec.h`, `erc32_timer.h`, `exec.cc`, `help.cc`, `sisio.cc` | | 100% |
+| graduated: `erc32_cfg.h`, `erc32_error.h`, `erc32_mec.h`, `erc32_timer.h`, `exec.cc`, `help.cc`, `sisio.cc` | | 100% |
 
 `func.cc` and `elf.cc` are not in the table above only because they were not
 captured in that run. Measure them before planning their step.
@@ -93,11 +93,20 @@ Done, graduated in `tests/covered.txt`:
   the system fault status register and the failing address register. The five
   error sources collapse into one table, so the reset-or-halt decision is
   written once.
+- **`erc32_cfg.h`** the MEC control, memory configuration, waitstate, I/O
+  configuration and access protection segment registers, and the eleven
+  globals their decode used to write. The memory access path reads what they
+  decode to through accessors.
 
 `erc32.cc` instantiates each of these on its single `RealEnv`, except the
 timers, which need a per-instance event thunk and so take a
 `RealTimerEnv<Thunk>`. `tests/erc32.cc` drives each template on its own small
 test environment with no globals.
+
+`RealEnv` now serves four subsystems, and two of its methods reach back into
+one of them. Its methods are therefore declared in the class and defined after
+the subsystem objects are constructed, which is what lets one environment serve
+subsystems that depend on each other. Follow that when adding the fifth.
 
 ## The order of work
 
@@ -114,9 +123,8 @@ all of the concepts; each test file holds a small `TestEnv` per subsystem.
 
 1. ~~**`erc32_timer.h`** RTC, GPT and watchdog.~~ Done.
 2. ~~**`erc32_error.h`** ERSR, SFSR, FFAR, `mecparerror`, `decode_ersr`.~~ Done.
-3. **`erc32_cfg.h`** MEC control, memory configuration, waitstates, I/O
-   configuration, software reset, power down, the access protection segments.
-   Precedes the memory path, which reads the sizes and masks it computes.
+3. ~~**`erc32_cfg.h`** MEC control, memory configuration, waitstates, I/O
+   configuration, software reset, power down, the protection segments.~~ Done.
 4. **The shared host UART port module.** `port_init`, `init_stdio`,
    `restore_stdio` and the `DO_STDIO_READ` macro are near-identical in
    `erc32.cc`, `leon2.cc` and `grlib.cc`. They become one plain `.cc` taking
@@ -300,6 +308,15 @@ Hard-won here, so the next person does not rediscover them.
   two rows the manual lists and the code never had were plain to see: an IU
   hardware error and an FPU comparison error latched and were then ignored.
   Look for the same shape in `grlib.cc` and the UART.
+
+- **A wrong decode can hide behind a compensating caller.** The RAM and PROM
+  size fields decoded four and sixteen times too large. Nothing failed,
+  because the simulator's own boot loader programmed sizes its comment
+  described correctly and the wrong decode turned them into the memory the
+  board actually has. Fixing the decode alone turned 27 runs red; fixing the
+  boot loader with it left every run green and the fingerprints unmoved. When
+  a spec fix breaks the world, check whether a caller was compensating before
+  concluding that RTEMS depends on the bug.
 
 - **Spec-driven testing earns its keep.** The one real bug found while covering
   `erc32.cc` (the GPT scaler read was gated on the wrong enable bit) surfaced
