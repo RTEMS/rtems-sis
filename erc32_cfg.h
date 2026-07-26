@@ -40,7 +40,9 @@ enum
 				   outside it */
   kMcrHardwareError = 1u << 15, /* reserved in the manual; the simulator uses
 				   it to inject a MEC hardware error */
-  kMcrReset = 0x01350014u
+  /* BTO, WDCS, DMAE, DST, UPE, UP and UCS set, the UART scaler at one, and
+     every error unmasked and set to halt.  */
+  kMcrReset = 0x01b50014u
 };
 
 /* Memory configuration register fields.  */
