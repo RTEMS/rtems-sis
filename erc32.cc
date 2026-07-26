@@ -1462,7 +1462,9 @@ boot_init (void)
   mec_write (MEC_WCR, 0);			 /* zero waitstates */
   mec_write (MEC_TRAPD, 0);			 /* turn off watch-dog */
   mec_write (MEC_RTC_SCALER, ebase.freq - 1);	 /* generate 1 MHz RTC tick */
-  mec_write (MEC_MEMCFG, (3 << 18) | (4 << 10)); /* 1 MB ROM, 4 MB RAM */
+  /* Decode all of the ROM and RAM the board has, which is what the stack
+     pointer set below assumes.  */
+  mec_write (MEC_MEMCFG, (7 << 18) | (6 << 10)); /* 16 MB ROM, 16 MB RAM */
   sregs->wim = 2;
   sregs->psr = 0x110010e0;
   sregs->r[30] = RAM_END;

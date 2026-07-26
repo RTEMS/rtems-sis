@@ -54,7 +54,11 @@ enum
   kMemcfgPromSizeShift = 18,	   /* PSIZ */
   kMemcfgReserved = 0xc0e08000u,   /* bits 31-30, 23-21 and 15 */
   kMemcfgReset = kMemcfgPromWrite, /* PROM write enabled, both sizes minimal */
-  kSizeFieldMask = 7u
+  kSizeFieldMask = 7u,
+
+  /* The sizes RSIZ 000 and PSIZ 000 select; every further step doubles.  */
+  kRamSizeMin = 256 * 1024,
+  kPromSizeMin = 128 * 1024
 };
 
 /* I/O configuration register: bits 7-6 of every unit's field are unused.  */
@@ -338,9 +342,9 @@ private:
     else
       memcfg_ |= kMemcfgProm40Bit;
 
-    ram_size_ = (1024 * 1024)
+    ram_size_ = kRamSizeMin
 		<< ((memcfg_ >> kMemcfgRamSizeShift) & kSizeFieldMask);
-    rom_size_ = (2 * 1024 * 1024)
+    rom_size_ = kPromSizeMin
 		<< ((memcfg_ >> kMemcfgPromSizeShift) & kSizeFieldMask);
 
     if (env_.Verbose ())
