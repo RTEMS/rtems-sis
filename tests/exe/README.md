@@ -47,16 +47,14 @@ that follow either marker are the normal way RTEMS shuts down, not a failure.
 
 # Status
 
-Captured on the tree at commit 6b2c667.
-
 | Board | PASS | XFAIL | Notes |
 | --- | ---: | ---: | --- |
-| `erc32` | 21 | 7 | interrupt window misses, see below |
+| `erc32` | 22 | 6 | interrupt window misses, see below |
 | `gr712rc` | 28 | 0 | clean |
 | `gr740` | 28 | 0 | clean |
 | `gr740_smp` | 33 | 0 | clean |
-| `griscv` | 3 | 25 | board broken, see below |
-| `griscv_smp` | 2 | 31 | board broken, see below |
+| `griscv` | 28 | 0 | clean |
+| `griscv_smp` | 33 | 0 | clean |
 | `leon2` | 28 | 0 | clean |
 
 The non SMP boards carry 28 tests, the SMP boards add the five `smp*` tests for
@@ -64,30 +62,45 @@ The non SMP boards carry 28 tests, the SMP boards add the five `smp*` tests for
 
 ## erc32 interrupt window misses
 
-`erc32 spintrcritical01`, `02`, `03`, `04`, `05` and `20` complete but report
-one or more failed checks. They fail the same way on the unmodified simulator,
-so they are pre-existing ERC32 timing limitations, not a regression. The same
-tests pass on `leon3`, `gr740` and `leon2`.
+`erc32 spintrcritical01`, `02`, `03`, `04`, `05` and `20` report
+`T_INTERRUPT_TEST_TIMEOUT`: the bisection of `T_interrupt_test` runs its full
+`max_iteration_count` without converging. They fail with the jitter the
+simulator had before d708f4d as well, so they are a long standing limit of the
+ERC32 model, not a regression. The same tests pass on `leon3`, `gr740` and
+`leon2`, which tolerate the same jitter.
 
-## erc32 spintrcritical24 regression
+Building with the trap jitter forced to zero makes all six pass, which places
+the cause in the width of the jitter relative to the ERC32 interrupt window
+rather than in RTEMS. Whether the jitter earns its keep is a modelling
+question: it is original upstream code, it was mathematically broken from the
+start until d708f4d, and nothing else in the cost model is stochastic.
+Removing it is a one line change and would turn these six `XPASS`.
 
-`erc32 spintrcritical24` passes on the unmodified tree and fails after commit
-d708f4d "sim: Add the missing jitter parentheses". That commit changed the
-SPARC trap cost from a masked `0..7` cycles to `3..10` cycles, which shifts
-interrupt delivery out of the window this test races against. Confirmed by a
-single line A/B build: reverting only the `sparc.cc` jitter line restores
-`F:0`. It is gated `XFAIL` and flagged as an open regression to fix, not an
-accepted baseline. When the timing is corrected the run turns `XPASS` and
-`test-run` fails, prompting a promotion back to `PASS`.
+## erc32 spintrcritical24, fixed
 
-## griscv and griscv_smp broken
+`erc32 spintrcritical24` regressed at commit d708f4d "sim: Add the missing
+jitter parentheses" and passes again. The cause was not the corrected trap
+cost but the source of the jitter: it was `(ninst ^ simtime) & 7`, so the
+"noise" was a function of the simulated time. `T_interrupt_test` hunts for a
+race by bisecting a busy wait, which moves the simulated time, so the jitter
+tracked the search variable instead of being independent of it and the
+bisection could not converge. The jitter now comes from a per processor
+pseudo random sequence advanced once per trap. It stays deterministic, so
+runs remain reproducible, and the 3 to 10 cycle range of d708f4d is kept.
 
-Almost every RISC-V on GRLIB run crashes early with an illegal instruction
-(`cpu 0 in error mode (tt = 0x00)`) while still printing the test banner. This
-is an open issue and may be an SIS or an RTEMS bug. The runs that avoid the
-broken path still pass: `crypt01` and `fsdosfsname01` on both, plus
-`tmcontext01` on `griscv`. Nothing else survives, including every SMP test on
-`griscv_smp`.
+## griscv and griscv_smp, fixed
+
+Both boards were failing almost every run because SIS did not implement
+`mstatush`, CSR 0x310. RTEMS clears the `MDT` bit there on the interrupt path
+of `_RISCV_Exception_handler`, and the unimplemented CSR raised an illegal
+instruction. `mstatush` is mandatory on RV32 and every one of its fields
+belongs to an extension SIS does not emulate, so it now reads as zero and
+discards writes. That one CSR accounted for all 56 failures.
+
+The diagnosis was blocked by a second bug: `riscv_execute_trap` cleared
+`sregs->trap` before returning `ERROR_MODE`, so `cpu N in error mode (tt = ...)`
+always printed `0x00` whatever the cause. The SPARC path returns before
+clearing; the RISC-V path now does the same.
 
 # Test catalogue
 
@@ -98,21 +111,21 @@ where the result differs from PASS.
 
 | Test | What it does | Not PASS on |
 | --- | --- | --- |
-| `crypt01` | `crypt()` family correctness over test vectors. The heaviest test at about 108 s, the long pole of a parallel run. | griscv boards pass this one |
-| `record04` | Event recording ring buffer (`<rtems/record.h>`). | griscv, griscv_smp |
-| `ttest02` | Self-test of the RTEMS T test framework, exercises its interrupt test. Reports `F:0` on all SPARC boards. | griscv, griscv_smp |
+| `crypt01` | `crypt()` family correctness over test vectors. The heaviest test at about 108 s, the long pole of a parallel run. | |
+| `record04` | Event recording ring buffer (`<rtems/record.h>`). | |
+| `ttest02` | Self-test of the RTEMS T test framework, exercises its interrupt test. | |
 
 ## Filesystem
 
 | Test | What it does | Not PASS on |
 | --- | --- | --- |
-| `fsdosfsname01` | FAT short, long and multibyte name handling and MS FAT compatibility. | griscv boards pass this one |
+| `fsdosfsname01` | FAT short, long and multibyte name handling and MS FAT compatibility. | |
 
 ## Interrupt and critical section
 
 The `spintrcritical` suite stresses the interrupt critical section, an ISR
-racing a kernel operation on the same object. All pass on `leon3`, `gr740`,
-`gr740_smp` and `leon2`; the erc32 and griscv columns are covered above.
+racing a kernel operation on the same object. All pass everywhere except the
+six erc32 runs covered above.
 
 | Test | Race under test |
 | --- | --- |
@@ -136,13 +149,12 @@ racing a kernel operation on the same object. All pass on `leon3`, `gr740`,
 
 | Test | What it does | Not PASS on |
 | --- | --- | --- |
-| `tmcontext01` | Context switch time by function nest level and cache state, JSON output. Under SIS some entries are corrupted (values near 2^32 from the timecounter running backwards), so it passes but its numbers are not a reliable fingerprint. | griscv_smp |
-| `tmonetoone` | Cost of one task to task hand off per synchronisation primitive. A performance fingerprint, see below. | griscv, griscv_smp |
+| `tmcontext01` | Context switch time by function nest level and cache state, JSON output. Under SIS some entries are corrupted (values near 2^32 from the timecounter running backwards), so it passes but its numbers are not a reliable fingerprint. | |
+| `tmonetoone` | Cost of one task to task hand off per synchronisation primitive. A performance fingerprint, see below. | |
 
 ## SMP
 
-Only on `gr740_smp` and `griscv_smp`. All pass on `gr740_smp`; none pass on
-`griscv_smp`, they all hit the griscv breakage.
+Only on `gr740_smp` and `griscv_smp`. All pass on both.
 
 | Test | What it does |
 | --- | --- |
@@ -156,8 +168,8 @@ Only on `gr740_smp` and `griscv_smp`. All pass on `gr740_smp`; none pass on
 
 | Test | What it does | Not PASS on |
 | --- | --- | --- |
-| `ts-validation-0` | Main RTEMS validation test suite. | griscv, griscv_smp |
-| `ts-validation-timecounter-1` | Timecounter validation. | griscv, griscv_smp |
+| `ts-validation-0` | Main RTEMS validation test suite. | |
+| `ts-validation-timecounter-1` | Timecounter validation. | |
 
 # Performance benchmark
 

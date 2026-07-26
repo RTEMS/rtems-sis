@@ -12,30 +12,16 @@
 # XFAIL.
 
 # ERC32 misses the interrupt critical section window in a handful of the
-# spintrcritical tests.  These fail on the unmodified simulator too, so they
-# are pre-existing limitations, not a recent regression.
+# spintrcritical tests.  They report T_INTERRUPT_TEST_TIMEOUT: the bisection
+# of the framework never converges, because the trap entry jitter is wide
+# enough to flip the outcome of a given busy count.  Building with the jitter
+# forced to zero makes all of them pass, and they fail with the jitter the
+# simulator had before d708f4d as well, so they are a long standing limit of
+# the ERC32 model rather than a recent regression.  The other SPARC boards
+# tolerate the same jitter.
 erc32 spintrcritical01.exe XFAIL   # pre-existing, fails on unmodified SIS
 erc32 spintrcritical02.exe XFAIL   # pre-existing, fails on unmodified SIS
 erc32 spintrcritical03.exe XFAIL   # pre-existing, fails on unmodified SIS
 erc32 spintrcritical04.exe XFAIL   # pre-existing, fails on unmodified SIS
 erc32 spintrcritical05.exe XFAIL   # pre-existing, fails on unmodified SIS
 erc32 spintrcritical20.exe XFAIL   # pre-existing, fails on unmodified SIS
-
-# REGRESSION.  spintrcritical24 passes on the unmodified tree and fails after
-# d708f4d "sim: Add the missing jitter parentheses", which changed the SPARC
-# trap cost from 0..7 to 3..10 cycles and shifted interrupt delivery out of
-# the tested window.  When the regression is fixed this run turns XPASS and
-# test-run fails, telling us to promote it back to PASS.
-erc32 spintrcritical24.exe XFAIL   # REGRESSION since d708f4d (jitter)
-
-# The RISC-V on GRLIB boards crash early (illegal instruction, tt=0x00) on
-# almost every test.  Open issue, could be an SIS or an RTEMS bug.  The few
-# tests that avoid the broken path still pass and stay gated as PASS.
-griscv * XFAIL                      # known broken board, see README
-griscv crypt01.exe PASS
-griscv fsdosfsname01.exe PASS
-griscv tmcontext01.exe PASS
-
-griscv_smp * XFAIL                  # known broken board, see README
-griscv_smp crypt01.exe PASS
-griscv_smp fsdosfsname01.exe PASS
