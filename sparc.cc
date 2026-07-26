@@ -2277,9 +2277,10 @@ sparc_set_rega (struct pstate *sregs, char *reg, uint32 rval)
     sregs->r[(cwp + 31) & 0x7f] = rval;
   else
     err = 1;
+  assert (err <= 2);
   switch (err)
     {
-    case 0:
+    default: /* the register was set, which is what a user asked for */
       printf ("%s = %d (0x%08x)\n", reg, rval, rval);
       break;
     case 1:
@@ -2287,8 +2288,6 @@ sparc_set_rega (struct pstate *sregs, char *reg, uint32 rval)
       break;
     case 2:
       printf ("cannot set g0\n");
-      break;
-    default:
       break;
     }
 }
@@ -2492,20 +2491,12 @@ simm13dec (char *st, struct insn_type insn, int hex, int merge)
     {
       if (!hex)
 	{
-	  if (merge)
-	    {
-	      if (!insn.rs1)
-		sprintf (tmp, "%d", insn.simm);
-	      else
-		sprintf (tmp, "%+d", insn.simm);
-	    }
+	  /* Only the address of a jump merges its immediate into an
+	     expression, and an address is always printed in hex.  */
+	  if (!insn.rs1)
+	    sprintf (tmp, "%d", insn.simm);
 	  else
-	    {
-	      if (!insn.rs1)
-		sprintf (tmp, "%d", insn.simm);
-	      else
-		sprintf (tmp, ", %d", insn.simm);
-	    }
+	    sprintf (tmp, ", %d", insn.simm);
 	}
       else
 	{
@@ -2571,16 +2562,6 @@ freg3 (char *st, struct insn_type insn)
   fregdec (st, insn.rs2);
   strcat (st, ", ");
   fregdec (st, insn.rd);
-}
-
-static void
-creg3 (char *st, struct insn_type insn)
-{
-  cregdec (st, insn.rs1);
-  strcat (st, ", ");
-  cregdec (st, insn.rs2);
-  strcat (st, ", ");
-  cregdec (st, insn.rd);
 }
 
 static void
@@ -2715,17 +2696,6 @@ ldpara (char *st, struct insn_type insn)
 }
 
 static void
-stparx (char *st, struct insn_type insn)
-{
-  if (insn.rd)
-    {
-      regdec (st, insn.rd);
-      strcat (st, ", ");
-    }
-  adec (st, insn);
-}
-
-static void
 stparf (char *st, struct insn_type insn)
 {
   fregdec (st, insn.rd);
@@ -2793,6 +2763,7 @@ sparc_disas (char *st, unsigned pc, unsigned int inst)
   insn.simm = (insn.insn << 19) >> 19;
   insn.asi = (inst >> 5) & 0xff;
 
+  assert (insn.op <= 3);
   switch (insn.op)
     {
     case CALL:
@@ -2846,7 +2817,7 @@ sparc_disas (char *st, unsigned pc, unsigned int inst)
 	  sprintf (st, "unknown opcode: 0x%08x", inst);
 	}
       break;
-    case FMT3:
+    default: /* the arithmetic group, which is most of a program */
       switch (insn.op3)
 	{
 	case IAND:
@@ -3326,7 +3297,7 @@ sparc_disas (char *st, unsigned pc, unsigned int inst)
 	  if (!insn.rd)
 	    {
 	      strcpy (st, "clr  ");
-	      stparx (st, insn);
+	      adec (st, insn);
 	      break;
 	    }
 	  else
@@ -3340,7 +3311,7 @@ sparc_disas (char *st, unsigned pc, unsigned int inst)
 	  if (!insn.rd)
 	    {
 	      strcpy (st, "clrb  ");
-	      stparx (st, insn);
+	      adec (st, insn);
 	      break;
 	    }
 	  else
@@ -3354,7 +3325,7 @@ sparc_disas (char *st, unsigned pc, unsigned int inst)
 	  if (!insn.rd)
 	    {
 	      strcpy (st, "clrh  ");
-	      stparx (st, insn);
+	      adec (st, insn);
 	      break;
 	    }
 	  else
@@ -3498,8 +3469,6 @@ sparc_disas (char *st, unsigned pc, unsigned int inst)
 	  sprintf (st, "unknown opcode: 0x%08x", inst);
 	}
       break;
-    default:
-      sprintf (st, "unknown opcode: 0x%08x", inst);
     }
 }
 
