@@ -54,16 +54,20 @@ template <TimerEnv Env> class Timer
 {
 public:
   Timer (Env &env, uint32 scaler_mask, int level, unsigned ctrl_shift,
-	 const char *name)
+	 bool reload_at_zero_reset, const char *name)
       : env_ (env), scaler_mask_ (scaler_mask), level_ (level),
-	ctrl_shift_ (ctrl_shift), name_ (name)
+	ctrl_shift_ (ctrl_shift), reload_at_zero_reset_ (reload_at_zero_reset),
+	name_ (name)
   {
     Reset ();
   }
 
   /* The reset state: counter, reload and scaler all at their maximum, and
      the timer not running.  The manual states that after system reset the
-     timer is not running and must be programmed as required.  */
+     timer is not running and must be programmed as required.
+
+     The counter reload bit is the one timer control register bit whose
+     reset value is not zero: RTCCR resets set, GCR resets clear.  */
   void
   Reset ()
   {
@@ -72,7 +76,7 @@ public:
     scaler_ = scaler_mask_;
     scaler_start_ = 0;
     enabled_ = false;
-    reload_at_zero_ = false;
+    reload_at_zero_ = reload_at_zero_reset_;
     scaler_enabled_ = false;
   }
 
@@ -195,6 +199,7 @@ private:
   const uint32 scaler_mask_;
   const int level_;
   const unsigned ctrl_shift_;
+  const bool reload_at_zero_reset_;
   const char *const name_;
 
   uint32 counter_;

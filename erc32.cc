@@ -291,9 +291,9 @@ static WatchdogEnv wdog_env;
    the timer control register; the general purpose timer has a 16 bit scaler
    and its control bits at bit 0.  */
 static erc32::Timer<TimerEnv<rtc_intr>> rtc (rtc_env, 0x0ff, erc32::kRtcLevel,
-					     8, "RTC");
-static erc32::Timer<TimerEnv<gpt_intr>> gpt (gpt_env, 0x0ffff,
-					     erc32::kGptLevel, 0, "GPT");
+					     8, true, "RTC");
+static erc32::Timer<TimerEnv<gpt_intr>>
+    gpt (gpt_env, 0x0ffff, erc32::kGptLevel, 0, false, "GPT");
 static erc32::Watchdog<WatchdogEnv> wdog (wdog_env);
 
 /* One-time init */
