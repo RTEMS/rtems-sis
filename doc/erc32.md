@@ -194,12 +194,22 @@ memory exception trap.
 
 The memory configuration register is used to define available memory in the
 system. The fields RSIZ and PSIZ are used to set RAM and ROM size, the
-remaining fields are not used. NOTE: after reset, the MEC is set to decode 4
+remaining fields are not used. Both are encoded as in the specification: RSIZ
+selects 256 Kbyte at zero and doubles from there, PSIZ selects 128 Kbyte, so
+the two largest RAM encodings and the largest ROM encoding ask for more memory
+than the emulated board has. NOTE: after reset, the MEC is set to decode 128
 Kbyte of ROM and 256 Kbyte of RAM. The memory configuration register has to be
-updated to reflect the available memory.
+updated to reflect the available memory. The simulator's own boot loader
+programs the full 16 Mbyte of each.
+
+The PROM width bit is read-only, as in the specification, and follows the
+`-rom8` option rather than the written data.
 
 The waitstate configuration register is used to generate waitstates. This
-register must also be updated with the correct configuration after reset.
+register must also be updated with the correct configuration after reset. It
+is write-only, so reading it is a memory exception. The two PROM fields encode
+no waitstates both at zero and at one, so their count is one below the field
+from two upwards.
 
 The memory protection scheme is implemented - it is enabled through bit 3 in
 the MEC control register.
