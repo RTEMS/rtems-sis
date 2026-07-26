@@ -19,12 +19,18 @@
    base cost is added, so a trap always costs at least TRAP_C.  */
 
 #include "doctest.h"
+#include "support.h"
 
 #include "config.h"
 #include "sis.h"
 #include "sparc.h"
 
 #include "cpumem.h"
+
+#include <stddef.h>
+#include <string>
+
+using sis_tests::stdout_capture;
 
 namespace
 {
@@ -1382,4 +1388,146 @@ TEST_CASE_FIXTURE (sparc_fixture,
 
   sregs[0].trap = 0;
   ext_irl[0] = 0;
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC registers are reachable by name")
+{
+  /* The shell and the GDB stub reach a register by name.  The window
+     registers use the architectural names of the manual's figure 4-1.  */
+  const char *names[32] = { "g0", "g1", "g2", "g3", "g4", "g5", "g6", "g7",
+			    "o0", "o1", "o2", "o3", "o4", "o5", "o6", "o7",
+			    "l0", "l1", "l2", "l3", "l4", "l5", "l6", "l7",
+			    "i0", "i1", "i2", "i3", "i4", "i5", "i6", "i7" };
+
+  for (int i = 1; i < 32; i++)
+    {
+      arch->set_register (&sregs[0], (char *) names[i], 0x1000 + i, 0);
+      INFO ("register ", names[i]);
+      CHECK (get (i) == (uint32) (0x1000 + i));
+    }
+
+  /* g0 is hard wired to zero.  */
+  arch->set_register (&sregs[0], (char *) "g0", 0x1234, 0);
+  CHECK (get (0) == 0);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC the control registers are named too")
+{
+  arch->set_register (&sregs[0], (char *) "psr", 0xffffffff, 0);
+  CHECK (sregs[0].psr == 0x00f03fff);
+
+  arch->set_register (&sregs[0], (char *) "tbr", 0xffffffff, 0);
+  CHECK (sregs[0].tbr == 0xfffffff0);
+
+  arch->set_register (&sregs[0], (char *) "wim", 0xffffffff, 0);
+  CHECK (sregs[0].wim == 0xff);
+
+  arch->set_register (&sregs[0], (char *) "y", 0x12345678, 0);
+  CHECK (sregs[0].y == 0x12345678);
+
+  arch->set_register (&sregs[0], (char *) "pc", 0x2000, 0);
+  CHECK (sregs[0].pc == 0x2000);
+
+  arch->set_register (&sregs[0], (char *) "npc", 0x2004, 0);
+  CHECK (sregs[0].npc == 0x2004);
+
+  arch->set_register (&sregs[0], (char *) "fsr", 0, 0);
+
+  /* A name the core does not know is reported and changes nothing.  */
+  stdout_capture cap;
+  arch->set_register (&sregs[0], (char *) "nosuchreg", 1, 0);
+  CHECK (!cap.str ().empty ());
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC registers are reachable by number")
+{
+  /* With no name the number selects the register, which is the order the
+     GDB stub packs them in.  */
+  for (int i = 1; i < 32; i++)
+    {
+      arch->set_register (&sregs[0], NULL, 0x2000 + i, i);
+      INFO ("register number ", i);
+      CHECK (get (i) == (uint32) (0x2000 + i));
+    }
+
+  /* Then the control registers, in the order the stub expects: y, psr, wim,
+     tbr, pc, npc and the floating point status.  */
+  const uint32 want[7] = { 0x12345678, 0x00f03fff, 0x0f, 0xfffffff0,
+			   0x3000,     0x3004,	   0 };
+  for (int i = 0; i < 7; i++)
+    arch->set_register (&sregs[0], NULL, want[i], 64 + i);
+
+  CHECK (sregs[0].y == want[0]);
+  CHECK (sregs[0].psr == want[1]);
+  CHECK (sregs[0].wim == want[2]);
+  CHECK (sregs[0].tbr == want[3]);
+  CHECK (sregs[0].pc == want[4]);
+  CHECK (sregs[0].npc == want[5]);
+
+  /* A number past the last register changes nothing.  */
+  arch->set_register (&sregs[0], NULL, 0xdeadbeef, 99);
+  CHECK (sregs[0].npc == want[5]);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC the GDB stub packs every register")
+{
+  char buf[72 * 4];
+
+  set (1, 0x11223344);
+  sregs[0].pc = 0x2000;
+
+  CHECK (arch->gdb_get_reg (buf) == 72 * 4);
+
+  /* Each register is packed most significant byte first, whatever the host
+     does.  */
+  CHECK ((unsigned char) buf[4] == 0x11);
+  CHECK ((unsigned char) buf[5] == 0x22);
+  CHECK ((unsigned char) buf[6] == 0x33);
+  CHECK ((unsigned char) buf[7] == 0x44);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC the register displays print something")
+{
+  stdout_capture cap;
+
+  sregs[0].psr |= PSR_EF;
+  arch->display_registers (&sregs[0]);
+  arch->display_ctrl (&sregs[0]);
+  arch->display_special (&sregs[0]);
+  arch->display_fpu (&sregs[0]);
+
+  std::string out = cap.str ();
+  CHECK (out.find ("psr") != std::string::npos);
+  CHECK (out.find ("INS") != std::string::npos);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC the disassembler names the instruction")
+{
+  stdout_capture cap;
+
+  /* Put a few instructions in memory and disassemble them where they
+     are.  */
+  sis_tests::flatmem_poke (0x100, f3r (OP_ARITH, 3, ADD, 1, 2));
+  sis_tests::flatmem_poke (0x104, f3i (OP_ARITH, 3, SUBCC, 1, 4));
+  sis_tests::flatmem_poke (0x108, (OP_CALL << 30) | 4);
+  sis_tests::flatmem_poke (0x10c, bicc (0, BICC_BE, 4));
+  sis_tests::flatmem_poke (0x110, sethi (3, 0x1234));
+  sis_tests::flatmem_poke (0x114, f3i (OP_MEM, 3, LD, 1, 0));
+  sis_tests::flatmem_poke (0x118, f3i (OP_MEM, 3, ST, 1, 0));
+  sis_tests::flatmem_poke (0x11c, f3i (OP_ARITH, 8, SAVE, 0, 0));
+
+  for (uint32 a = 0x100; a <= 0x11c; a += 4)
+    arch->disas (a);
+
+  std::string out = cap.str ();
+  CHECK (out.find ("add") != std::string::npos);
+  CHECK (out.find ("subcc") != std::string::npos);
+  CHECK (out.find ("call") != std::string::npos);
+  CHECK (out.find ("be") != std::string::npos);
+  CHECK (out.find ("sethi") != std::string::npos);
+  CHECK (out.find ("ld") != std::string::npos);
+  CHECK (out.find ("st") != std::string::npos);
+  CHECK (out.find ("save") != std::string::npos);
 }
