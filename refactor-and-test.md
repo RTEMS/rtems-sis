@@ -66,20 +66,19 @@ against real descriptors the way `tests/sisio.cc` does.
 ## Where the tree stands
 
 Measured with `./waf configure --enable-coverage && ./waf`, branch metric,
-777 of 5913 arcs (13%). The totals move as headers join the filter and as
+1917 of 5891 arcs (32%). The totals move as headers join the filter and as
 duplicated and dead code is removed, so compare per file rather than against
 an older total.
 
 | Area | Arcs | Taken |
 |---|---|---|
-| `sparc.cc`, `riscv.cc` | 2280 | 986 |
-| `grlib.cc`, `grspw.cc`, `gr1553.cc`, `greth.cc`, `memscrub.cc`, `tap.cc` | 986 | 0 |
-| `sis.cc`, `remote.cc`, `interf.cc` | 546 | 0 |
-| `leon2.cc`, `leon3.cc`, `gr740.cc`, `rv32.cc` | 276 | 0 |
-| graduated: `erc32_cfg.h`, `erc32_error.h`, `erc32_mec.h`, `erc32_timer.h`, `erc32_uart.h`, `erc32.cc`, `exec.cc`, `help.cc`, `sisio.cc`, `uartport.cc` | | 100% |
-
-`func.cc` and `elf.cc` are not in the table above only because they were not
-captured in that run. Measure them before planning their step.
+| `riscv.cc` | 1122 | 12 |
+| `func.cc` | 603 | 30 |
+| `grlib.cc`, `grspw.cc`, `gr1553.cc`, `greth.cc`, `memscrub.cc`, `tap.cc` | 1002 | 0 |
+| `sis.cc`, `remote.cc`, `interf.cc` | 547 | 0 |
+| `leon2.cc`, `leon3.cc`, `gr740.cc`, `rv32.cc` | 284 | 0 |
+| `elf.cc` | 97 | 91 |
+| graduated: `erc32_cfg.h`, `erc32_error.h`, `erc32_mec.h`, `erc32_timer.h`, `erc32_uart.h`, `erc32.cc`, `exec.cc`, `help.cc`, `sisio.cc`, `sparc.cc`, `uartport.cc` | | 100% |
 
 Done, graduated in `tests/covered.txt`:
 
@@ -105,6 +104,10 @@ Done, graduated in `tests/covered.txt`:
   `leon2.cc` and `grlib.cc` rather than written once each. Not a template: it
   is plain code taking a `struct uart_port` and tested against real
   descriptors, the way `tests/sisio.cc` works.
+- **`sparc.cc`** the SPARC V8 integer unit, its floating point unit, its trap
+  and interrupt logic, and its disassembler. No refactor: the core already
+  takes a `struct pstate *` and reaches memory through the vtable, so it got
+  the flat memory of `tests/cpumem.cc` and nothing else.
 
 `tests/erc32.cc` drives each template on its own small test environment with
 no globals.
@@ -164,7 +167,7 @@ all of the concepts; each test file holds a small `TestEnv` per subsystem.
 
 ### Then the rest of the simulator
 
-1. `sparc.cc`, then `riscv.cc`. **In progress.** The largest arc count, the
+1. ~~`sparc.cc`~~ Done. Then `riscv.cc`. The largest arc count, the
    best specs, and the only place where a defect means a wrongly emulated
    program rather than a wrong warning. No production refactor: the cores
    already take a `struct pstate *` and reach memory through the vtable.
@@ -193,7 +196,8 @@ all of the concepts; each test file holds a small `TestEnv` per subsystem.
    - **The `opf` encodings are file-local to `sparc.cc`**, so the test
      transcribes them from appendix B rather than sharing them.
 
-   `sparc.cc` is at **974 of 1158 arcs, 84%**, from 5 when this started.
+   `sparc.cc` is at **100% line and branch**, from 5 arcs when this started,
+   and is graduated in `tests/covered.txt`.
    Covered: the integer, logical and shift operations with their condition
    codes, the loads and stores in every width and both address spaces, the
    atomic accesses, the register windows and their traps, `rett`, `ticc`, the
@@ -204,20 +208,38 @@ all of the concepts; each test file holds a small `TestEnv` per subsystem.
    register access the shell and the GDB stub use, the disassembler, and the
    target coverage collection.
 
-   Four bugs came out of it, each confirmed against the manual before the
+   Six bugs came out of it, each confirmed against the manual before the
    test was written: `LDSBA` and `LDSHA` not sign extending, `STDFQ` not
-   privileged, and, in `func.cc`, the end-of-time sentinel wrapping into the
-   past.
+   privileged, a negative square root overwriting the trap type of the
+   status register with the current exception field alone, the disassembler
+   comparing the immediate flag against the character `'1'` so that
+   `or %rs1, 0, %rd` never printed as a move, and, in `func.cc`, the
+   end-of-time sentinel wrapping into the past.
 
-   What is left, and it needs a decision as well as more cases:
+   Reaching the last arcs also removed dead code rather than testing it:
+   `disp_reg` and `creg3` were never called, `stparx` only ever saw a
+   discarded result, and five switch defaults could not be entered. See
+   "Exhaustive switches" below for the decoder restructure, which was worth
+   far more than the arcs.
 
-   - ~~The structurally unreachable switch arcs.~~ Done, and it was worth
-     far more than the arcs. See "Exhaustive switches" below.
-   - **The rest need more cases** in the same style: the paths gated on
-     `sis_gdb_break`, `sync_rt`, and the remaining corners of multiply,
-     divide and the floating point exception flags.
+   Two things the flat memory had to grow for it:
+
+   - **`flatmem_fail_write`** makes one word read but refuse a write. The
+     atomic instructions have a fault path between their read and their
+     write which no address of a plain window reaches, because a window
+     fails a read wherever it fails a write.
+   - **`covram` has no declaration in `sis.h`**, so the test declares the
+     bitmap of `func.cc` itself to assert that a jump was recorded.
+
+   One finding was left for the maintainer rather than fixed, because it
+   would move the simulated timing fingerprints: `fpexec` records `frd`
+   already swapped and `LDF` swaps before comparing, but `STF` compares
+   before its swap, so a store charges its hold for the sibling register.
+   It is timing only, not a wrong result.
 
    Then `riscv.cc`, which has the same shape and can reuse the flat memory.
+   Apply the exhaustive switch restructure to its decoder first: that gain
+   comes free, and measuring it is easier before the arc count moves.
 
 2. `grlib.cc` and the GRLIB cores. One file behind four boards, and the GRLIB
    manual in `ref/` is already scoped to the cores SIS models.
