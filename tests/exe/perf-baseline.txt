@@ -9,7 +9,7 @@
 #   <board> <exe> <label> <value>
 #
 # Captured with the default build, from the reference executables rebuilt
-# at RTEMS bc73eb7217, and after the trap entry jitter was decorrelated
+# at RTEMS a52d944336, and after the trap entry jitter was decorrelated
 # from the simulated time.  Re-bless by
 # running ./waf test-run --perf and copying the current values here.
 
@@ -29,14 +29,14 @@ gr740_smp smpatomic01.exe 2 617923
 gr740_smp smpatomic01.exe 3 617891
 
 # smpmrsp01: thread migrations observed per CPU, gr740 with four cores.
-gr740_smp smpmrsp01.exe 0 175928
-gr740_smp smpmrsp01.exe 1 175930
-gr740_smp smpmrsp01.exe 2 175777
-gr740_smp smpmrsp01.exe 3 176083
+gr740_smp smpmrsp01.exe 0 175792
+gr740_smp smpmrsp01.exe 1 175793
+gr740_smp smpmrsp01.exe 2 175372
+gr740_smp smpmrsp01.exe 3 176210
 
 # smplock01: SMP lock acquisitions per section, sum over cores for the first
 # four measured sections, gr740 with four cores (higher is faster).
-gr740_smp smplock01.exe sum0 1384976
+gr740_smp smplock01.exe sum0 1384958
 gr740_smp smplock01.exe sum1 1995741
 gr740_smp smplock01.exe sum2 2994065
 gr740_smp smplock01.exe sum3 3991943

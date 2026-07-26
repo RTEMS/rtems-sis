@@ -8,12 +8,7 @@
 #
 # A run not matched by any line defaults to PASS.  The most specific line
 # wins, so a board wide XFAIL can carry per-test PASS exceptions.  See
-# tests/exe/README.md for the full status table and the notes behind each
-# XFAIL.
-
-# spintrcritical20 is a different case and stays.  The mainline tightened its
-# done condition to require the interrupt to land inside the action, where
-# the RTEMS 6 version accepted flags which accumulate over iterations, so the
-# mainline check is the stronger one and must not be relaxed.  ERC32 only
-# hits that narrower window when the trap entry jitter is forced to zero.
-erc32 spintrcritical20.exe XFAIL   # narrow window, see README
+# tests/exe/README.md for the full status table.
+#
+# Every run passes, so there is no line below.  Add one only with a reason
+# and a pointer to the open issue behind it.

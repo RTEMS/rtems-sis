@@ -47,12 +47,12 @@ that follow either marker are the normal way RTEMS shuts down, not a failure.
 
 # Status
 
-Built from RTEMS bc73eb7217 with the RTEMS 7 tools (GCC 15.2.0), one
+Built from RTEMS a52d944336 with the RTEMS 7 tools (GCC 15.2.0), one
 configuration per board, and stripped of debug information with `strip -g`.
 
 | Board | PASS | XFAIL | Notes |
 | --- | ---: | ---: | --- |
-| `erc32` | 27 | 1 | one narrow window, see below |
+| `erc32` | 28 | 0 | clean |
 | `gr712rc` | 28 | 0 | clean |
 | `gr740` | 28 | 0 | clean |
 | `gr740_smp` | 33 | 0 | clean |
@@ -63,66 +63,31 @@ configuration per board, and stripped of debug information with `strip -g`.
 The non SMP boards carry 28 tests, the SMP boards add the five `smp*` tests for
 33.
 
-## erc32 spintrcritical20
+## Interrupt tests and timing noise
 
-`erc32 spintrcritical20` reports `T_INTERRUPT_TEST_TIMEOUT`: the bisection of
-`T_interrupt_test` runs its full `max_iteration_count` without converging.
+`erc32 spintrcritical20` used to report `T_INTERRUPT_TEST_TIMEOUT`, and it
+was the last run in this corpus which did not pass. Two RTEMS defects were
+behind the interrupt critical section failures here, both now fixed.
 
-`spintrcritical01` to `05` used to fail the same way. That was an RTEMS bug,
-not a simulator one. The five share `spintrcritical01impl.h`, whose interrupt
-handler must classify the interrupt only while the action is in progress:
+`spintrcritical01` to `05` share `spintrcritical01impl.h`, whose interrupt
+handler must classify the interrupt only while the action is in progress.
+Without that check the handler classifies and releases the semaphore on
+every tick, so the search is fed samples which say nothing about the race.
+The check was on the RTEMS 6 branch as afb30a1056 and had never reached the
+mainline.
 
-```c
-if ( T_interrupt_test_get_state() != T_INTERRUPT_TEST_ACTION ) {
-  return T_INTERRUPT_TEST_CONTINUE;
-}
-```
+`spintrcritical20` exposed a weakness in `T_interrupt_test()` itself. The
+search bisects a busy wait and adjusts its bracket on an early and on a late
+interrupt, but `T_INTERRUPT_TEST_CONTINUE`, which means the interrupt hit
+the action without satisfying the test, fell through both cases and left the
+bracket untouched. The search then reused one time point for every
+remaining iteration. On erc32 that showed as 9997 of 10000 iterations
+landing inside the action with none of them satisfying the test. The search
+now counts those results and, once nothing else has come back for a while,
+walks the time point through the bracket so the whole action is covered.
 
-Without it the handler classifies and releases the semaphore on every tick,
-so the bisection is fed samples which say nothing about the race. The check
-is on the RTEMS 6 branch as afb30a1056, "spintrcritical0[1-5]: Fix sporadic
-test failures", and had never reached the mainline. Proven both ways:
-deleting it from an RTEMS 6 build reproduces the failure exactly, `F:1` after
-about ten seconds, and restoring it turns all five `F:0` in about forty
-milliseconds. `leon3` is unaffected either way. These executables carry the
-restored check and all five pass.
-
-**`spintrcritical20` is a different case, and not an RTEMS bug.** The mainline
-tightened its done
-condition to require the interrupt to land inside the action window, where
-the RTEMS 6 version accepted three flags which accumulate over iterations and
-are never reset, so it could report done without a single in-window hit. The
-mainline check is the stronger one and must not be relaxed. ERC32 reaches
-that narrower window only when the trap entry jitter is forced to zero, so
-this one is a simulator question: the jitter is original upstream code, it
-was mathematically broken from the start until d708f4d, and nothing else in
-the cost model is stochastic. Removing it is a one line change.
-
-## erc32 spintrcritical24, fixed
-
-`erc32 spintrcritical24` regressed at commit d708f4d "sim: Add the missing
-jitter parentheses" and passes again. The cause was not the corrected trap
-cost but the source of the jitter: it was `(ninst ^ simtime) & 7`, so the
-"noise" was a function of the simulated time. `T_interrupt_test` hunts for a
-race by bisecting a busy wait, which moves the simulated time, so the jitter
-tracked the search variable instead of being independent of it and the
-bisection could not converge. The jitter now comes from a per processor
-pseudo random sequence advanced once per trap. It stays deterministic, so
-runs remain reproducible, and the 3 to 10 cycle range of d708f4d is kept.
-
-## griscv and griscv_smp, fixed
-
-Both boards were failing almost every run because SIS did not implement
-`mstatush`, CSR 0x310. RTEMS clears the `MDT` bit there on the interrupt path
-of `_RISCV_Exception_handler`, and the unimplemented CSR raised an illegal
-instruction. `mstatush` is mandatory on RV32 and every one of its fields
-belongs to an extension SIS does not emulate, so it now reads as zero and
-discards writes. That one CSR accounted for all 56 failures.
-
-The diagnosis was blocked by a second bug: `riscv_execute_trap` cleared
-`sregs->trap` before returning `ERROR_MODE`, so `cpu N in error mode (tt = ...)`
-always printed `0x00` whatever the cause. The SPARC path returns before
-clearing; the RISC-V path now does the same.
+Both are worth knowing when reading a timing failure here: an interrupt
+test which times out is not necessarily a simulator problem.
 
 # Test catalogue
 
