@@ -18,6 +18,7 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
 #include "riscv.h"
+#include <assert.h>
 #include <inttypes.h>
 #include <math.h>
 #include <string.h>
@@ -794,6 +795,7 @@ riscv_dispatch_instruction (struct pstate *sregs)
 	  break;
 	case OP_IMM: /* IMM */
 	  sop2 = EXTRACT_ITYPE_IMM (sregs->inst);
+	  assert (funct3 <= 7);
 	  switch (funct3)
 	    {
 	    case IXOR:
@@ -812,7 +814,7 @@ riscv_dispatch_instruction (struct pstate *sregs)
 	    case SLL:
 	      sregs->r[rd] = op1 << (rs2);
 	      break;
-	    case SRL:
+	    default: /* the shift right group, the commonest of the eight */
 	      if ((sregs->inst >> 30) & 1)
 		{
 		  sop1 = op1;
@@ -835,14 +837,13 @@ riscv_dispatch_instruction (struct pstate *sregs)
 	      else
 		sregs->r[rd] = 0;
 	      break;
-	    default:
-	      sregs->trap = TRAP_ILLEG;
 	    }
 	  break;
 	case OP_REG: /* REG */
 	  switch ((sregs->inst >> 25) & 3)
 	    {
 	    case 0:
+	      assert (funct3 <= 7);
 	      switch (funct3)
 		{
 		case IXOR:
@@ -854,7 +855,7 @@ riscv_dispatch_instruction (struct pstate *sregs)
 		case IAND:
 		  sregs->r[rd] = op1 & op2;
 		  break;
-		case ADD:
+		default: /* add and subtract, the commonest of the eight */
 		  sop1 = op1;
 		  sop2 = op2;
 		  if ((sregs->inst >> 30) & 1)
@@ -888,8 +889,6 @@ riscv_dispatch_instruction (struct pstate *sregs)
 		  else
 		    sregs->r[rd] = 0;
 		  break;
-		default:
-		  sregs->trap = TRAP_ILLEG;
 		}
 	      break;
 	    case 1: /* MUL/DIV */
