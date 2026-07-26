@@ -1049,12 +1049,10 @@ const struct grlib_ipcore gptimer = { gpt_init, gpt_reset, gpt_read, gpt_write,
 #define UART_FLUSH_TIME 5000
 
 /* New uart defines.  */
-#define UART_TX_TIME 1000
-#define UART_RX_TIME 1000
-#define UARTA_DR     0x1
-#define UARTA_SRE    0x2
-#define UARTA_HRE    0x4
-#define UARTA_OR     0x10
+#define UARTA_DR  0x1
+#define UARTA_SRE 0x2
+#define UARTA_HRE 0x4
+#define UARTA_OR  0x10
 
 /* UART support variables.  */
 
@@ -1072,7 +1070,6 @@ static unsigned wnuma;
 #define O_NONBLOCK 0
 #endif
 
-static char uarta_sreg, uarta_hreg;
 static uint32 uart_stat_reg;
 static uint32 uarta_data;
 
@@ -1105,7 +1102,6 @@ apbuart_read (uint32 addr, uint32 *data)
 
     case 0x00: /* UART 1 RX/TX */
 #ifndef _WIN32
-#ifdef FAST_UART
 
       if (aind < anum)
 	{
@@ -1135,13 +1131,6 @@ apbuart_read (uint32 addr, uint32 *data)
 	    }
 	}
 #else
-      tmp = uarta_data;
-      uarta_data &= ~UART_DR;
-      uart_stat_reg &= ~UARTA_DR;
-      *data = tmp;
-      return 0;
-#endif
-#else
       *data = 0;
       return 0;
 #endif
@@ -1149,7 +1138,6 @@ apbuart_read (uint32 addr, uint32 *data)
 
     case 0x04: /* UART status register  */
 #ifndef _WIN32
-#ifdef FAST_UART
 
       Ucontrol = 0;
       if (aind < anum)
@@ -1172,10 +1160,6 @@ apbuart_read (uint32 addr, uint32 *data)
       Ucontrol |= 0x00000006;
       *data = Ucontrol;
       return 0;
-#else
-      *data = uart_stat_reg;
-      return 0;
-#endif
 #else
       *data = 0x00060006;
       return 0;
@@ -1204,7 +1188,6 @@ apbuart_write (uint32 addr, uint32 *data, uint32 sz)
     {
 
     case 0x00: /* UART A */
-#ifdef FAST_UART
       if (porta.open)
 	{
 	  if (wnuma < UARTBUF)
@@ -1219,25 +1202,9 @@ apbuart_write (uint32 addr, uint32 *data, uint32 sz)
 	    }
 	}
       grlib_set_irq (3);
-#else
-      if (uart_stat_reg & UARTA_SRE)
-	{
-	  uarta_sreg = c;
-	  uart_stat_reg &= ~UARTA_SRE;
-	  event (uarta_tx, 0, UART_TX_TIME);
-	}
-      else
-	{
-	  uarta_hreg = c;
-	  uart_stat_reg &= ~UARTA_HRE;
-	}
-#endif
       break;
 
     case 0x04: /* UART status register */
-#ifndef FAST_UART
-      uart_stat_reg &= 1;
-#endif
       break;
     case 0x08: /* UART control register  */
       break;
@@ -1258,51 +1225,6 @@ apbuart_flush (void)
 }
 
 static void
-uarta_tx (int32 arg)
-{
-  (void) arg;
-  while (porta.open)
-    {
-      while (fwrite (&uarta_sreg, 1, 1, porta.fout) != 1)
-	continue;
-    }
-  if (uart_stat_reg & UARTA_HRE)
-    {
-      uart_stat_reg |= UARTA_SRE;
-    }
-  else
-    {
-      uarta_sreg = uarta_hreg;
-      uart_stat_reg |= UARTA_HRE;
-      event (uarta_tx, 0, UART_TX_TIME);
-    }
-  grlib_set_irq (3);
-}
-
-static void
-uart_rx (int32 arg)
-{
-  char rxd;
-  int32 rsize = 0;
-
-  if (porta.open)
-    rsize = uart_port_read (&porta, &rxd, 1);
-  else
-    rsize = 0;
-  if (rsize > 0)
-    {
-      uarta_data = rxd;
-      if (uart_stat_reg & UARTA_DR)
-	{
-	  uart_stat_reg |= UARTA_OR;
-	}
-      uart_stat_reg |= UARTA_DR;
-      grlib_set_irq (3);
-    }
-  event (uart_rx, 0, UART_RX_TIME);
-}
-
-static void
 uart_intr (int32 arg)
 {
   uint32 tmp;
@@ -1315,13 +1237,7 @@ uart_intr (int32 arg)
 static void
 uart_irq_start (void)
 {
-#ifdef FAST_UART
   event (uart_intr, 0, UART_FLUSH_TIME);
-#else
-#ifndef _WIN32
-  event (uart_rx, 0, UART_RX_TIME);
-#endif
-#endif
 }
 
 static void

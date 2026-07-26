@@ -103,7 +103,6 @@ def configure(conf):
                               [msvc_opt, '/Zi', '/EHsc', '/std:c++20'])
     else:
         conf.env.append_value('CXXFLAGS', ['-O' + level, '-g', '-std=c++20'])
-    conf.env.append_value('DEFINES', ['FAST_UART'])
 
     for header in HEADERS:
         conf.check_cxx(header_name=header, mandatory=False)

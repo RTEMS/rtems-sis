@@ -102,18 +102,16 @@
 #define UART_FLUSH_TIME 3000
 
 /* New uart defines */
-#define UART_TX_TIME 1000
-#define UART_RX_TIME 1000
-#define UARTA_DR     0x1
-#define UARTA_SRE    0x2
-#define UARTA_HRE    0x4
-#define UARTA_OR     0x40
-#define UARTA_CLR    0x80
-#define UARTB_DR     0x10000
-#define UARTB_SRE    0x20000
-#define UARTB_HRE    0x40000
-#define UARTB_OR     0x400000
-#define UARTB_CLR    0x800000
+#define UARTA_DR  0x1
+#define UARTA_SRE 0x2
+#define UARTA_HRE 0x4
+#define UARTA_OR  0x40
+#define UARTA_CLR 0x80
+#define UARTB_DR  0x10000
+#define UARTB_SRE 0x20000
+#define UARTB_HRE 0x40000
+#define UARTB_OR  0x400000
+#define UARTB_CLR 0x800000
 
 #define UART_DR	 0x100
 #define UART_TSE 0x200
@@ -139,7 +137,6 @@ static unsigned wnumb;
 #define O_NONBLOCK 0
 #endif
 
-static char uarta_sreg, uarta_hreg, uartb_sreg, uartb_hreg;
 static uint32 uart_stat_reg;
 static uint32 uarta_data, uartb_data;
 
@@ -157,11 +154,6 @@ static void port_init (void);
 static uint32 read_uart (uint32 addr);
 static void write_uart (uint32 addr, uint32 data);
 static void flush_uart (void);
-#ifndef FAST_UART
-static void uarta_tx (int32);
-static void uartb_tx (int32);
-static void uart_rx (int32 arg);
-#endif
 static void uart_intr (int32 arg);
 static void uart_irq_start (void);
 static void wdog_intr (int32 arg);
@@ -387,9 +379,7 @@ error_mode (uint32 pc)
 static void
 sim_halt ()
 {
-#ifdef FAST_UART
   flush_uart ();
-#endif
 }
 
 static void
@@ -708,7 +698,6 @@ read_uart (uint32 addr)
 
     case 0xE0: /* UART 1 */
 #ifndef _WIN32
-#ifdef FAST_UART
 
       if (aind < anum)
 	{
@@ -735,19 +724,12 @@ read_uart (uint32 addr)
 	    }
 	}
 #else
-      tmp = uarta_data;
-      uarta_data &= ~UART_DR;
-      uart_stat_reg &= ~UARTA_DR;
-      return tmp;
-#endif
-#else
       return 0;
 #endif
       break;
 
     case 0xE4: /* UART 2 */
 #ifndef _WIN32
-#ifdef FAST_UART
       if (bind < bnum)
 	{
 	  if ((bind + 1) < bnum)
@@ -773,19 +755,12 @@ read_uart (uint32 addr)
 	    }
 	}
 #else
-      tmp = uartb_data;
-      uartb_data &= ~UART_DR;
-      uart_stat_reg &= ~UARTB_DR;
-      return tmp;
-#endif
-#else
       return 0;
 #endif
       break;
 
     case 0xE8: /* UART status register  */
 #ifndef _WIN32
-#ifdef FAST_UART
 
       Ucontrol = 0;
       if (aind < anum)
@@ -826,9 +801,6 @@ read_uart (uint32 addr)
       Ucontrol |= 0x00060006;
       return Ucontrol;
 #else
-      return uart_stat_reg;
-#endif
-#else
       return 0x00060006;
 #endif
       break;
@@ -849,7 +821,6 @@ write_uart (uint32 addr, uint32 data)
     {
 
     case 0xE0: /* UART A */
-#ifdef FAST_UART
       if (porta.open)
 	{
 	  if (wnuma < UARTBUF)
@@ -864,23 +835,9 @@ write_uart (uint32 addr, uint32 data)
 	    }
 	}
       mec_irq (4);
-#else
-      if (uart_stat_reg & UARTA_SRE)
-	{
-	  uarta_sreg = c;
-	  uart_stat_reg &= ~UARTA_SRE;
-	  event (uarta_tx, 0, UART_TX_TIME);
-	}
-      else
-	{
-	  uarta_hreg = c;
-	  uart_stat_reg &= ~UARTA_HRE;
-	}
-#endif
       break;
 
     case 0xE4: /* UART B */
-#ifdef FAST_UART
       if (portb.open)
 	{
 	  if (wnumb < UARTBUF)
@@ -895,33 +852,8 @@ write_uart (uint32 addr, uint32 data)
 	    }
 	}
       mec_irq (5);
-#else
-      if (uart_stat_reg & UARTB_SRE)
-	{
-	  uartb_sreg = c;
-	  uart_stat_reg &= ~UARTB_SRE;
-	  event (uartb_tx, 0, UART_TX_TIME);
-	}
-      else
-	{
-	  uartb_hreg = c;
-	  uart_stat_reg &= ~UARTB_HRE;
-	}
-#endif
       break;
     case 0xE8: /* UART status register */
-#ifndef FAST_UART
-      if (data & UARTA_CLR)
-	{
-	  uart_stat_reg &= 0xFFFF0000;
-	  uart_stat_reg |= UARTA_SRE | UARTA_HRE;
-	}
-      if (data & UARTB_CLR)
-	{
-	  uart_stat_reg &= 0x0000FFFF;
-	  uart_stat_reg |= UARTB_SRE | UARTB_HRE;
-	}
-#endif
       break;
     default:
       if (sis_verbose)
@@ -942,103 +874,9 @@ flush_uart ()
     }
 }
 
-/* The interrupt-driven transmit and receive handlers are used only when the
-   UART is not in fast mode.  Fast mode moves the data in read_uart,
-   write_uart and uart_intr, so these are left out of the build.  */
-#ifndef FAST_UART
-static void
-uarta_tx (int32 arg)
-{
-  (void) arg;
-  while (porta.open)
-    {
-      while (fwrite (&uarta_sreg, 1, 1, porta.fout) != 1)
-	continue;
-    }
-  if (uart_stat_reg & UARTA_HRE)
-    {
-      uart_stat_reg |= UARTA_SRE;
-    }
-  else
-    {
-      uarta_sreg = uarta_hreg;
-      uart_stat_reg |= UARTA_HRE;
-      event (uarta_tx, 0, UART_TX_TIME);
-    }
-  mec_irq (4);
-}
-
-static void
-uartb_tx (int32 arg)
-{
-  (void) arg;
-  while (portb.open)
-    {
-      while (fwrite (&uartb_sreg, 1, 1, portb.fout) != 1)
-	continue;
-    }
-  if (uart_stat_reg & UARTB_HRE)
-    {
-      uart_stat_reg |= UARTB_SRE;
-    }
-  else
-    {
-      uartb_sreg = uartb_hreg;
-      uart_stat_reg |= UARTB_HRE;
-      event (uartb_tx, 0, UART_TX_TIME);
-    }
-  mec_irq (5);
-}
-
-static void
-uart_rx (int32 arg)
-{
-  int32 rsize;
-  char rxd;
-
-  rsize = 0;
-  if (porta.open)
-    rsize = uart_port_read (&porta, &rxd, 1);
-  else
-    rsize = 0;
-  if (rsize > 0)
-    {
-      uarta_data = UART_DR | rxd;
-      if (uart_stat_reg & UARTA_HRE)
-	uarta_data |= UART_THE;
-      if (uart_stat_reg & UARTA_SRE)
-	uarta_data |= UART_TSE;
-      if (uart_stat_reg & UARTA_DR)
-	{
-	  uart_stat_reg |= UARTA_OR;
-	  mec_irq (7); /* UART error interrupt */
-	}
-      uart_stat_reg |= UARTA_DR;
-      mec_irq (4);
-    }
-  rsize = 0;
-  if (portb.open)
-    rsize = uart_port_read (&portb, &rxd, 1);
-  else
-    rsize = 0;
-  if (rsize)
-    {
-      uartb_data = UART_DR | rxd;
-      if (uart_stat_reg & UARTB_HRE)
-	uartb_data |= UART_THE;
-      if (uart_stat_reg & UARTB_SRE)
-	uartb_data |= UART_TSE;
-      if (uart_stat_reg & UARTB_DR)
-	{
-	  uart_stat_reg |= UARTB_OR;
-	  mec_irq (7); /* UART error interrupt */
-	}
-      uart_stat_reg |= UARTB_DR;
-      mec_irq (5);
-    }
-  event (uart_rx, 0, UART_RX_TIME);
-}
-#endif
+/* Move whatever the emulated UARTs have buffered, and re-arm.  This is the
+   only path which touches the host, so read_uart and write_uart never
+   block.  */
 
 static void
 uart_intr (int32 arg)
@@ -1051,13 +889,7 @@ uart_intr (int32 arg)
 static void
 uart_irq_start ()
 {
-#ifdef FAST_UART
   event (uart_intr, 0, UART_FLUSH_TIME);
-#else
-#ifndef _WIN32
-  event (uart_rx, 0, UART_RX_TIME);
-#endif
-#endif
 }
 
 /* Watch-dog and MEC timers.  The logic is in erc32_timer.h; these are the
