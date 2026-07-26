@@ -41,6 +41,7 @@
 #include "sis.h"
 #include "sisio.h"
 
+#include "erc32_error.h"
 #include "erc32_mec.h"
 #include "erc32_timer.h"
 
@@ -94,13 +95,6 @@
 #define MEC_UART_CTRL 0x0E8
 #define SIM_LOAD      0x0F0
 
-/* Memory exception causes */
-#define PROT_EXC  0x3
-#define UIMP_ACC  0x4
-#define MEC_ACC	  0x6
-#define WATCH_EXC 0xa
-#define BREAK_EXC 0xb
-
 /* Size of UART buffers (bytes) */
 #define UARTBUF 1024
 
@@ -132,14 +126,11 @@ static char fname[256];
 static uint32 mec_ssa[2]; /* Write protection start address */
 static uint32 mec_sea[2]; /* Write protection end address */
 static uint32 mec_wpr[2]; /* Write protection control fields */
-static uint32 mec_sfsr;
-static uint32 mec_ffar;
 static uint32 mec_mcr;	  /* MEC control register */
 static uint32 mec_memcfg; /* Memory control register */
 static uint32 mec_wcr;	  /* MEC waitstate register */
 static uint32 mec_iocr;	  /* MEC IO control register */
 static uint32 posted_irq;
-static uint32 mec_ersr; /* MEC error and status register */
 
 /* Memory support variables */
 
@@ -181,8 +172,8 @@ static uint32 uarta_data, uartb_data;
 
 /* Forward declarations */
 
-static void decode_ersr (void);
 static void mecparerror (void);
+static bool error_write_enabled (void);
 static void decode_memcfg (void);
 static void decode_wcr (void);
 static void decode_mcr (void);
@@ -231,6 +222,26 @@ struct RealEnv
     mecparerror ();
   }
   void
+  Irq (int level)
+  {
+    mec_irq (level);
+  }
+  void
+  SysReset ()
+  {
+    sys_reset ();
+  }
+  void
+  SysHalt ()
+  {
+    sys_halt ();
+  }
+  bool
+  ErrorWriteEnabled ()
+  {
+    return error_write_enabled ();
+  }
+  void
   Log (const char *msg)
   {
     fputs (msg, stdout);
@@ -239,6 +250,15 @@ struct RealEnv
 
 static RealEnv real_env;
 static erc32::Mec<RealEnv> mec (real_env);
+static erc32::ErrorHandler<RealEnv> error_handler (real_env);
+
+/* The interrupt controller and the error handler each depend on the other,
+   so one of the two links through a function defined after both.  */
+static bool
+error_write_enabled ()
+{
+  return (mec.tcr () & 0x100000u) != 0;
+}
 
 /* The environment a timer runs against in the real board.  THUNK is the
    event queue callback which ticks that timer, so the template itself never
@@ -279,7 +299,7 @@ struct RealWatchdogEnv : public RealTimerEnv<wdog_intr>
   WatchdogReset ()
   {
     sys_reset ();
-    mec_ersr = 0xC000;
+    error_handler.SetResetCause (erc32::kResetWatchdog);
   }
 };
 
@@ -323,82 +343,13 @@ reset ()
   sregs[0].intack = mec_intack;
 }
 
-static void
-decode_ersr ()
-{
-  if (mec_ersr & 0x01)
-    {
-      if (!(mec_mcr & 0x20))
-	{
-	  if (mec_mcr & 0x40)
-	    {
-	      sys_reset ();
-	      mec_ersr = 0x8000;
-	      if (sis_verbose)
-		printf ("Error manager reset - IU in error mode\n");
-	    }
-	  else
-	    {
-	      sys_halt ();
-	      mec_ersr |= 0x2000;
-	      if (sis_verbose)
-		printf ("Error manager halt - IU in error mode\n");
-	    }
-	}
-      else
-	mec_irq (1);
-    }
-  if (mec_ersr & 0x04)
-    {
-      if (!(mec_mcr & 0x200))
-	{
-	  if (mec_mcr & 0x400)
-	    {
-	      sys_reset ();
-	      mec_ersr = 0x8000;
-	      if (sis_verbose)
-		printf ("Error manager reset - IU comparison error\n");
-	    }
-	  else
-	    {
-	      sys_halt ();
-	      mec_ersr |= 0x2000;
-	      if (sis_verbose)
-		printf ("Error manager halt - IU comparison error\n");
-	    }
-	}
-      else
-	mec_irq (1);
-    }
-  if (mec_ersr & 0x20)
-    {
-      if (!(mec_mcr & 0x2000))
-	{
-	  if (mec_mcr & 0x4000)
-	    {
-	      sys_reset ();
-	      mec_ersr = 0x8000;
-	      if (sis_verbose)
-		printf ("Error manager reset - MEC hardware error\n");
-	    }
-	  else
-	    {
-	      sys_halt ();
-	      mec_ersr |= 0x2000;
-	      if (sis_verbose)
-		printf ("Error manager halt - MEC hardware error\n");
-	    }
-	}
-      else
-	mec_irq (1);
-    }
-}
+/* The error handler.  The logic is in erc32_error.h; these are the board's
+   entry points into it.  */
 
 static void
 mecparerror ()
 {
-  mec_ersr |= 0x20;
-  decode_ersr ();
+  error_handler.MecHwError ();
 }
 
 /* IU error mode manager */
@@ -406,9 +357,7 @@ mecparerror ()
 static void
 error_mode (uint32 pc)
 {
-
-  mec_ersr |= 0x1;
-  decode_ersr ();
+  error_handler.IuErrorMode ();
 }
 
 /* Check memory settings */
@@ -457,13 +406,11 @@ decode_mcr ()
 {
   mem_accprot = (mec_wpr[0] | mec_wpr[1]);
   mem_blockprot = (mec_mcr >> 3) & 1;
+  error_handler.SetControl (mec_mcr);
   if (sis_verbose && mem_accprot)
     printf ("Memory block write protection enabled\n");
   if (mec_mcr & 0x08000)
-    {
-      mec_ersr |= 0x20;
-      decode_ersr ();
-    }
+    mecparerror ();
   if (sis_verbose && (mec_mcr & 2))
     printf ("Software reset enabled\n");
   if (sis_verbose && (mec_mcr & 1))
@@ -504,12 +451,10 @@ mec_reset ()
     mec_ssa[i] = mec_sea[i] = mec_wpr[i] = 0;
   mec_mcr = 0x01350014;
   mec_iocr = 0;
-  mec_sfsr = 0x078;
-  mec_ffar = 0;
+  error_handler.Reset ();
   mec.ResetInterrupts ();
   mec_memcfg = 0x10000;
   mec_wcr = -1;
-  mec_ersr = 0; /* MEC error and status register */
 
   decode_memcfg ();
   decode_wcr ();
@@ -543,17 +488,7 @@ mec_irq (int32 level)
 static void
 set_sfsr (uint32 fault, uint32 addr, uint32 asi, uint32 read)
 {
-  if ((asi == 0xa) || (asi == 0xb))
-    {
-      mec_ffar = addr;
-      mec_sfsr = (fault << 3) | (!read << 15);
-      mec_sfsr |= ((mec_sfsr & 1) ^ 1) | (mec_sfsr & 1);
-      /* The guard leaves asi as 0xa or 0xb, so 0xb here means 0xa there.  */
-      if (asi == 0xb)
-	mec_sfsr |= 0x1004;
-      else
-	mec_sfsr |= 0x0004;
-    }
+  error_handler.SetFault (fault, addr, asi, read);
 }
 
 static int32
@@ -620,15 +555,15 @@ mec_read (uint32 addr, uint32 asi, uint32 *data)
       break;
 
     case MEC_SFSR: /* 0xA0 */
-      *data = mec_sfsr;
+      *data = error_handler.sfsr ();
       break;
 
     case MEC_FFAR: /* 0xA4 */
-      *data = mec_ffar;
+      *data = error_handler.ffar ();
       break;
 
     case MEC_ERSR: /* 0xB0 */
-      *data = mec_ersr;
+      *data = error_handler.ersr ();
       break;
 
     case MEC_TCR: /* 0xD0 */
@@ -639,7 +574,7 @@ mec_read (uint32 addr, uint32 asi, uint32 *data)
     case MEC_UARTB: /* 0xE4 */
       if (asi != 0xb)
 	{
-	  set_sfsr (MEC_ACC, addr, asi, 1);
+	  set_sfsr (erc32::kFaultMecRegister, addr, asi, 1);
 	  return 1;
 	}
       *data = read_uart (addr);
@@ -651,7 +586,7 @@ mec_read (uint32 addr, uint32 asi, uint32 *data)
       break;
 
     default:
-      set_sfsr (MEC_ACC, addr, asi, 1);
+      set_sfsr (erc32::kFaultMecRegister, addr, asi, 1);
       return 1;
       break;
     }
@@ -677,7 +612,7 @@ mec_write (uint32 addr, uint32 data)
       if (mec_mcr & 0x2)
 	{
 	  sys_reset ();
-	  mec_ersr = 0x4000;
+	  error_handler.SetResetCause (erc32::kResetSoftware);
 	  if (sis_verbose)
 	    printf (" Software reset issued\n");
 	}
@@ -758,9 +693,7 @@ mec_write (uint32 addr, uint32 data)
       break;
 
     case MEC_SFSR: /* 0xA0 */
-      if (data & 0xFFFF0880)
-	mecparerror ();
-      mec_sfsr = 0x78;
+      error_handler.WriteSfsr (data);
       break;
 
     case MEC_ISR:
@@ -794,10 +727,7 @@ mec_write (uint32 addr, uint32 data)
       break;
 
     case MEC_ERSR: /* 0xB0 */
-      if (mec.tcr () & 0x100000)
-	if (data & 0xFFFFEFC0)
-	  mecparerror ();
-      mec_ersr = data & 0x103f;
+      error_handler.WriteErsr (data);
       break;
 
     case MEC_TCR: /* 0xD0 */
@@ -819,7 +749,7 @@ mec_write (uint32 addr, uint32 data)
       break;
 
     default:
-      set_sfsr (MEC_ACC, addr, 0xb, 0);
+      set_sfsr (erc32::kFaultMecRegister, addr, 0xb, 0);
       return 1;
       break;
     }
@@ -1423,7 +1353,7 @@ memory_iread (uint32 addr, uint32 *data, int32 *ws)
     asi = 9;
   else
     asi = 8;
-  set_sfsr (UIMP_ACC, addr, asi, 1);
+  set_sfsr (erc32::kFaultUnimplemented, addr, asi, 1);
   *ws = MEM_EX_WS;
   return 1;
 }
@@ -1446,7 +1376,7 @@ memory_read (uint32 addr, uint32 *data, int32 *ws)
       mexc = mec_read (addr, asi, data);
       if (mexc)
 	{
-	  set_sfsr (MEC_ACC, addr, asi, 1);
+	  set_sfsr (erc32::kFaultMecRegister, addr, asi, 1);
 	  *ws = MEM_EX_WS;
 	}
       else
@@ -1465,7 +1395,7 @@ memory_read (uint32 addr, uint32 *data, int32 *ws)
   if (sis_verbose)
     printf ("Memory exception at %x (illegal address)\n", addr);
   asi = (sregs->psr & 0x080) ? 11 : 10;
-  set_sfsr (UIMP_ACC, addr, asi, 1);
+  set_sfsr (erc32::kFaultUnimplemented, addr, asi, 1);
   *ws = MEM_EX_WS;
   return 1;
 }
@@ -1501,7 +1431,7 @@ memory_write (uint32 addr, uint32 *data, int32 sz, int32 *ws)
 	    {
 	      if (sis_verbose)
 		printf ("Memory access protection error at 0x%08x\n", addr);
-	      set_sfsr (PROT_EXC, addr, asi, 0);
+	      set_sfsr (erc32::kFaultProtection, addr, asi, 0);
 	      *ws = MEM_EX_WS;
 	      return 1;
 	    }
@@ -1515,14 +1445,14 @@ memory_write (uint32 addr, uint32 *data, int32 sz, int32 *ws)
       asi = (sregs->psr & 0x080) ? 11 : 10;
       if ((sz != 2) || (asi != 0xb))
 	{
-	  set_sfsr (MEC_ACC, addr, asi, 0);
+	  set_sfsr (erc32::kFaultMecRegister, addr, asi, 0);
 	  *ws = MEM_EX_WS;
 	  return 1;
 	}
       mexc = mec_write (addr, *data);
       if (mexc)
 	{
-	  set_sfsr (MEC_ACC, addr, asi, 0);
+	  set_sfsr (erc32::kFaultMecRegister, addr, asi, 0);
 	  *ws = MEM_EX_WS;
 	}
       else
@@ -1545,7 +1475,7 @@ memory_write (uint32 addr, uint32 *data, int32 sz, int32 *ws)
 
   *ws = MEM_EX_WS;
   asi = (sregs->psr & 0x080) ? 11 : 10;
-  set_sfsr (UIMP_ACC, addr, asi, 0);
+  set_sfsr (erc32::kFaultUnimplemented, addr, asi, 0);
   return 1;
 }
 
