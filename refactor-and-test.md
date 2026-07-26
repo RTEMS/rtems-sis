@@ -66,7 +66,7 @@ against real descriptors the way `tests/sisio.cc` does.
 ## Where the tree stands
 
 Measured with `./waf configure --enable-coverage && ./waf`, branch metric,
-771 of 5915 arcs (13%). The totals move as headers join the filter and as
+777 of 5913 arcs (13%). The totals move as headers join the filter and as
 duplicated and dead code is removed, so compare per file rather than against
 an older total.
 
@@ -75,9 +75,8 @@ an older total.
 | `sparc.cc`, `riscv.cc` | 2274 | 17 |
 | `grlib.cc`, `grspw.cc`, `gr1553.cc`, `greth.cc`, `memscrub.cc`, `tap.cc` | 986 | 0 |
 | `sis.cc`, `remote.cc`, `interf.cc` | 546 | 0 |
-| `erc32.cc` | 175 | 167 |
 | `leon2.cc`, `leon3.cc`, `gr740.cc`, `rv32.cc` | 276 | 0 |
-| graduated: `erc32_cfg.h`, `erc32_error.h`, `erc32_mec.h`, `erc32_timer.h`, `erc32_uart.h`, `exec.cc`, `help.cc`, `sisio.cc`, `uartport.cc` | | 100% |
+| graduated: `erc32_cfg.h`, `erc32_error.h`, `erc32_mec.h`, `erc32_timer.h`, `erc32_uart.h`, `erc32.cc`, `exec.cc`, `help.cc`, `sisio.cc`, `uartport.cc` | | 100% |
 
 `func.cc` and `elf.cc` are not in the table above only because they were not
 captured in that run. Measure them before planning their step.
@@ -121,10 +120,14 @@ subsystems that depend on each other. Follow that when adding the fifth.
 
 ### ERC32 first
 
-`erc32.cc` is finished and graduated before any other file is opened. Its
-remaining arcs are exactly the shapes the recipe has not been proven against
-(host I/O setup, an error manager that resets the machine, a watchdog), so a
-pattern that survives them will survive `leon2.cc` and `grlib.cc`.
+**`erc32.cc` is done.** It is at 100% line and branch and is in
+`tests/covered.txt`, along with the five headers its subsystems moved into and
+the shared `uartport.cc`. The recipe has now been proven against every shape
+the file had: host I/O setup, an error manager that halts and resets the
+machine, a watchdog, a register-decoding configuration block and a UART.
+Steps 6 and 7 below were absorbed into the steps before them, because
+deduplication and dead-code removal shrank the file faster than the coverage
+work grew.
 
 One subsystem per step, each its own header and template with its own narrow
 concept, all in `namespace erc32`. `erc32.cc` holds one `RealEnv` satisfying
@@ -138,11 +141,11 @@ all of the concepts; each test file holds a small `TestEnv` per subsystem.
    removed 182 arcs from the tree for 44 covered ones, and took `erc32.cc`
    from 325 arcs to 227.
 5. ~~**`erc32_uart.h`** the MEC UART register model.~~ Done.
-6. **`erc32_mem.h`** memory access dispatch. The only step with a performance
-   obligation. Keep the implementation in an out-of-line global function
-   reached by a static template call, never inlined and never indirect.
-7. Leftovers (`boot_init`, `init_sim`/`reset`, halt and exit) and the commit
-   that adds `erc32.cc` to `tests/covered.txt`.
+6. ~~**`erc32_mem.h`** memory access dispatch.~~ Not needed as a separate
+   step: the access path is covered where it stands, and the segment
+   protection moved into `erc32_cfg.h` with it. Read the performance note
+   below before touching it again.
+7. ~~Leftovers and the commit that graduates `erc32.cc`.~~ Done.
 
 ### Then the rest of the simulator
 
@@ -369,6 +372,13 @@ Hard-won here, so the next person does not rediscover them.
   stdin that never closes makes a run hang in the emulated UART and looks like a
   hang in target code. Before believing a regression or an improvement from a
   behavioral change, run it against an unmodified tree.
+
+- **Never pipe a build to `/dev/null`.** `CLAUDE.md` warns about `head` and
+  `grep -m` killing a build with SIGPIPE; discarding the output is the same
+  trap without the signal. A failing `./waf --notests > /dev/null` left the
+  previous binary in place, and the next three diagnostic runs were of stale
+  code and pointed the wrong way. Let the build print, and read the last
+  lines.
 
 - **A green `test-run` only counts if the run reaches the code.** Removing
   the status bits the ERC32 UART data register returns left `test-run` fully
