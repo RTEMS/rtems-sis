@@ -647,3 +647,347 @@ TEST_CASE_FIXTURE (riscv_fixture,
   CHECK (exec (rtype (OP_REG, 3, 7, 1, 2, 1)) == 0);
   CHECK (get (3) == 0x80000000);
 }
+
+TEST_CASE_FIXTURE (riscv_fixture,
+		   "RISC-V a control register is read and written")
+{
+  /* The CSR group of the privileged specification: each instruction reads
+     the register into rd and then writes it, so one instruction both
+     collects the old value and installs the new one.  */
+  set (1, 0x1234);
+
+  CHECK (exec (itype (OP_SYS, 2, CSRRW, 1, CSR_MSCRATCH)) == 0);
+  CHECK (sregs[0].mscratch == 0x1234);
+
+  set (1, 0x0f00);
+  CHECK (exec (itype (OP_SYS, 2, CSRRW, 1, CSR_MSCRATCH)) == 0);
+  CHECK (get (2) == 0x1234);
+  CHECK (sregs[0].mscratch == 0x0f00);
+
+  /* Set and clear turn the source into a mask.  */
+  set (1, 0x00ff);
+  CHECK (exec (itype (OP_SYS, 2, CSRRS, 1, CSR_MSCRATCH)) == 0);
+  CHECK (get (2) == 0x0f00);
+  CHECK (sregs[0].mscratch == 0x0fff);
+
+  CHECK (exec (itype (OP_SYS, 2, CSRRC, 1, CSR_MSCRATCH)) == 0);
+  CHECK (get (2) == 0x0fff);
+  CHECK (sregs[0].mscratch == 0x0f00);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture,
+		   "RISC-V a control register read does not write")
+{
+  /* A set or clear naming x0 as its source reads the register without
+     writing it, which is how a program reads a register it must not
+     disturb.  */
+  sregs[0].mscratch = 0x1234;
+
+  CHECK (exec (itype (OP_SYS, 2, CSRRS, 0, CSR_MSCRATCH)) == 0);
+  CHECK (get (2) == 0x1234);
+  CHECK (sregs[0].mscratch == 0x1234);
+
+  CHECK (exec (itype (OP_SYS, 2, CSRRC, 0, CSR_MSCRATCH)) == 0);
+  CHECK (sregs[0].mscratch == 0x1234);
+
+  CHECK (exec (itype (OP_SYS, 2, CSRRSI, 0, CSR_MSCRATCH)) == 0);
+  CHECK (sregs[0].mscratch == 0x1234);
+
+  CHECK (exec (itype (OP_SYS, 2, CSRRCI, 0, CSR_MSCRATCH)) == 0);
+  CHECK (sregs[0].mscratch == 0x1234);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture,
+		   "RISC-V the immediate control register forms")
+{
+  /* The immediate forms take a five bit value out of the source field
+     rather than a register.  */
+  sregs[0].mscratch = 0;
+
+  CHECK (exec (itype (OP_SYS, 2, CSRRWI, 0x15, CSR_MSCRATCH)) == 0);
+  CHECK (sregs[0].mscratch == 0x15);
+
+  CHECK (exec (itype (OP_SYS, 2, CSRRSI, 0x0a, CSR_MSCRATCH)) == 0);
+  CHECK (get (2) == 0x15);
+  CHECK (sregs[0].mscratch == 0x1f);
+
+  CHECK (exec (itype (OP_SYS, 2, CSRRCI, 0x0a, CSR_MSCRATCH)) == 0);
+  CHECK (sregs[0].mscratch == 0x15);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the machine registers answer")
+{
+  /* Every machine register the core models, read back through the same
+     instruction a program uses.  */
+  sregs[0].mstatus = MSTATUS_MIE;
+  sregs[0].mtvec = 0x4000;
+  sregs[0].epc = 0x2000;
+  sregs[0].mie = MIP_MTIP;
+  sregs[0].mip = MIP_MSIP;
+  sregs[0].mcause = 7;
+  sregs[0].mtval = 0x1234;
+  sregs[0].simtime = 0x1'0000'0002;
+
+  struct
+  {
+    uint32 csr;
+    uint32 value;
+  } cases[] = {
+    { CSR_MSTATUS, MSTATUS_MIE },
+    { CSR_MTVEC, 0x4000 },
+    { CSR_MEPC, 0x2000 },
+    { CSR_MIE, MIP_MTIP },
+    { CSR_MIP, MIP_MSIP },
+    { CSR_MCAUSE, 7 },
+    { CSR_MTVAL, 0x1234 },
+    { CSR_MHARTID, 0 },
+    { CSR_MISA, 0x40000100 },
+    { CSR_TIME, 2 },
+    { CSR_TIMEH, 1 },
+    { CSR_MSTATUSH, 0 },
+  };
+
+  for (auto c : cases)
+    {
+      INFO ("register " << c.csr);
+      CHECK (exec (itype (OP_SYS, 2, CSRRS, 0, c.csr)) == 0);
+      CHECK (get (2) == c.value);
+    }
+}
+
+TEST_CASE_FIXTURE (
+    riscv_fixture,
+    "RISC-V an external interrupt shows in the pending register")
+{
+  /* The interrupt controller asserts the external line outside the register,
+     so a read of the pending register reports it alongside what software
+     set.  */
+  sregs[0].mip = 0;
+  ext_irl[0] = 0x1b;
+
+  CHECK (exec (itype (OP_SYS, 2, CSRRS, 0, CSR_MIP)) == 0);
+  CHECK ((get (2) & MIP_MEIP) != 0);
+
+  ext_irl[0] = 0;
+  CHECK (exec (itype (OP_SYS, 2, CSRRS, 0, CSR_MIP)) == 0);
+  CHECK ((get (2) & MIP_MEIP) == 0);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture,
+		   "RISC-V a write of an unmodelled register is illegal")
+{
+  /* A write of a register the core does not model is an illegal
+     instruction.  The read of one answers zero, because the core models the
+     registers a program needs rather than the whole space.  */
+  set (1, 1);
+
+  CHECK (exec (itype (OP_SYS, 2, CSRRW, 1, 0x7c0)) == TRAP_ILLEG);
+  CHECK (exec (itype (OP_SYS, 2, CSRRS, 1, 0x7c0)) == TRAP_ILLEG);
+  CHECK (exec (itype (OP_SYS, 2, CSRRC, 1, 0x7c0)) == TRAP_ILLEG);
+  CHECK (exec (itype (OP_SYS, 2, CSRRWI, 1, 0x7c0)) == TRAP_ILLEG);
+  CHECK (exec (itype (OP_SYS, 2, CSRRSI, 1, 0x7c0)) == TRAP_ILLEG);
+  CHECK (exec (itype (OP_SYS, 2, CSRRCI, 1, 0x7c0)) == TRAP_ILLEG);
+
+  CHECK (exec (itype (OP_SYS, 2, CSRRS, 0, 0x7c0)) == 0);
+  CHECK (get (2) == 0);
+
+  /* The unassigned function code is illegal too.  */
+  CHECK (exec (itype (OP_SYS, 2, 4, 1, 0)) == TRAP_ILLEG);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the mandatory high status register")
+{
+  /* mstatush is mandatory on RV32 and every field of it belongs to an
+     extension the core does not emulate, so it reads zero and a write is
+     discarded rather than refused.  */
+  set (1, 0xffffffff);
+
+  CHECK (exec (itype (OP_SYS, 2, CSRRW, 1, CSR_MSTATUSH)) == 0);
+  CHECK (get (2) == 0);
+  CHECK (exec (itype (OP_SYS, 2, CSRRS, 0, CSR_MSTATUSH)) == 0);
+  CHECK (get (2) == 0);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the environment instructions")
+{
+  /* ecall stops the run and ebreak takes the breakpoint trap, or reports a
+     debugger breakpoint while the stub is running.  */
+  int saved = sis_gdb_break;
+
+  sis_gdb_break = 0;
+  CHECK (exec (itype (OP_SYS, 0, 0, 0, 0)) == ERROR_TRAP);
+  CHECK (exec (itype (OP_SYS, 0, 0, 0, 1)) == TRAP_EBREAK);
+
+  sis_gdb_break = 1;
+  CHECK (exec (itype (OP_SYS, 0, 0, 0, 1)) == WPT_TRAP);
+  CHECK (sregs[0].bphit == 1);
+
+  sregs[0].bphit = 0;
+  sis_gdb_break = saved;
+
+  /* The unassigned codes of the group are illegal.  */
+  CHECK (exec (itype (OP_SYS, 0, 0, 0, 3)) == TRAP_ILLEG);
+  CHECK (exec (itype (OP_SYS, 0, 0, 0, 4)) == TRAP_ILLEG);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture,
+		   "RISC-V a return from a trap restores the mode")
+{
+  /* mret goes back to the saved program counter, restores the mode the trap
+     came from and puts the saved interrupt enable back.  */
+  sregs[0].epc = 0x3000;
+  sregs[0].mpp = 3;
+  sregs[0].mode = 1;
+  sregs[0].mstatus = MSTATUS_MPIE;
+  sregs[0].pc = 0x2000;
+  sregs[0].npc = 0x2004;
+
+  CHECK (exec (itype (OP_SYS, 0, 0, 0, 2)) == 0);
+  CHECK (sregs[0].pc == 0x3000);
+  CHECK (sregs[0].mode == 3);
+  CHECK ((sregs[0].mstatus & MSTATUS_MIE) != 0);
+  CHECK ((sregs[0].mstatus & MSTATUS_MPIE) != 0);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture,
+		   "RISC-V wait for interrupt enters power-down")
+{
+  /* wfi stops the core until something interrupts it, which the simulator
+     models by skipping to the next event.  */
+  sregs[0].pwd_mode = 0;
+  sregs[0].hold = 0;
+
+  CHECK (exec (itype (OP_SYS, 0, 0, 0, 5)) == 0);
+  CHECK (sregs[0].pwd_mode == 1);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V a fence costs a trap entry")
+{
+  /* The core has no store buffer to drain, so a fence only costs the time
+     an ordering barrier would.  */
+  CHECK (exec (itype (OP_FENCE, 0, 0, 0, 0)) == 0);
+  CHECK (sregs[0].icnt == TRAP_C);
+}
+
+namespace
+{
+
+/* An atomic instruction is the register format with the operation in the top
+   five bits, above the acquire and release ordering bits.  */
+uint32
+amo (uint32 funct5, uint32 rd, uint32 rs1, uint32 rs2)
+{
+  return rtype (OP_AMO, rd, 2, rs1, rs2, funct5 << 2);
+}
+
+} /* namespace */
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the atomic read-modify-writes")
+{
+  /* The A extension: each one returns the word it found and leaves the
+     result of the operation behind.  */
+  struct
+  {
+    uint32 funct5;
+    uint32 memory, operand, result;
+  } cases[] = {
+    { AMOSWAP, 100, 7, 7 },
+    { AMOADD, 100, 7, 107 },
+    { AMOXOR, 0xf0f0, 0x0ff0, 0xf0f0 ^ 0x0ff0 },
+    { AMOOR, 0xf0f0, 0x0ff0, 0xf0f0 | 0x0ff0 },
+    { AMOAND, 0xf0f0, 0x0ff0, 0xf0f0 & 0x0ff0 },
+    { AMOMIN, (uint32) -5, 3, (uint32) -5 },
+    { AMOMIN, 3, (uint32) -5, (uint32) -5 },
+    { AMOMAX, (uint32) -5, 3, 3 },
+    { AMOMAX, 3, (uint32) -5, 3 },
+    { AMOMINU, (uint32) -5, 3, 3 },
+    { AMOMINU, 3, (uint32) -5, 3 },
+    { AMOMAXU, (uint32) -5, 3, (uint32) -5 },
+    { AMOMAXU, 3, (uint32) -5, (uint32) -5 },
+  };
+
+  for (auto c : cases)
+    {
+      INFO ("operation " << c.funct5 << " on " << c.memory);
+      sis_tests::flatmem_poke (0x40, c.memory);
+      set (1, 0x40);
+      set (2, c.operand);
+
+      CHECK (exec (amo (c.funct5, 3, 1, 2)) == 0);
+      CHECK (get (3) == c.memory);
+      CHECK (sis_tests::flatmem_peek (0x40) == c.result);
+    }
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the reservation pair")
+{
+  /* Load reserved takes a reservation on the word it read and store
+     conditional writes only while that reservation still names the same
+     address, reporting zero when it did and one when it did not.  */
+  sis_tests::flatmem_poke (0x40, 0x12345678);
+  set (1, 0x40);
+  set (2, 0x11);
+
+  CHECK (exec (amo (LRQ, 3, 1, 0)) == 0);
+  CHECK (get (3) == 0x12345678);
+
+  CHECK (exec (amo (SCQ, 3, 1, 2)) == 0);
+  CHECK (get (3) == 0);
+  CHECK (sis_tests::flatmem_peek (0x40) == 0x11);
+
+  /* The reservation is spent, so a second store conditional fails.  */
+  CHECK (exec (amo (SCQ, 3, 1, 2)) == 0);
+  CHECK (get (3) == 1);
+
+  /* A store conditional to another address fails as well.  */
+  CHECK (exec (amo (LRQ, 3, 1, 0)) == 0);
+  set (1, 0x80);
+  CHECK (exec (amo (SCQ, 3, 1, 2)) == 0);
+  CHECK (get (3) == 1);
+  CHECK (sis_tests::flatmem_peek (0x80) == 0);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V an atomic access must be aligned")
+{
+  /* Every atomic instruction works on a whole word, so a misaligned address
+     is refused before anything is read.  */
+  set (1, 0x41);
+  set (2, 0x11);
+
+  CHECK (exec (amo (AMOADD, 3, 1, 2)) == TRAP_LMALI);
+  CHECK (sregs[0].wpaddress == 0x41);
+  CHECK (exec (amo (LRQ, 3, 1, 0)) == TRAP_LMALI);
+  CHECK (exec (amo (SCQ, 3, 1, 2)) == TRAP_LMALI);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture,
+		   "RISC-V an atomic access reports a refused word")
+{
+  /* A word outside memory is a load fault, and one which reads but refuses
+     a write is a store fault, which is the path between the read and the
+     write of a read-modify-write.  */
+  set (1, sis_tests::FLATMEM_SIZE);
+  set (2, 0x11);
+
+  CHECK (exec (amo (AMOADD, 3, 1, 2)) == TRAP_LEXC);
+  CHECK (exec (amo (LRQ, 3, 1, 0)) == TRAP_LEXC);
+
+  sis_tests::flatmem_fail_write (0x40);
+  set (1, 0x40);
+  CHECK (exec (amo (AMOADD, 3, 1, 2)) == TRAP_SEXC);
+  CHECK (sregs[0].wpaddress == 0x40);
+
+  CHECK (exec (amo (LRQ, 3, 1, 0)) == 0);
+  CHECK (exec (amo (SCQ, 3, 1, 2)) == TRAP_SEXC);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the unassigned atomics are illegal")
+{
+  /* The operation field has more encodings than the extension assigns.  */
+  set (1, 0x40);
+  set (2, 0x11);
+
+  CHECK (exec (amo (4, 3, 1, 2)) == TRAP_ILLEG);
+  CHECK (exec (amo (6, 3, 1, 2)) == TRAP_ILLEG);
+  CHECK (exec (amo (0x1f, 3, 1, 2)) == TRAP_ILLEG);
+}
