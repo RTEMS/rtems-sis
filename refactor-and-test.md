@@ -367,6 +367,15 @@ Hard-won here, so the next person does not rediscover them.
   hang in target code. Before believing a regression or an improvement from a
   behavioral change, run it against an unmodified tree.
 
+- **The build has no warning flags, so dead code accumulates unseen.** The
+  wscript passes only `-O<level> -g -std=c++20`. Building the tree with
+  `CXXFLAGS=-Wall ./waf configure && ./waf` reports 132 warnings, and roughly a
+  third are unused variables, each one a piece of dead code a coverage pass
+  will otherwise have to reason about. Two dead receive buffers in `leon2.cc`
+  and `grlib.cc` were found this way. Measure a file with `-Wall` before
+  covering it, and consider proposing the flag to the maintainer once the
+  count is low enough to act on.
+
 - **A coverage number describes one build configuration.** The
   `--enable-coverage` build is `-O0`; the shipping build is `-O2`. Do not
   compare timings across the two, and see `doc/building-sis.md` for why a single
