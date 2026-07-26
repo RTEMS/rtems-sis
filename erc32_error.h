@@ -214,8 +214,6 @@ public:
       sfsr_ |= kSfsrAtStore;
     if (asi == kAsiSupervisorData)
       sfsr_ |= kSfsrAtSupervisor;
-    /* Bit 0 is reserved and reads zero in the manual.  */
-    sfsr_ |= 1;
   }
 
 private:
