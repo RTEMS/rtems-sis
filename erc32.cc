@@ -700,7 +700,9 @@ read_uart (uint32 addr)
 	    }
 	  else
 	    {
-	      return (0x600 | (uint32) aq[aind]);
+	      /* Nothing arrived, so the receive register still holds the
+		 last byte delivered.  */
+	      return (0x600 | (uint32) aq[aind > 0 ? aind - 1 : 0]);
 	    }
 	}
 #else
@@ -731,7 +733,9 @@ read_uart (uint32 addr)
 	    }
 	  else
 	    {
-	      return (0x600 | (uint32) bq[bind]);
+	      /* Nothing arrived, so the receive register still holds the
+		 last byte delivered.  */
+	      return (0x600 | (uint32) bq[bind > 0 ? bind - 1 : 0]);
 	    }
 	}
 #else
