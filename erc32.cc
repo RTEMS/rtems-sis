@@ -580,12 +580,15 @@ mec_write (uint32 addr, uint32 data)
       cfg.WriteSegmentEnd (1, data);
       break;
 
-    case MEC_UARTA:
-    case MEC_UARTB:
-      if (data & 0xFFFFFF00)
+    case MEC_UARTA: /* 0xE0 */
+    case MEC_UARTB: /* 0xE4 */
+      if (data & 0xffffff00)
 	mecparerror ();
-    case MEC_UART_CTRL:
-      if (data & 0xFF00FF00)
+      write_uart (addr, data);
+      break;
+
+    case MEC_UART_CTRL: /* 0xE8 */
+      if (data & 0xff08ff08)
 	mecparerror ();
       write_uart (addr, data);
       break;
