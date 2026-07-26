@@ -248,7 +248,7 @@ public:
       return false;
 
     uint32 mode = supervisor ? kSegSupervisor : kSegUser;
-    uint32 waddr = (addr & 0x7fffffu) >> 2;
+    uint32 waddr = (addr & geom_.ram_mask) >> 2;
     bool hit[kSegments];
 
     for (int i = 0; i < kSegments; i++)
