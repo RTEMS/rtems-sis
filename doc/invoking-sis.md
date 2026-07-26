@@ -115,8 +115,8 @@ Useful when you want to simulate the timing and data-bus behavior of an 8-bit
 ROM.
 
 **`-uben`**  
-Enable handling of unaligned memory accesses and specific byte-ordering
-behaviors for ERC32.
+Connect the console to UART B instead of UART A for ERC32. UART A is then left
+unattached unless `-uart1` gives it a device.
 
 **`file`**  
 The executable file to be loaded must be an SPARC or RISCV ELF file. On

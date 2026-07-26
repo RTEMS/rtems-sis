@@ -80,8 +80,8 @@ sis_usage ()
 	  "memory regions. (ERC32 only)\n");
   printf ("  [-rom8]              -> Simulate 8-bit ROM timing and data-bus "
 	  "behavior (ERC32 only).\n");
-  printf ("  [-uben]              -> Enable handling of unaligned memory "
-	  "accesses (ERC32 only).\n");
+  printf ("  [-uben]              -> Put the console on UART B instead of "
+	  "UART A (ERC32 only).\n");
 }
 
 void
