@@ -2302,13 +2302,6 @@ sparc_set_register (struct pstate *sregs, char *reg, uint32 rval, uint32 addr)
     sparc_set_rega (sregs, reg, rval);
 }
 
-static void
-disp_reg (struct pstate *sregs, char *reg)
-{
-  if (strncmp (reg, "w", 1) == 0)
-    sparc_disp_regs (sregs, VAL (&reg[1]));
-}
-
 /* Save stack pointer in each valid register window. Used to detect if gdb
    wants to read a memory location which is cached in a register.
 */
