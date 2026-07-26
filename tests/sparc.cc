@@ -1839,3 +1839,300 @@ TEST_CASE_FIXTURE (sparc_fixture,
   CHECK (exec (f3r (OP_ARITH, 4, ADD, 3, 3)) == 0);
   CHECK (get (4) == 0x22446688);
 }
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC collects target coverage while it runs")
+{
+  /* With the -cov option the core records what it executed and how it left
+     each control transfer, which is a second path through every branch.  */
+  uint32 saved = ebase.coven;
+  ebase.coven = 1;
+
+  /* A conditional branch taken and not taken.  */
+  sregs[0].psr |= PSR_Z;
+  CHECK (exec (bicc (0, BICC_BE, 4)) == 0);
+  sregs[0].pc = 0x1000;
+  sregs[0].npc = 0x1004;
+  sregs[0].psr &= ~PSR_Z;
+  CHECK (exec (bicc (0, BICC_BE, 4)) == 0);
+
+  /* The same with the annul bit, taken and not taken.  */
+  sregs[0].pc = 0x1000;
+  sregs[0].npc = 0x1004;
+  CHECK (exec (bicc (1, BICC_BE, 4)) == 0);
+  sregs[0].pc = 0x1000;
+  sregs[0].npc = 0x1004;
+  sregs[0].psr |= PSR_Z;
+  CHECK (exec (bicc (1, BICC_BE, 4)) == 0);
+
+  /* Branch always, with and without the annul bit.  */
+  sregs[0].pc = 0x1000;
+  sregs[0].npc = 0x1004;
+  CHECK (exec (bicc (0, BICC_BA, 4)) == 0);
+  sregs[0].pc = 0x1000;
+  sregs[0].npc = 0x1004;
+  CHECK (exec (bicc (1, BICC_BA, 4)) == 0);
+
+  /* Branch never, which is the not taken case of an unconditional
+     branch.  */
+  sregs[0].pc = 0x1000;
+  sregs[0].npc = 0x1004;
+  CHECK (exec (bicc (0, BICC_BN, 4)) == 0);
+  sregs[0].pc = 0x1000;
+  sregs[0].npc = 0x1004;
+  CHECK (exec (bicc (1, BICC_BN, 4)) == 0);
+
+  /* A call and a jump.  */
+  sregs[0].pc = 0x1000;
+  sregs[0].npc = 0x1004;
+  CHECK (exec ((OP_CALL << 30) | 4) == 0);
+
+  set (1, 0x3000);
+  sregs[0].pc = 0x1000;
+  sregs[0].npc = 0x1004;
+  CHECK (exec (f3i (OP_ARITH, 3, JMPL, 1, 0)) == 0);
+
+  /* A return from a trap.  */
+  sregs[0].psr &= ~PSR_ET;
+  sregs[0].psr |= PSR_S;
+  sregs[0].wim = 0;
+  CHECK (exec (f3i (OP_ARITH, 0, RETT, 1, 0)) == 0);
+
+  ebase.coven = saved;
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC collects coverage over the floating point branches")
+{
+  uint32 saved = ebase.coven;
+  ebase.coven = 1;
+  sregs[0].psr |= PSR_EF;
+
+  for (uint32 annul = 0; annul < 2; annul++)
+    for (uint32 fcc = 0; fcc < 2; fcc++)
+      for (uint32 cond = 0; cond < 16; cond += 8)
+	{
+	  sregs[0].fsr = (sregs[0].fsr & ~0xc00) | (fcc << 10);
+	  sregs[0].pc = 0x1000;
+	  sregs[0].npc = 0x1004;
+	  CHECK (exec ((FPBCC << 22) | (cond << 25) | (annul << 29) | 4) == 0);
+	}
+
+  ebase.coven = saved;
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC a floating point branch waits for the unit")
+{
+  /* A branch on the condition field has to wait for an operation still in
+     the pipe, which the core charges as a hold.  */
+  sregs[0].psr |= PSR_EF;
+  sregs[0].simtime = 0;
+  sregs[0].ftime = 50;
+
+  CHECK (exec ((FPBCC << 22) | (FBA << 25) | 4) == 0);
+  CHECK (sregs[0].hold > 0);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC results reach the window registers")
+{
+  /* Every read of a state register writes its result, which lands in a
+     global or a window register depending on the number.  */
+  CHECK (exec (f3r (OP_ARITH, 16, RDPSR, 0, 0)) == 0);
+  CHECK (get (16) == sregs[0].psr);
+
+  CHECK (exec (f3r (OP_ARITH, 17, RDWIM, 0, 0)) == 0);
+  CHECK (get (17) == sregs[0].wim);
+
+  CHECK (exec (f3r (OP_ARITH, 18, RDTBR, 0, 0)) == 0);
+  CHECK (get (18) == sregs[0].tbr);
+
+  sregs[0].y = 0x1234;
+  CHECK (exec (f3r (OP_ARITH, 19, RDY, 0, 0)) == 0);
+  CHECK (get (19) == 0x1234);
+
+  CHECK (exec (sethi (20, 0x100)) == 0);
+  CHECK (get (20) == 0x100 << 10);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC an ancillary register the core has no answer for")
+{
+  int saved = cputype;
+  cputype = CPU_LEON3;
+
+  /* A number outside the ones the core knows leaves the destination
+     alone.  */
+  set (3, 0x5555);
+  CHECK (exec (f3r (OP_ARITH, 3, RDY, 5, 0)) == 0);
+  CHECK (get (3) == 0x5555);
+
+  cputype = saved;
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC the LEON write-y reaches its ancillary registers")
+{
+  int saved = cputype;
+  cputype = CPU_LEON3;
+
+  /* On a LEON the write-y opcode selects an ancillary register by its
+     destination number: seventeen is the implementation register, of which
+     only the configurable field is writable.  */
+  set (1, 0x0ffff000);
+  CHECK (exec (f3i (OP_ARITH, 17, WRY, 1, 0)) == 0);
+  CHECK ((sregs[0].asr17 & 0x0fffe000) == (0x0ffff000 & 0x0fffe000));
+
+  /* Nineteen is the power down register, which stops the processor.  */
+  sregs[0].pwd_mode = 0;
+  CHECK (exec (f3i (OP_ARITH, 19, WRY, 1, 0)) == 0);
+  CHECK (sregs[0].pwd_mode == 1);
+
+  cputype = saved;
+  sregs[0].pwd_mode = 0;
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC a write to psr checks the window")
+{
+  /* A window number the implementation does not have is unimplemented.  */
+  sregs[0].psr |= 0x18;
+  CHECK (exec (f3i (OP_ARITH, 0, WRPSR, 0, 0)) == TRAP_UNIMP);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC jmpl checks its address")
+{
+  /* The target must be word aligned, and the simulator stops rather than
+     jumping to a null pointer.  */
+  set (1, 0x3001);
+  CHECK (exec (f3i (OP_ARITH, 3, JMPL, 1, 0)) == TRAP_UNALI);
+
+  set (1, 0);
+  CHECK (exec (f3i (OP_ARITH, 3, JMPL, 1, 0)) == NULL_TRAP);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC flush can be made unimplemented")
+{
+  int saved = ift;
+
+  ift = 1;
+  CHECK (exec (f3i (OP_ARITH, 0, FLUSH, 0, 0)) == TRAP_UNIMP);
+
+  ift = saved;
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC a double access needs an even register")
+{
+  set (1, 0x2000);
+
+  /* The manual calls the low bit of the register number unused and makes
+     the trap for an odd one optional, so the core rounds down to the even
+     register of the pair.  */
+  set (2, 0x11223344);
+  set (3, 0x55667788);
+  CHECK (exec (f3i (OP_MEM, 3, STD, 1, 0)) == 0);
+  CHECK (sis_tests::flatmem_peek (0x2000) == 0x11223344);
+
+  set (2, 0);
+  set (3, 0);
+  CHECK (exec (f3i (OP_MEM, 3, LDD, 1, 0)) == 0);
+  CHECK (get (2) == 0x11223344);
+  CHECK (get (3) == 0x55667788);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC a LEON reads its cache control through an ASI")
+{
+  int saved = cputype;
+  cputype = CPU_LEON3;
+
+  /* Address space two is the cache control register on a LEON.  */
+  sregs[0].cache_ctrl = 0x0f;
+  set (1, 0);
+  CHECK (exec (f3r (OP_MEM, 3, LDA, 1, 0) | (2 << 5)) == 0);
+  CHECK (get (3) == 0x0f);
+
+  /* Any other address in that space reports the cache configuration.  */
+  set (1, 8);
+  CHECK (exec (f3r (OP_MEM, 3, LDA, 1, 0) | (2 << 5)) == 0);
+  CHECK (get (3) == 1u << 27);
+
+  cputype = saved;
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC every alternate space form is privileged")
+{
+  /* chk_asi refuses in user mode and refuses an immediate, for each of the
+     instructions which goes through it.  */
+  const uint32 alternates[10] = { LDA,	 LDDA, LDUBA, LDSBA, LDUHA,
+				  LDSHA, STA,  STDA,  STBA,  STHA };
+
+  set (1, 0x2000);
+
+  for (int i = 0; i < 10; i++)
+    {
+      sregs[0].psr &= ~PSR_S;
+      INFO ("opcode ", alternates[i]);
+      CHECK (exec (f3r (OP_MEM, 2, alternates[i], 1, 0) | (0xb << 5)) ==
+	     TRAP_PRIVI);
+
+      sregs[0].psr |= PSR_S;
+      CHECK (exec (f3i (OP_MEM, 2, alternates[i], 1, 0)) == TRAP_UNIMP);
+    }
+
+  /* The two atomic forms as well.  */
+  sregs[0].psr &= ~PSR_S;
+  CHECK (exec (f3r (OP_MEM, 2, SWAPA, 1, 0) | (0xb << 5)) == TRAP_PRIVI);
+  CHECK (exec (f3r (OP_MEM, 2, LDSTUBA, 1, 0) | (0xb << 5)) == TRAP_PRIVI);
+
+  /* The compare and swap is the exception: the two data address spaces are
+     allowed in user mode, and any other is not.  */
+  CHECK (exec (f3r (OP_MEM, 2, CASA, 1, 0) | (0xb << 5)) == 0);
+  CHECK (exec (f3r (OP_MEM, 2, CASA, 1, 0) | (0xa << 5)) == 0);
+  CHECK (exec (f3r (OP_MEM, 2, CASA, 1, 0) | (0x1 << 5)) == TRAP_PRIVI);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC an alternate space access must be aligned")
+{
+  set (1, 0x2001);
+
+  CHECK (exec (f3r (OP_MEM, 2, LDA, 1, 0) | (0xb << 5)) == TRAP_UNALI);
+  CHECK (exec (f3r (OP_MEM, 2, STA, 1, 0) | (0xb << 5)) == TRAP_UNALI);
+  CHECK (exec (f3r (OP_MEM, 2, LDUHA, 1, 0) | (0xb << 5)) == TRAP_UNALI);
+  CHECK (exec (f3r (OP_MEM, 2, STHA, 1, 0) | (0xb << 5)) == TRAP_UNALI);
+
+  set (1, 0x2004);
+  CHECK (exec (f3r (OP_MEM, 2, LDDA, 1, 0) | (0xb << 5)) == TRAP_UNALI);
+  CHECK (exec (f3r (OP_MEM, 2, STDA, 1, 0) | (0xb << 5)) == TRAP_UNALI);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC a read watchpoint stops a load")
+{
+  uint32 saved = ebase.wprnum;
+
+  ebase.wprnum = 1;
+  ebase.wprs[0] = 0x2000;
+  ebase.wprm[0] = 3;
+  ebase.wphit = 0;
+
+  set (1, 0x2000);
+  exec (f3i (OP_MEM, 3, LD, 1, 0));
+  CHECK (ebase.wphit != 0);
+
+  ebase.wprnum = saved;
+  ebase.wphit = 0;
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC tagged add overflow is checked on the sum too")
+{
+  /* The trap form takes the trap for an arithmetic overflow as well as for a
+     set tag.  */
+  set (1, 0x7ffffffc);
+  set (2, 0x7ffffffc);
+
+  CHECK (exec (f3r (OP_ARITH, 3, TADDCCTV, 1, 2)) == TRAP_TAG);
+  CHECK (exec (f3r (OP_ARITH, 3, TSUBCCTV, 1, 2)) == 0);
+}
