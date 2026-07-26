@@ -2352,6 +2352,24 @@ TEST_CASE_FIXTURE (mec_fixture, "MEC UART A receives buffered input")
   CHECK ((d3 & 0x100) == 0);
 }
 
+TEST_CASE_FIXTURE (mec_fixture, "MEC UART A read stays in bounds when drained")
+{
+  /* Fill the receive buffer exactly, drain it, then read once more.  The
+     read index is then the size of the buffer, so a read of the byte at the
+     index would be one past the end of it.  What comes back is the last byte
+     delivered, which is what the receive register holds.  */
+  std::string full (UARTBUF - 1, 'x');
+  full += 'w';
+  stdin_feed feed (full.c_str ());
+
+  for (int i = 0; i < UARTBUF; i++)
+    rd (R_UARTA);
+
+  uint32 d = rd (R_UARTA);
+  CHECK ((d & 0x100) == 0); /* no data */
+  CHECK ((d & 0xff) == 'w');
+}
+
 TEST_CASE_FIXTURE (mec_fixture, "MEC UART A receives a single byte")
 {
   /* A lone fed byte reads back with no further interrupt.  */
