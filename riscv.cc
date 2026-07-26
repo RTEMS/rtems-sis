@@ -921,23 +921,33 @@ riscv_dispatch_instruction (struct pstate *sregs)
 		case 4: /* DIV */
 		  sop1 = op1;
 		  sop2 = op2;
-		  result = sop1 / sop2;
+		  if (op2 == 0)
+		    result = -1;
+		  else if (op1 == 0x80000000 && op2 == 0xffffffff)
+		    result = (int32) 0x80000000;
+		  else
+		    result = sop1 / sop2;
 		  sregs->r[rd] = result;
 		  sregs->icnt = T_DIV;
 		  break;
 		case 5: /* DIVU */
-		  sregs->r[rd] = op1 / op2;
+		  sregs->r[rd] = op2 == 0 ? 0xffffffff : op1 / op2;
 		  sregs->icnt = T_DIV;
 		  break;
 		case 6: /* REM */
 		  sop1 = op1;
 		  sop2 = op2;
-		  sop1 = sop1 % sop2;
-		  sregs->r[rd] = sop1;
+		  if (op2 == 0)
+		    result = sop1;
+		  else if (op1 == 0x80000000 && op2 == 0xffffffff)
+		    result = 0;
+		  else
+		    result = sop1 % sop2;
+		  sregs->r[rd] = result;
 		  sregs->icnt = T_DIV;
 		  break;
 		case 7: /* REMU */
-		  sregs->r[rd] = op1 % op2;
+		  sregs->r[rd] = op2 == 0 ? op1 : op1 % op2;
 		  sregs->icnt = T_DIV;
 		  break;
 		}
