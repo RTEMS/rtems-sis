@@ -66,17 +66,17 @@ against real descriptors the way `tests/sisio.cc` does.
 ## Where the tree stands
 
 Measured with `./waf configure --enable-coverage && ./waf`, branch metric,
-763 of 5959 arcs (13%). The totals move as headers join the filter and as
-duplicated code is removed, so compare per file rather than against an older
-total.
+763 of 5929 arcs (13%). The totals move as headers join the filter and as
+duplicated and dead code is removed, so compare per file rather than against
+an older total.
 
 | Area | Arcs | Taken |
 |---|---|---|
 | `sparc.cc`, `riscv.cc` | 2274 | 17 |
-| `grlib.cc`, `grspw.cc`, `gr1553.cc`, `greth.cc`, `memscrub.cc`, `tap.cc` | 1001 | 0 |
+| `grlib.cc`, `grspw.cc`, `gr1553.cc`, `greth.cc`, `memscrub.cc`, `tap.cc` | 986 | 0 |
 | `sis.cc`, `remote.cc`, `interf.cc` | 546 | 0 |
 | `erc32.cc` | 227 | 211 |
-| `leon2.cc`, `leon3.cc`, `gr740.cc`, `rv32.cc` | 291 | 0 |
+| `leon2.cc`, `leon3.cc`, `gr740.cc`, `rv32.cc` | 276 | 0 |
 | graduated: `erc32_cfg.h`, `erc32_error.h`, `erc32_mec.h`, `erc32_timer.h`, `exec.cc`, `help.cc`, `sisio.cc`, `uartport.cc` | | 100% |
 
 `func.cc` and `elf.cc` are not in the table above only because they were not
@@ -134,7 +134,17 @@ all of the concepts; each test file holds a small `TestEnv` per subsystem.
 4. ~~**The shared host UART port module.**~~ Done, as `uartport.cc`. It
    removed 182 arcs from the tree for 44 covered ones, and took `erc32.cc`
    from 325 arcs to 227.
-5. **`erc32_uart.h`** the MEC UART register model, on top of step 4.
+5. **`erc32_uart.h`** the MEC UART register model, on top of step 4. The
+   groundwork is done: the never-built second UART model is gone, so there is
+   one implementation to move, and `erc32.cc` is at 93% with 16 uncovered arcs,
+   most of them in `read_uart` and `write_uart`. The model is symmetric between
+   channel A and channel B, so it should collapse into one template driven by a
+   spec the way `erc32::Timer` does, with the interrupt level and the shift of
+   the channel's field in the status register as the data. Note the deviation
+   to settle first: the manual makes bits 31-8 of a RX/TX register reserved and
+   read zero, and SIS returns 0x700 or 0x600 there, mirroring the data ready,
+   send empty and hold empty bits of the status register into the data
+   register. Find out whether RTEMS depends on it before changing it.
 6. **`erc32_mem.h`** memory access dispatch. The only step with a performance
    obligation. Keep the implementation in an out-of-line global function
    reached by a static template call, never inlined and never indirect.
@@ -366,6 +376,16 @@ Hard-won here, so the next person does not rediscover them.
   stdin that never closes makes a run hang in the emulated UART and looks like a
   hang in target code. Before believing a regression or an improvement from a
   behavioral change, run it against an unmodified tree.
+
+- **Code that is never compiled rots, and nothing tells you.** `FAST_UART`
+  was defined unconditionally by the build and by the autotools build before
+  it, so a whole second UART model sat under `#ifndef FAST_UART` in three
+  board files, never compiled once in this repository's history. Its transmit
+  handler had an infinite loop, present since the initial commit. Removing it
+  took 360 lines and then made a further 37 lines of state dead. Preprocess a
+  file before and after such a removal and diff the output: identical output
+  is proof the change is behavior-neutral, which no test can give you for code
+  that was never built.
 
 - **The build has no warning flags, so dead code accumulates unseen.** The
   wscript passes only `-O<level> -g -std=c++20`. Building the tree with
