@@ -163,6 +163,9 @@ struct pstate
   uint32 lrq;
   uint32 lrqa;
 
+  /* State of the pseudo random trap entry jitter, see trap_jitter(). */
+  uint32 jitter;
+
   uint32 bphit;
   uint32 l1itags[L1ITAGS];
   uint64 l1imiss;

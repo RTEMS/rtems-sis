@@ -4,9 +4,8 @@
 /* Tests for riscv.cc trap handling.
 
    riscv_execute_trap charges a trap the same way sparc.cc does: TRAP_C cycles
-   plus three bits of jitter taken from ninst and simtime.  The jitter must be
-   masked to 0..7 before the base cost is added, so a trap always costs at
-   least TRAP_C.  */
+   plus three bits of pseudo random jitter.  A trap always costs at least
+   TRAP_C, and the jitter must not follow the simulated time.  */
 
 #include "doctest.h"
 
@@ -40,16 +39,39 @@ trap_icnt (uint64 ninst, uint64 simtime)
 
 } // namespace
 
-TEST_CASE ("riscv trap cost keeps the jitter above the base cost")
+TEST_CASE ("riscv trap cost never drops below the base cost")
 {
-  /* jitter = (ninst ^ simtime) & 7.  Before the parentheses were corrected
-     the mask applied to TRAP_C + jitter, so jitter 5, 6 and 7 wrapped to 0, 1
-     and 2 and a trap could cost less than TRAP_C, or nothing at all.  */
-  CHECK (trap_icnt (5, 0) == TRAP_C + 5);
-  CHECK (trap_icnt (6, 0) == TRAP_C + 6);
-  CHECK (trap_icnt (7, 0) == TRAP_C + 7);
+  /* Before the parentheses were corrected the mask applied to TRAP_C + jitter
+     rather than to the jitter alone, so a trap could cost less than TRAP_C,
+     or nothing at all.  Walk a whole jitter sequence over one processor.  */
+  struct pstate s = {};
+  bool          seen_above_base = false;
 
-  /* The values that never wrapped are unchanged by the fix.  */
-  CHECK (trap_icnt (0, 0) == TRAP_C + 0);
-  CHECK (trap_icnt (4, 0) == TRAP_C + 4);
+  for (int i = 0; i < 64; ++i)
+    {
+      s.icnt = 0;
+      s.trap = TRAP_EBREAK;
+      riscv.execute_trap (&s);
+
+      CHECK (s.icnt >= TRAP_C);
+      CHECK (s.icnt <= TRAP_C + 7);
+
+      if (s.icnt > TRAP_C)
+        seen_above_base = true;
+    }
+
+  /* The jitter is meant to vary, not to sit at zero.  */
+  CHECK (seen_above_base);
+}
+
+TEST_CASE ("riscv trap jitter does not follow the simulated time")
+{
+  /* Test code which hunts for a race by varying a busy wait moves both ninst
+     and simtime.  A jitter derived from them would track the search variable
+     instead of being independent of it, and the race window would never be
+     found.  Two processors at the same point of the jitter sequence must be
+     charged the same, whatever their time and instruction count.  */
+  CHECK (trap_icnt (0, 0) == trap_icnt (12345, 67890));
+  CHECK (trap_icnt (5, 0) == trap_icnt (0, 5));
+  CHECK (trap_icnt (7, 7) == trap_icnt (1, 2));
 }

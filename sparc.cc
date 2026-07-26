@@ -1917,6 +1917,23 @@ fpexec (uint32 op3, uint32 rd, uint32 rs1, uint32 rs2, struct pstate *sregs)
   return 0;
 }
 
+/*
+ * Pseudo random jitter of 0 to 7 clocks for the trap entry cost.
+ *
+ * The sequence is deterministic, so a run stays reproducible, but it must not
+ * be derived from the simulated time or the instruction count.  Test code
+ * which hunts for a race by varying a busy wait moves both of those, so a
+ * jitter derived from them would track the search variable instead of being
+ * independent of it, and the race window would never be found.
+ */
+static uint32
+trap_jitter (struct pstate *sregs)
+{
+  sregs->jitter = sregs->jitter * 1103515245 + 12345;
+
+  return (sregs->jitter >> 16) & 0x7;
+}
+
 static int
 sparc_execute_trap (struct pstate *sregs)
 {
@@ -1970,7 +1987,7 @@ sparc_execute_trap (struct pstate *sregs)
 	}
 
       /* Increase simulator time and add some jitter */
-      sregs->icnt = TRAP_C + ((sregs->ninst ^ sregs->simtime) & 0x7);
+      sregs->icnt = TRAP_C + trap_jitter (sregs);
     }
 
   return 0;
