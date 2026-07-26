@@ -23,6 +23,7 @@
 #include "sis.h"
 
 #include <concepts>
+#include <cstring>
 
 namespace erc32
 {
@@ -131,7 +132,10 @@ public:
       {
 	if (wnum_ >= kUartBufSize)
 	  Drain ();
-	wbuf_[wnum_++] = (char) data;
+	/* A host which took nothing leaves the buffer full, and the
+	   character is lost, as it is on a real overrun.  */
+	if (wnum_ < kUartBufSize)
+	  wbuf_[wnum_++] = (char) data;
       }
     env_.Irq (spec_.level);
   }
@@ -200,11 +204,25 @@ private:
     return rind_ > 0 ? (uint32) rq_[rind_ - 1] : 0;
   }
 
+  /* Hand the buffer to the host, from where the last write stopped.  A host
+     which takes nothing more keeps what is left for the next attempt, rather
+     than being asked again forever.  */
   void
   Drain ()
   {
-    while (wnum_ > 0)
-      wnum_ -= env_.PortWrite (wbuf_, wnum_);
+    unsigned sent = 0;
+
+    while (sent < wnum_)
+      {
+	int n = env_.PortWrite (wbuf_ + sent, (int) (wnum_ - sent));
+	if (n <= 0)
+	  break;
+	sent += (unsigned) n;
+      }
+
+    wnum_ -= sent;
+    if (wnum_ > 0)
+      memmove (wbuf_, wbuf_ + sent, wnum_);
   }
 
   Env &env_;
