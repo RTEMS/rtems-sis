@@ -2605,3 +2605,309 @@ TEST_CASE_FIXTURE (sparc_fixture,
   CHECK (exec (f3r (OP_MEM, 2, STDA, 1, 0) | (0xb << 5)) == TRAP_DEXC);
   CHECK (exec (f3r (OP_MEM, 2, LDDA, 1, 0) | (0xb << 5)) == TRAP_DEXC);
 }
+
+/* The condition field of a trap and of a branch, from the table of appendix
+   C of the architecture manual.  Written out here rather than shared with the
+   core, so a case checks the core against the manual and not against
+   itself.  */
+static bool
+cond_taken (uint32 cond, uint32 icc)
+{
+  bool n = (icc >> 3) & 1;
+  bool z = (icc >> 2) & 1;
+  bool v = (icc >> 1) & 1;
+  bool c = icc & 1;
+
+  switch (cond)
+    {
+    case BICC_BN:
+      return false;
+    case BICC_BE:
+      return z;
+    case BICC_BLE:
+      return z || (n != v);
+    case BICC_BL:
+      return n != v;
+    case BICC_BLEU:
+      return c || z;
+    case BICC_BCS:
+      return c;
+    case BICC_NEG:
+      return n;
+    case BICC_BVS:
+      return v;
+    case BICC_BA:
+      return true;
+    case BICC_BNE:
+      return !z;
+    case BICC_BG:
+      return !(z || (n != v));
+    case BICC_BGE:
+      return n == v;
+    case BICC_BGU:
+      return !(c || z);
+    case BICC_BCC:
+      return !c;
+    case BICC_POS:
+      return !n;
+    default:
+      return !v;
+    }
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC ticc traps on every condition")
+{
+  /* Ticc raises trap 128 + the software trap number when its condition holds
+     and does nothing when it does not.  The condition codes below cover both
+     answers for each of the sixteen conditions, including the two which
+     depend on N and V differing rather than on either alone.  */
+  const uint32 codes[] = { 0, N | Z | V | C, N, V, Z, C, N | V, Z | C };
+  const uint32 number = 5;
+
+  for (uint32 code : codes)
+    {
+      for (uint32 cond = 0; cond < 16; cond++)
+	{
+	  sregs[0].psr = (sregs[0].psr & ~PSR_CC) | (code << 20);
+
+	  int trap = exec (f3i (OP_ARITH, cond, TICC, 0, number));
+	  int want = cond_taken (cond, code) ? (int) (0x80 | number) : 0;
+
+	  INFO ("condition " << cond << " codes " << code);
+	  CHECK (trap == want);
+	}
+    }
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC the trap number wraps to seven bits")
+{
+  /* The trap number is the low seven bits of rs1 plus the operand, so a
+     larger sum wraps rather than reaching into the trap type above it.  */
+  set (1, 0x180);
+  CHECK (exec (f3i (OP_ARITH, BICC_BA, TICC, 1, 3)) == (int) (0x80 | 3));
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC ta 1 is a breakpoint under gdb")
+{
+  /* The debugger plants ta 1 as its breakpoint, so with the stub running
+     that one encoding reports a breakpoint hit instead of a software trap.
+     Every other trap number, and the same encoding without the stub, stays a
+     software trap.  */
+  int saved = sis_gdb_break;
+
+  sis_gdb_break = 1;
+  CHECK (exec (0x91d02001) == WPT_TRAP);
+  CHECK (sregs[0].bphit == 1);
+
+  sregs[0].bphit = 0;
+  CHECK (exec (f3i (OP_ARITH, BICC_BA, TICC, 0, 2)) == (int) (0x80 | 2));
+  CHECK (sregs[0].bphit == 0);
+
+  sis_gdb_break = 0;
+  CHECK (exec (0x91d02001) == (int) (0x80 | 1));
+  CHECK (sregs[0].bphit == 0);
+
+  sis_gdb_break = saved;
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC the logical operations combine bits")
+{
+  /* The logical group of the manual, each with the operand negated or not
+     and with or without the condition codes.  */
+  const uint32 a = 0xf0f0ff00;
+  const uint32 b = 0x0ff00ff0;
+
+  set (1, a);
+  set (2, b);
+
+  CHECK (exec (f3r (OP_ARITH, 3, IAND, 1, 2)) == 0);
+  CHECK (get (3) == (a & b));
+  CHECK (exec (f3r (OP_ARITH, 3, IANDN, 1, 2)) == 0);
+  CHECK (get (3) == (a & ~b));
+  CHECK (exec (f3r (OP_ARITH, 3, IOR, 1, 2)) == 0);
+  CHECK (get (3) == (a | b));
+  CHECK (exec (f3r (OP_ARITH, 3, IORN, 1, 2)) == 0);
+  CHECK (get (3) == (a | ~b));
+  CHECK (exec (f3r (OP_ARITH, 3, IXOR, 1, 2)) == 0);
+  CHECK (get (3) == (a ^ b));
+  CHECK (exec (f3r (OP_ARITH, 3, IXNOR, 1, 2)) == 0);
+  CHECK (get (3) == (a ^ ~b));
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC the logical operations report their result")
+{
+  /* The condition code forms set N and Z from the result and clear V and C,
+     which the manual gives for the whole group.  Each operation gets its own
+     operands, one pair whose result has the top bit set and one whose result
+     is zero.  */
+  struct
+  {
+    uint32 op3;
+    uint32 a, b, negative;
+    uint32 zero_a, zero_b;
+  } cases[] = {
+    { IANDCC, 0xffffffff, 0xffffffff, 0xffffffff, 0, 0 },
+    { IANDNCC, 0xffffffff, 0, 0xffffffff, 0, 0 },
+    { IORCC, 0x80000000, 0, 0x80000000, 0, 0 },
+    { IORNCC, 0, 0, 0xffffffff, 0, 0xffffffff },
+    { IXORCC, 0xffffffff, 0, 0xffffffff, 0, 0 },
+    { IXNORCC, 0xffffffff, 0xffffffff, 0xffffffff, 0, 0xffffffff },
+  };
+
+  for (auto c : cases)
+    {
+      INFO ("opcode " << c.op3);
+
+      set (1, c.a);
+      set (2, c.b);
+      sregs[0].psr |= (V | C) << 20;
+      CHECK (exec (f3r (OP_ARITH, 3, c.op3, 1, 2)) == 0);
+      CHECK (get (3) == c.negative);
+      CHECK (icc () == N);
+
+      set (1, c.zero_a);
+      set (2, c.zero_b);
+      CHECK (exec (f3r (OP_ARITH, 3, c.op3, 1, 2)) == 0);
+      CHECK (get (3) == 0);
+      CHECK (icc () == Z);
+    }
+}
+
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC add and subtract carry the carry in")
+{
+  /* The extended forms add the carry of the condition codes, which is how a
+     program builds arithmetic wider than a word.  */
+  set (1, 10);
+  set (2, 3);
+
+  sregs[0].psr |= C << 20;
+  CHECK (exec (f3r (OP_ARITH, 3, ADDX, 1, 2)) == 0);
+  CHECK (get (3) == 14);
+
+  sregs[0].psr &= ~PSR_CC;
+  CHECK (exec (f3r (OP_ARITH, 3, ADDX, 1, 2)) == 0);
+  CHECK (get (3) == 13);
+
+  sregs[0].psr |= C << 20;
+  CHECK (exec (f3r (OP_ARITH, 3, SUBX, 1, 2)) == 0);
+  CHECK (get (3) == 6);
+
+  sregs[0].psr &= ~PSR_CC;
+  CHECK (exec (f3r (OP_ARITH, 3, SUBX, 1, 2)) == 0);
+  CHECK (get (3) == 7);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC the extended forms report their result")
+{
+  /* The condition codes an extended operation reports are those of the whole
+     sum, carry in included: adding one to the largest word with the carry
+     set overflows twice and lands back on one.  */
+  set (1, 0xffffffff);
+  set (2, 1);
+  sregs[0].psr |= C << 20;
+
+  CHECK (exec (f3r (OP_ARITH, 3, ADDXCC, 1, 2)) == 0);
+  CHECK (get (3) == 1);
+  CHECK ((icc () & C) != 0);
+  CHECK ((icc () & (N | Z | V)) == 0);
+
+  /* And a subtraction which borrows: zero less one less the borrow.  */
+  set (1, 0);
+  set (2, 1);
+  sregs[0].psr |= C << 20;
+
+  CHECK (exec (f3r (OP_ARITH, 3, SUBXCC, 1, 2)) == 0);
+  CHECK (get (3) == 0xfffffffe);
+  CHECK ((icc () & N) != 0);
+  CHECK ((icc () & C) != 0);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC the multiplies report a negative result")
+{
+  /* The condition code forms of the multiply report N and Z from the low
+     word of the product, which the two below make negative.  */
+  set (1, 0xffffffff);
+  set (2, 1);
+
+  CHECK (exec (f3r (OP_ARITH, 3, UMULCC, 1, 2)) == 0);
+  CHECK (get (3) == 0xffffffff);
+  CHECK ((icc () & N) != 0);
+  CHECK ((icc () & Z) == 0);
+
+  set (1, 0xffffffff);
+  set (2, 1);
+  CHECK (exec (f3r (OP_ARITH, 3, SMULCC, 1, 2)) == 0);
+  CHECK (get (3) == 0xffffffff);
+  CHECK ((icc () & N) != 0);
+}
+
+TEST_CASE_FIXTURE (sparc_fixture,
+		   "SPARC the disassembler names the synthetic forms")
+{
+  stdout_capture cap;
+
+  /* The assembly syntax has a shorter form for many instructions once one of
+     their registers is fixed: a discarded result is clr or tst or cmp, a zero
+     source is mov, and a jump through the return address is ret.  Sweep the
+     same opcode space again over the register numbers which select them,
+     together with the ones the register names depend on: r0, the stack and
+     frame pointer, and one register of each of the four groups.  */
+  const int regs[] = { 0, 1, 8, 14, 20, 15, 28, 30, 31 };
+  const int32 imms[] = { 0, 8, 5, -5, 0x100, -0x100 };
+  uint32 addr = 0x200;
+
+  for (int r : regs)
+    {
+      for (uint32 op3 = 0; op3 < 0x40; op3++)
+	{
+	  for (uint32 op : { OP_ARITH, OP_MEM })
+	    {
+	      sis_tests::flatmem_poke (addr, f3r (op, r, op3, r, 0));
+	      arch->disas (addr);
+	      sis_tests::flatmem_poke (addr, f3r (op, r, op3, 0, r));
+	      arch->disas (addr);
+	      sis_tests::flatmem_poke (addr, f3r (op, 0, op3, r, r));
+	      arch->disas (addr);
+	    }
+	}
+    }
+
+  /* The immediate forms, whose printed shape depends on the sign of the
+     immediate, on whether it is printed in hex, and on whether the source
+     register is r0 and so left out.  An immediate of eight off the return
+     address register is the return instruction.  */
+  for (int32 imm : imms)
+    {
+      for (int r : regs)
+	{
+	  for (uint32 op3 = 0; op3 < 0x40; op3++)
+	    {
+	      for (uint32 op : { OP_ARITH, OP_MEM })
+		{
+		  sis_tests::flatmem_poke (addr, f3i (op, r, op3, r, imm));
+		  arch->disas (addr);
+		  sis_tests::flatmem_poke (addr, f3i (op, r, op3, 0, imm));
+		  arch->disas (addr);
+		  sis_tests::flatmem_poke (addr, f3i (op, 0, op3, r, imm));
+		  arch->disas (addr);
+		}
+	    }
+	}
+    }
+
+  /* A sethi of zero into r0 is the canonical no-operation, and a floating
+     point branch takes the annul bit like an integer one.  */
+  sis_tests::flatmem_poke (addr, sethi (0, 0));
+  arch->disas (addr);
+  for (uint32 cond = 0; cond < 16; cond++)
+    {
+      sis_tests::flatmem_poke (addr,
+			       (1u << 29) | (cond << 25) | (FPBCC << 22) | 4);
+      arch->disas (addr);
+    }
+
+  CHECK (!cap.str ().empty ());
+}
