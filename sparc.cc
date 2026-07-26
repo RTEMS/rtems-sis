@@ -1383,6 +1383,12 @@ sparc_dispatch_instruction (struct pstate *sregs)
 	      sregs->trap = TRAP_UNIMP;
 	      break;
 	    }
+	  /* The store of the deferred trap queue is privileged.  */
+	  if (!(sregs->psr & PSR_S))
+	    {
+	      sregs->trap = TRAP_PRIVI;
+	      break;
+	    }
 	  if (!((sregs->psr & PSR_EF) && FP_PRES))
 	    {
 	      sregs->trap = TRAP_FPDIS;
