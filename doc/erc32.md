@@ -196,8 +196,9 @@ The memory configuration register is used to define available memory in the
 system. The fields RSIZ and PSIZ are used to set RAM and ROM size, the
 remaining fields are not used. Both are encoded as in the specification: RSIZ
 selects 256 Kbyte at zero and doubles from there, PSIZ selects 128 Kbyte, so
-the two largest RAM encodings and the largest ROM encoding ask for more memory
-than the emulated board has. NOTE: after reset, the MEC is set to decode 128
+the largest RAM encoding asks for 32 Mbyte, twice the RAM the emulated board
+has, and an access above 16 Mbyte wraps to the bottom of it. Every other
+encoding of either field fits. NOTE: after reset, the MEC is set to decode 128
 Kbyte of ROM and 256 Kbyte of RAM. The memory configuration register has to be
 updated to reflect the available memory. The simulator's own boot loader
 programs the full 16 Mbyte of each.
@@ -211,8 +212,13 @@ is write-only, so reading it is a memory exception. The two PROM fields encode
 no waitstates both at zero and at one, so their count is one below the field
 from two upwards.
 
-The memory protection scheme is implemented - it is enabled through bit 3 in
-the MEC control register.
+The memory protection scheme is implemented. Each of the two segments covers
+the words from 0x02000000 + SEGBASE * 4 up to but not including 0x02000000 +
+SEGEND * 4, and its two mode bits decide whether the protection applies to
+user accesses, to supervisor accesses, or to both. A segment with neither bit
+set is disabled. Normally a write outside every enabled segment faults; bit 3
+of the MEC control register inverts that, so a write inside a segment is the
+one that faults. A double word write is checked against both of its words.
 
 The following registers are implemented:
 
