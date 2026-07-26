@@ -238,8 +238,6 @@ public:
   {
     mcr_ = data;
     DecodeMcr ();
-    if (mcr_ & kMcrHardwareError)
-      env_.ReportError ();
   }
 
   void
@@ -249,8 +247,6 @@ public:
       env_.ReportError ();
     memcfg_ = data;
     DecodeMemcfg ();
-    if (memcfg_ & kMemcfgReserved)
-      env_.ReportError ();
   }
 
   void
