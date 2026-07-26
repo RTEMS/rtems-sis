@@ -66,7 +66,7 @@ against real descriptors the way `tests/sisio.cc` does.
 ## Where the tree stands
 
 Measured with `./waf configure --enable-coverage && ./waf`, branch metric,
-763 of 5929 arcs (13%). The totals move as headers join the filter and as
+771 of 5915 arcs (13%). The totals move as headers join the filter and as
 duplicated and dead code is removed, so compare per file rather than against
 an older total.
 
@@ -75,9 +75,9 @@ an older total.
 | `sparc.cc`, `riscv.cc` | 2274 | 17 |
 | `grlib.cc`, `grspw.cc`, `gr1553.cc`, `greth.cc`, `memscrub.cc`, `tap.cc` | 986 | 0 |
 | `sis.cc`, `remote.cc`, `interf.cc` | 546 | 0 |
-| `erc32.cc` | 227 | 211 |
+| `erc32.cc` | 175 | 167 |
 | `leon2.cc`, `leon3.cc`, `gr740.cc`, `rv32.cc` | 276 | 0 |
-| graduated: `erc32_cfg.h`, `erc32_error.h`, `erc32_mec.h`, `erc32_timer.h`, `exec.cc`, `help.cc`, `sisio.cc`, `uartport.cc` | | 100% |
+| graduated: `erc32_cfg.h`, `erc32_error.h`, `erc32_mec.h`, `erc32_timer.h`, `erc32_uart.h`, `exec.cc`, `help.cc`, `sisio.cc`, `uartport.cc` | | 100% |
 
 `func.cc` and `elf.cc` are not in the table above only because they were not
 captured in that run. Measure them before planning their step.
@@ -99,6 +99,9 @@ Done, graduated in `tests/covered.txt`:
   globals their decode used to write. The memory access path reads what they
   decode to through accessors, and asks `WriteProtected` whether a RAM write
   is allowed.
+- **`erc32_uart.h`** the two MEC UART channels, one template with a
+  `UartSpec` each, holding the receive and transmit buffers and the status
+  bits. Its environment is parameterised on the host port.
 - **`uartport.cc`** the host side of an emulated UART, shared by `erc32.cc`,
   `leon2.cc` and `grlib.cc` rather than written once each. Not a template: it
   is plain code taking a `struct uart_port` and tested against real
@@ -134,20 +137,7 @@ all of the concepts; each test file holds a small `TestEnv` per subsystem.
 4. ~~**The shared host UART port module.**~~ Done, as `uartport.cc`. It
    removed 182 arcs from the tree for 44 covered ones, and took `erc32.cc`
    from 325 arcs to 227.
-5. **`erc32_uart.h`** the MEC UART register model, on top of step 4. The
-   groundwork is done: the never-built second UART model is gone, so there is
-   one implementation to move, and `erc32.cc` is at 93% with 16 uncovered arcs,
-   most of them in `read_uart` and `write_uart`. The model is symmetric between
-   channel A and channel B, so it should collapse into one template driven by a
-   spec the way `erc32::Timer` does, with the interrupt level and the shift of
-   the channel's field in the status register as the data. Note the deviation
-   to settle first: the manual makes bits 31-8 of a RX/TX register reserved and
-   read zero, and SIS returns 0x700 or 0x600 there, mirroring the data ready,
-   send empty and hold empty bits of the status register into the data
-   register. Settled: keep it, and it now has a line in `doc/erc32.md`. The
-   end-to-end suite gives no signal either way, because the ERC32 binaries
-   never read a UART data register at all, so a green `test-run` would not
-   have meant the change was safe.
+5. ~~**`erc32_uart.h`** the MEC UART register model.~~ Done.
 6. **`erc32_mem.h`** memory access dispatch. The only step with a performance
    obligation. Keep the implementation in an out-of-line global function
    reached by a static template call, never inlined and never indirect.
