@@ -700,44 +700,22 @@ port_init ()
 static uint32
 read_uart (uint32 addr)
 {
-  switch (addr & 0xff)
-    {
-    case 0xE0: /* UART A RX and TX register */
-      return uarta.ReadData ();
-
-    case 0xE4: /* UART B RX and TX register */
-      return uartb.ReadData ();
-
-    case 0xE8: /* UART status register */
-      return uarta.StatusBits () | uartb.StatusBits ();
-
-    default:
-      if (sis_verbose)
-	printf ("Read from unimplemented MEC register (%x)\n", addr);
-    }
-  return 0;
+  /* The caller dispatches only the three UART registers here.  */
+  if ((addr & 0xff) == MEC_UARTA)
+    return uarta.ReadData ();
+  if ((addr & 0xff) == MEC_UARTB)
+    return uartb.ReadData ();
+  return uarta.StatusBits () | uartb.StatusBits ();
 }
 
 static void
 write_uart (uint32 addr, uint32 data)
 {
-  switch (addr & 0xff)
-    {
-    case 0xE0: /* UART A RX and TX register */
-      uarta.WriteData (data);
-      break;
-
-    case 0xE4: /* UART B RX and TX register */
-      uartb.WriteData (data);
-      break;
-
-    case 0xE8: /* UART status register */
-      break;
-
-    default:
-      if (sis_verbose)
-	printf ("Write to unimplemented MEC register (%x)\n", addr);
-    }
+  if ((addr & 0xff) == MEC_UARTA)
+    uarta.WriteData (data);
+  else if ((addr & 0xff) == MEC_UARTB)
+    uartb.WriteData (data);
+  /* A write to the status register has no effect.  */
 }
 
 static void
