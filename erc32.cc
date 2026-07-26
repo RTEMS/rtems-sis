@@ -42,6 +42,7 @@
 #include "sisio.h"
 
 #include "erc32_mec.h"
+#include "erc32_timer.h"
 
 /* MEC registers */
 #define MEC_START 0x01f80000
@@ -107,16 +108,6 @@
 /* For good performance, keep above 1000			 */
 #define UART_FLUSH_TIME 3000
 
-/* MEC timer control register bits */
-#define TCR_GACR  1
-#define TCR_GACL  2
-#define TCR_GASE  4
-#define TCR_GASL  8
-#define TCR_TCRCR 0x100
-#define TCR_TCRCL 0x200
-#define TCR_TCRSE 0x400
-#define TCR_TCRSL 0x800
-
 /* New uart defines */
 #define UART_TX_TIME 1000
 #define UART_RX_TIME 1000
@@ -149,37 +140,6 @@ static uint32 mec_wcr;	  /* MEC waitstate register */
 static uint32 mec_iocr;	  /* MEC IO control register */
 static uint32 posted_irq;
 static uint32 mec_ersr; /* MEC error and status register */
-
-static uint32 rtc_counter;
-static uint32 rtc_reload;
-static uint32 rtc_scaler;
-static uint32 rtc_scaler_start;
-static uint32 rtc_enabled;
-static uint32 rtc_cr;
-static uint32 rtc_se;
-
-static uint32 gpt_counter;
-static uint32 gpt_reload;
-static uint32 gpt_scaler;
-static uint32 gpt_scaler_start;
-static uint32 gpt_enabled;
-static uint32 gpt_cr;
-static uint32 gpt_se;
-
-static uint32 wdog_scaler;
-static uint32 wdog_counter;
-static uint32 wdog_rst_delay;
-static uint32 wdog_rston;
-
-enum wdog_type
-{
-  init,
-  disabled,
-  enabled,
-  stopped
-};
-
-static enum wdog_type wdog_status;
 
 /* Memory support variables */
 
@@ -245,18 +205,8 @@ static void uart_rx (int32 arg);
 static void uart_intr (int32 arg);
 static void uart_irq_start (void);
 static void wdog_intr (int32 arg);
-static void wdog_start (void);
 static void rtc_intr (int32 arg);
-static void rtc_start (void);
-static uint32 rtc_counter_read (void);
-static void rtc_scaler_set (uint32 val);
-static void rtc_reload_set (uint32 val);
 static void gpt_intr (int32 arg);
-static void gpt_start (void);
-static uint32 gpt_counter_read (void);
-static void gpt_scaler_set (uint32 val);
-static void gpt_reload_set (uint32 val);
-static void timer_ctrl (uint32 val);
 static char *get_mem_ptr (uint32 addr, uint32 size);
 static void store_bytes (char *mem, uint32 waddr, uint32 *data, int sz,
 			 int32 *ws);
@@ -290,6 +240,62 @@ struct RealEnv
 static RealEnv real_env;
 static erc32::Mec<RealEnv> mec (real_env);
 
+/* The environment a timer runs against in the real board.  THUNK is the
+   event queue callback which ticks that timer, so the template itself never
+   names a C function.  */
+template <void (*Thunk) (int32)> struct TimerEnv
+{
+  bool
+  Verbose ()
+  {
+    return sis_verbose != 0;
+  }
+  uint64
+  Now ()
+  {
+    return now ();
+  }
+  void
+  Irq (int level)
+  {
+    mec_irq (level);
+  }
+  void
+  ScheduleTick (uint64 delta)
+  {
+    event (Thunk, 0, delta);
+  }
+  void
+  Log (const char *msg)
+  {
+    fputs (msg, stdout);
+  }
+};
+
+/* The watchdog additionally issues the MEC's warm reset.  */
+struct WatchdogEnv : public TimerEnv<wdog_intr>
+{
+  void
+  WatchdogReset ()
+  {
+    sys_reset ();
+    mec_ersr = 0xC000;
+  }
+};
+
+static TimerEnv<rtc_intr> rtc_env;
+static TimerEnv<gpt_intr> gpt_env;
+static WatchdogEnv wdog_env;
+
+/* The real time clock has an 8 bit scaler and its control bits at bit 8 of
+   the timer control register; the general purpose timer has a 16 bit scaler
+   and its control bits at bit 0.  */
+static erc32::Timer<TimerEnv<rtc_intr>> rtc (rtc_env, 0x0ff, erc32::kRtcLevel,
+					     8, "RTC");
+static erc32::Timer<TimerEnv<gpt_intr>> gpt (gpt_env, 0x0ffff,
+					     erc32::kGptLevel, 0, "GPT");
+static erc32::Watchdog<WatchdogEnv> wdog (wdog_env);
+
 /* One-time init */
 
 static void
@@ -306,7 +312,7 @@ reset ()
 {
   mec_reset ();
   uart_irq_start ();
-  wdog_start ();
+  wdog.Start ();
   sregs[0].intack = mec_intack;
 }
 
@@ -509,25 +515,9 @@ mec_reset ()
   uart_stat_reg = UARTA_SRE | UARTA_HRE | UARTB_SRE | UARTB_HRE;
   uarta_data = uartb_data = UART_THE | UART_TSE;
 
-  rtc_counter = 0xffffffff;
-  rtc_reload = 0xffffffff;
-  rtc_scaler = 0xff;
-  rtc_enabled = 0;
-  rtc_cr = 0;
-  rtc_se = 0;
-
-  gpt_counter = 0xffffffff;
-  gpt_reload = 0xffffffff;
-  gpt_scaler = 0xffff;
-  gpt_enabled = 0;
-  gpt_cr = 0;
-  gpt_se = 0;
-
-  wdog_scaler = 255;
-  wdog_rst_delay = 255;
-  wdog_counter = 0xffff;
-  wdog_rston = 0;
-  wdog_status = init;
+  rtc.Reset ();
+  gpt.Reset ();
+  wdog.Reset ();
 }
 
 static void
@@ -608,24 +598,18 @@ mec_read (uint32 addr, uint32 asi, uint32 *data)
       break;
 
     case MEC_RTC_COUNTER: /* 0x80 */
-      *data = rtc_counter_read ();
+      *data = rtc.counter ();
       break;
     case MEC_RTC_SCALER: /* 0x84 */
-      if (rtc_enabled)
-	*data = rtc_scaler - (now () - rtc_scaler_start);
-      else
-	*data = rtc_scaler;
+      *data = rtc.ScalerRead ();
       break;
 
     case MEC_GPT_COUNTER: /* 0x88 */
-      *data = gpt_counter_read ();
+      *data = gpt.counter ();
       break;
 
     case MEC_GPT_SCALER: /* 0x8c */
-      if (gpt_enabled)
-	*data = gpt_scaler - (now () - gpt_scaler_start);
-      else
-	*data = gpt_scaler;
+      *data = gpt.ScalerRead ();
       break;
 
     case MEC_SFSR: /* 0xA0 */
@@ -740,29 +724,30 @@ mec_write (uint32 addr, uint32 data)
       break;
 
     case MEC_GPT_RELOAD:
-      gpt_reload_set (data);
+      gpt.SetReload (data);
       break;
 
     case MEC_GPT_SCALER:
       if (data & 0xFFFF0000)
 	mecparerror ();
-      gpt_scaler_set (data);
+      gpt.SetScaler (data);
       break;
 
     case MEC_TIMER_CTRL:
       if (data & 0xFFFFF0F0)
 	mecparerror ();
-      timer_ctrl (data);
+      rtc.WriteControl (data);
+      gpt.WriteControl (data);
       break;
 
     case MEC_RTC_RELOAD:
-      rtc_reload_set (data);
+      rtc.SetReload (data);
       break;
 
     case MEC_RTC_SCALER:
       if (data & 0xFFFFFF00)
 	mecparerror ();
-      rtc_scaler_set (data);
+      rtc.SetScaler (data);
       break;
 
     case MEC_SFSR: /* 0xA0 */
@@ -813,22 +798,11 @@ mec_write (uint32 addr, uint32 data)
       break;
 
     case MEC_WDOG: /* 0x60 */
-      wdog_scaler = (data >> 16) & 0x0ff;
-      wdog_counter = data & 0x0ffff;
-      wdog_rst_delay = data >> 24;
-      wdog_rston = 0;
-      if (wdog_status == stopped)
-	wdog_start ();
-      wdog_status = enabled;
+      wdog.WriteProgram (data);
       break;
 
     case MEC_TRAPD: /* 0x64 */
-      if (wdog_status == init)
-	{
-	  wdog_status = disabled;
-	  if (sis_verbose)
-	    printf ("Watchdog disabled\n");
-	}
+      wdog.WriteTrapDoor ();
       break;
 
     case MEC_PWDR:
@@ -1353,188 +1327,28 @@ uart_irq_start ()
 #endif
 }
 
-/* Watch-dog */
+/* Watch-dog and MEC timers.  The logic is in erc32_timer.h; these are the
+   event queue callbacks which tick each one.  */
 
 static void
 wdog_intr (int32 arg)
 {
-  if (wdog_status == disabled)
-    {
-      wdog_status = stopped;
-    }
-  else
-    {
-
-      if (wdog_counter)
-	{
-	  wdog_counter--;
-	  event (wdog_intr, 0, wdog_scaler + 1);
-	}
-      else
-	{
-	  if (wdog_rston)
-	    {
-	      printf ("Watchdog reset!\n");
-	      sys_reset ();
-	      mec_ersr = 0xC000;
-	    }
-	  else
-	    {
-	      mec_irq (15);
-	      wdog_rston = 1;
-	      wdog_counter = wdog_rst_delay;
-	      event (wdog_intr, 0, wdog_scaler + 1);
-	    }
-	}
-    }
+  (void) arg;
+  wdog.Tick ();
 }
-
-static void
-wdog_start ()
-{
-  event (wdog_intr, 0, wdog_scaler + 1);
-  if (sis_verbose)
-    printf ("Watchdog started, scaler = %d, counter = %d\n", wdog_scaler,
-	    wdog_counter);
-}
-
-/* MEC timers */
 
 static void
 rtc_intr (int32 arg)
 {
-  if (rtc_counter == 0)
-    {
-
-      mec_irq (13);
-      if (rtc_cr)
-	rtc_counter = rtc_reload;
-      else
-	rtc_se = 0;
-    }
-  else
-    rtc_counter -= 1;
-  if (rtc_se)
-    {
-      event (rtc_intr, 0, rtc_scaler + 1);
-      rtc_scaler_start = now ();
-      rtc_enabled = 1;
-    }
-  else
-    {
-      if (sis_verbose)
-	printf ("RTC stopped\n\r");
-      rtc_enabled = 0;
-    }
-}
-
-static void
-rtc_start ()
-{
-  if (sis_verbose)
-    printf ("RTC started (period %d)\n\r", rtc_scaler + 1);
-  event (rtc_intr, 0, rtc_scaler + 1);
-  rtc_scaler_start = now ();
-  rtc_enabled = 1;
-}
-
-static uint32
-rtc_counter_read ()
-{
-  return rtc_counter;
-}
-
-static void
-rtc_scaler_set (uint32 val)
-{
-  rtc_scaler = val & 0x0ff; /* eight-bit scaler only */
-}
-
-static void
-rtc_reload_set (uint32 val)
-{
-  rtc_reload = val;
+  (void) arg;
+  rtc.Tick ();
 }
 
 static void
 gpt_intr (int32 arg)
 {
-  if (gpt_counter == 0)
-    {
-      mec_irq (12);
-      if (gpt_cr)
-	gpt_counter = gpt_reload;
-      else
-	gpt_se = 0;
-    }
-  else
-    gpt_counter -= 1;
-  if (gpt_se)
-    {
-      event (gpt_intr, 0, gpt_scaler + 1);
-      gpt_scaler_start = now ();
-      gpt_enabled = 1;
-    }
-  else
-    {
-      if (sis_verbose)
-	printf ("GPT stopped\n\r");
-      gpt_enabled = 0;
-    }
-}
-
-static void
-gpt_start ()
-{
-  if (sis_verbose)
-    printf ("GPT started (period %d)\n\r", gpt_scaler + 1);
-  event (gpt_intr, 0, gpt_scaler + 1);
-  gpt_scaler_start = now ();
-  gpt_enabled = 1;
-}
-
-static uint32
-gpt_counter_read ()
-{
-  return gpt_counter;
-}
-
-static void
-gpt_scaler_set (uint32 val)
-{
-  gpt_scaler = val & 0x0ffff; /* 16-bit scaler */
-}
-
-static void
-gpt_reload_set (uint32 val)
-{
-  gpt_reload = val;
-}
-
-static void
-timer_ctrl (uint32 val)
-{
-
-  /* The scaler-load bits (TCR_TCRSL, TCR_GASL) have no effect: the prescaler
-     is modelled as an elapsed-time delta, so there is no scaler register to
-     reload.  */
-  rtc_cr = ((val & TCR_TCRCR) != 0);
-  if (val & TCR_TCRCL)
-    {
-      rtc_counter = rtc_reload;
-    }
-  rtc_se = ((val & TCR_TCRSE) != 0);
-  if (rtc_se && (rtc_enabled == 0))
-    rtc_start ();
-
-  gpt_cr = (val & TCR_GACR);
-  if (val & TCR_GACL)
-    {
-      gpt_counter = gpt_reload;
-    }
-  gpt_se = (val & TCR_GASE) >> 2;
-  if (gpt_se && (gpt_enabled == 0))
-    gpt_start ();
+  (void) arg;
+  gpt.Tick ();
 }
 
 /* Store data in host byte order.  MEM points to the beginning of the
