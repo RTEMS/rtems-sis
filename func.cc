@@ -897,7 +897,12 @@ event (void (*cfunc) (int32), int32 arg, uint64 delta)
       return;
     }
   ev1 = &ebase.eq;
-  delta += ebase.simtime;
+  /* The end of time is scheduled as the largest possible delta, which wraps
+     into the past once the simulator has been running.  Saturate instead.  */
+  if (delta > UINT64_MAX - ebase.simtime)
+    delta = UINT64_MAX;
+  else
+    delta += ebase.simtime;
   while ((ev1->nxt != NULL) && (ev1->nxt->time <= delta))
     {
       ev1 = ev1->nxt;
