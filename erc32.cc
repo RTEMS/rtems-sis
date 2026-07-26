@@ -40,6 +40,7 @@
 #endif
 #include "sis.h"
 #include "sisio.h"
+#include "uartport.h"
 
 #include "erc32_cfg.h"
 #include "erc32_error.h"
@@ -128,7 +129,8 @@ static uint32 posted_irq;
 
 /* UART support variables */
 
-static int32 fd1, fd2; /* file descriptor for input file */
+static struct uart_port porta = UART_PORT_INIT;
+static struct uart_port portb = UART_PORT_INIT;
 static int32 Ucontrol; /* UART status register */
 static unsigned char aq[UARTBUF], bq[UARTBUF];
 static int32 anum, aind = 0;
@@ -136,15 +138,9 @@ static int32 bnum, bind = 0;
 static char wbufa[UARTBUF], wbufb[UARTBUF];
 static unsigned wnuma;
 static unsigned wnumb;
-static FILE *f1in, *f1out, *f2in, *f2out;
-#ifdef HAVE_TERMIOS_H
-static struct termios ioc1, ioc2, iocold1, iocold2;
-#endif
 #ifndef O_NONBLOCK
 #define O_NONBLOCK 0
 #endif
-
-static int f1open = 0, f2open = 0;
 
 static char uarta_sreg, uarta_hreg, uartb_sreg, uartb_hreg;
 static uint32 uart_stat_reg;
@@ -402,10 +398,8 @@ sim_halt ()
 static void
 close_port ()
 {
-  if (f1open && f1in != stdin)
-    fclose (f1in);
-  if (f2open && f2in != stdin)
-    fclose (f2in);
+  uart_port_close (&porta);
+  uart_port_close (&portb);
 }
 
 static void
@@ -682,145 +676,26 @@ mec_write (uint32 addr, uint32 data)
 
 /* MEC UARTS */
 
-static int ifd1 = -1, ifd2 = -1, ofd1 = -1, ofd2 = -1;
-
 static void
 init_stdio ()
 {
-  if (dumbio)
-    return; /* do nothing */
-#ifdef HAVE_TERMIOS_H
-  if (ifd1 == 0 && f1open)
-    {
-      tcsetattr (0, TCSANOW, &ioc1);
-      tcflush (ifd1, TCIFLUSH);
-    }
-  if (ifd2 == 0 && f1open)
-    {
-      tcsetattr (0, TCSANOW, &ioc2);
-      tcflush (ifd2, TCIFLUSH);
-    }
-#endif
+  uart_port_raw (&porta);
+  uart_port_raw (&portb);
 }
 
 static void
 restore_stdio ()
 {
-  if (dumbio)
-    return; /* do nothing */
-#ifdef HAVE_TERMIOS_H
-  if (ifd1 == 0 && f1open && tty_setup)
-    tcsetattr (0, TCSANOW, &iocold1);
-  if (ifd2 == 0 && f2open && tty_setup)
-    tcsetattr (0, TCSANOW, &iocold2);
-#endif
+  uart_port_restore (&porta);
+  uart_port_restore (&portb);
 }
-
-#define DO_STDIO_READ(_fd_, _buf_, _len_)                                     \
-  (dumbio || nouartrx ? (0) : sis_uart_read (_fd_, (char *) (_buf_), _len_))
 
 static void
 port_init ()
 {
-
-  if (uben)
-    {
-      f2in = stdin;
-      f1in = NULL;
-      f2out = stdout;
-      f1out = NULL;
-    }
-  else
-    {
-      f1in = stdin;
-      f2in = NULL;
-      f1out = stdout;
-      f2out = NULL;
-    }
-  if (uart_dev1[0] != 0)
-    if ((fd1 = sis_uart_open (uart_dev1)) < 0)
-      {
-	printf ("Warning, couldn't open output device %s\n", uart_dev1);
-      }
-    else
-      {
-	if (sis_verbose)
-	  printf ("serial port A on %s\n", uart_dev1);
-	f1in = f1out = fdopen (fd1, "r+");
-	setbuf (f1out, NULL);
-	f1open = 1;
-      }
-  if (f1in)
-    ifd1 = fileno (f1in);
-  if (ifd1 == 0)
-    {
-      if (sis_verbose)
-	printf ("serial port A on stdin/stdout\n");
-      if (!dumbio)
-	{
-#ifdef HAVE_TERMIOS_H
-	  tcgetattr (ifd1, &ioc1);
-	  if (tty_setup)
-	    {
-	      iocold1 = ioc1;
-	      ioc1.c_lflag &= ~(ICANON | ECHO);
-	      ioc1.c_cc[VMIN] = 0;
-	      ioc1.c_cc[VTIME] = 0;
-	    }
-#endif
-	}
-      f1open = 1;
-    }
-
-  if (f1out)
-    {
-      ofd1 = fileno (f1out);
-      if (!dumbio && tty_setup && ofd1 == 1)
-	setbuf (f1out, NULL);
-    }
-
-  if (uart_dev2[0] != 0)
-    if ((fd2 = sis_uart_open (uart_dev2)) < 0)
-      {
-	printf ("Warning, couldn't open output device %s\n", uart_dev2);
-      }
-    else
-      {
-	if (sis_verbose)
-	  printf ("serial port B on %s\n", uart_dev2);
-	f2in = f2out = fdopen (fd2, "r+");
-	setbuf (f2out, NULL);
-	f2open = 1;
-      }
-  if (f2in)
-    ifd2 = fileno (f2in);
-  if (ifd2 == 0)
-    {
-      if (sis_verbose)
-	printf ("serial port B on stdin/stdout\n");
-      if (!dumbio)
-	{
-#ifdef HAVE_TERMIOS_H
-	  tcgetattr (ifd2, &ioc2);
-	  if (tty_setup)
-	    {
-	      iocold2 = ioc2;
-	      ioc2.c_lflag &= ~(ICANON | ECHO);
-	      ioc2.c_cc[VMIN] = 0;
-	      ioc2.c_cc[VTIME] = 0;
-	    }
-#endif
-	}
-      f2open = 1;
-    }
-
-  if (f2out)
-    {
-      ofd2 = fileno (f2out);
-      if (!dumbio && tty_setup && ofd2 == 1)
-	setbuf (f2out, NULL);
-    }
-
+  /* With -uben the console drives port B and port A is left unattached.  */
+  uart_port_open (&porta, "A", uart_dev1, !uben);
+  uart_port_open (&portb, "B", uart_dev2, uben);
   wnuma = wnumb = 0;
 }
 
@@ -846,8 +721,8 @@ read_uart (uint32 addr)
 	}
       else
 	{
-	  if (f1open)
-	    anum = DO_STDIO_READ (ifd1, aq, UARTBUF);
+	  if (porta.open)
+	    anum = uart_port_read (&porta, (char *) aq, UARTBUF);
 	  else
 	    anum = 0;
 	  if (anum > 0)
@@ -884,8 +759,8 @@ read_uart (uint32 addr)
 	}
       else
 	{
-	  if (f2open)
-	    bnum = DO_STDIO_READ (ifd2, bq, UARTBUF);
+	  if (portb.open)
+	    bnum = uart_port_read (&portb, (char *) bq, UARTBUF);
 	  else
 	    bnum = 0;
 	  if (bnum > 0)
@@ -922,8 +797,8 @@ read_uart (uint32 addr)
 	}
       else
 	{
-	  if (f1open)
-	    anum = DO_STDIO_READ (ifd1, aq, UARTBUF);
+	  if (porta.open)
+	    anum = uart_port_read (&porta, (char *) aq, UARTBUF);
 	  else
 	    anum = 0;
 	  if (anum > 0)
@@ -939,8 +814,8 @@ read_uart (uint32 addr)
 	}
       else
 	{
-	  if (f2open)
-	    bnum = DO_STDIO_READ (ifd2, bq, UARTBUF);
+	  if (portb.open)
+	    bnum = uart_port_read (&portb, (char *) bq, UARTBUF);
 	  else
 	    bnum = 0;
 	  if (bnum > 0)
@@ -978,7 +853,7 @@ write_uart (uint32 addr, uint32 data)
 
     case 0xE0: /* UART A */
 #ifdef FAST_UART
-      if (f1open)
+      if (porta.open)
 	{
 	  if (wnuma < UARTBUF)
 	    wbufa[wnuma++] = c;
@@ -986,7 +861,7 @@ write_uart (uint32 addr, uint32 data)
 	    {
 	      while (wnuma)
 		{
-		  wnuma -= fwrite (wbufa, 1, wnuma, f1out);
+		  wnuma -= fwrite (wbufa, 1, wnuma, porta.fout);
 		}
 	      wbufa[wnuma++] = c;
 	    }
@@ -1009,7 +884,7 @@ write_uart (uint32 addr, uint32 data)
 
     case 0xE4: /* UART B */
 #ifdef FAST_UART
-      if (f2open)
+      if (portb.open)
 	{
 	  if (wnumb < UARTBUF)
 	    wbufb[wnumb++] = c;
@@ -1017,7 +892,7 @@ write_uart (uint32 addr, uint32 data)
 	    {
 	      while (wnumb)
 		{
-		  wnumb -= fwrite (wbufb, 1, wnumb, f2out);
+		  wnumb -= fwrite (wbufb, 1, wnumb, portb.fout);
 		}
 	      wbufb[wnumb++] = c;
 	    }
@@ -1060,13 +935,13 @@ write_uart (uint32 addr, uint32 data)
 static void
 flush_uart ()
 {
-  while (wnuma && f1open)
+  while (wnuma && porta.open)
     {
-      wnuma -= fwrite (wbufa, 1, wnuma, f1out);
+      wnuma -= fwrite (wbufa, 1, wnuma, porta.fout);
     }
-  while (wnumb && f2open)
+  while (wnumb && portb.open)
     {
-      wnumb -= fwrite (wbufb, 1, wnumb, f2out);
+      wnumb -= fwrite (wbufb, 1, wnumb, portb.fout);
     }
 }
 
@@ -1078,9 +953,9 @@ static void
 uarta_tx (int32 arg)
 {
   (void) arg;
-  while (f1open)
+  while (porta.open)
     {
-      while (fwrite (&uarta_sreg, 1, 1, f1out) != 1)
+      while (fwrite (&uarta_sreg, 1, 1, porta.fout) != 1)
 	continue;
     }
   if (uart_stat_reg & UARTA_HRE)
@@ -1100,9 +975,9 @@ static void
 uartb_tx (int32 arg)
 {
   (void) arg;
-  while (f2open)
+  while (portb.open)
     {
-      while (fwrite (&uartb_sreg, 1, 1, f2out) != 1)
+      while (fwrite (&uartb_sreg, 1, 1, portb.fout) != 1)
 	continue;
     }
   if (uart_stat_reg & UARTB_HRE)
@@ -1125,8 +1000,8 @@ uart_rx (int32 arg)
   char rxd;
 
   rsize = 0;
-  if (f1open)
-    rsize = DO_STDIO_READ (ifd1, &rxd, 1);
+  if (porta.open)
+    rsize = uart_port_read (&porta, &rxd, 1);
   else
     rsize = 0;
   if (rsize > 0)
@@ -1145,8 +1020,8 @@ uart_rx (int32 arg)
       mec_irq (4);
     }
   rsize = 0;
-  if (f2open)
-    rsize = DO_STDIO_READ (ifd2, &rxd, 1);
+  if (portb.open)
+    rsize = uart_port_read (&portb, &rxd, 1);
   else
     rsize = 0;
   if (rsize)

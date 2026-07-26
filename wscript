@@ -48,6 +48,7 @@ SOURCES = [
     'grspw.cc',
     'memscrub.cc',
     'sisio.cc',
+    'uartport.cc',
 ]
 
 HEADERS = ['fcntl.h', 'stdlib.h', 'termios.h']
