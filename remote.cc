@@ -447,6 +447,11 @@ gdb_remote_exec (char *buf)
       break;
     case 'Z': /* add break/watch point */
     case 'z': /* remove break/watch point */
+      /* Types 0 to 4 are defined.  Anything else is a feature the stub does
+	 not support, which the empty packet reports.  A non-digit type wraps
+	 to a large value and is unsupported too.  */
+      if ((unsigned int) hex (buf[1]) > 4)
+	break;
       i = 3;
       addr = gethex (buf, &i);
       len = hex (buf[i]);

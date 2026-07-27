@@ -1467,22 +1467,32 @@ TEST_CASE_FIXTURE (remote_fixture, "'z' removes what 'Z' inserted")
   CHECK (peek (RAM) == 0x01000000);
 }
 
-TEST_CASE_FIXTURE (remote_fixture, "an unknown breakpoint type is refused")
+TEST_CASE_FIXTURE (remote_fixture, "an unknown breakpoint type is unsupported")
 {
-  /* "Packets": types 0 to 4 are defined.  GDB probes for support, and the
-     protocol asks for an empty reply when a type is not supported.
-
-     Suspected defect: the stub answers "E01" instead of an empty packet,
-     which tells GDB the breakpoint failed rather than that the type is
-     unknown.  */
-  std::string reply;
+  /* "Packets", 'Z type,addr,kind': types 0 to 4 are defined.  GDB probes for
+     support by sending the packet, and "Overview" makes the empty packet the
+     answer for a request the stub does not support.  "E NN" would instead
+     say that a supported breakpoint failed to go in.  */
+  std::string unknown, first_undefined, garbled, removed, supported;
   {
     gdb_session session;
-    reply = session.request (pkt ("Z9,2001000,4"));
+    poke (RAM, 0x01000000);
+    unknown = session.request (pkt ("Z9,2001000,4"));
+    /* Five is the first type the protocol does not define.  */
+    first_undefined = session.request (pkt ("Z5,2001000,4"));
+    /* A type that is not even a digit is no more supported.  */
+    garbled = session.request (pkt ("Zx,2001000,4"));
+    removed = session.request (pkt ("z9,2001000,4"));
+    /* A defined type still answers.  */
+    supported = session.request (pkt ("Z4,2001000,4"));
     session.finish ();
   }
 
-  CHECK (body_of (reply) == "E01");
+  CHECK (unknown == "+$#00");
+  CHECK (first_undefined == "+$#00");
+  CHECK (garbled == "+$#00");
+  CHECK (removed == "+$#00");
+  CHECK (body_of (supported) == "OK");
 }
 
 /* ------------------------------------------------------------------ */
