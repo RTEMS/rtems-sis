@@ -19,6 +19,7 @@ gr1553.cc
 greth.cc
 grspw.cc
 help.cc
+interf.cc
 riscv.cc
 sisio.cc
 sparc.cc
