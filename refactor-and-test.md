@@ -82,7 +82,7 @@ against real descriptors the way `tests/sisio.cc` does.
 ## Where the tree stands
 
 Measured with `./waf configure --enable-coverage && ./waf`, branch metric,
-4158 of 5007 arcs (83%). The totals move as headers join the filter and as
+4557 of 5195 arcs (88%). The totals move as headers join the filter and as
 duplicated and dead code is removed, so compare per file rather than against
 an older total. Read the per file rows of the gcovr report, not its `TOTAL`
 line: that row counts the standard library headers the build pulls in, whose
@@ -93,21 +93,21 @@ tree.
 |---|---|---|
 | `riscv.cc` | 1106 | 1106 |
 | `sparc.cc` | 1133 | 1133 |
-| `func.cc` | 603 | 582 |
-| `grlib.cc` | 378 | 376 |
+| `func.cc` | 603 | 581 |
+| `grlib.cc` | 387 | 385 |
 | `grspw.cc` | 206 | 206 |
-| `gr1553.cc` | 142 | 125 |
+| `gr1553.cc` | 120 | 120 |
 | `leon2.cc` | 150 | 141 |
 | `leon3.cc` | 42 | 38 |
-| `gr740.cc` | 42 | 0 |
-| `rv32.cc` | 50 | 0 |
+| `gr740.cc` | 42 | 38 |
+| `rv32.cc` | 50 | 48 |
 | `elf.cc` | 97 | 91 |
-| `interf.cc` | 120 | 13 |
-| `remote.cc` | 226 | 0 |
+| `interf.cc` | 118 | 118 |
+| `remote.cc` | 226 | 3 |
 | `sis.cc` | 207 | 0 |
-| `memscrub.cc` | 94 | 1 |
+| `memscrub.cc` | 94 | 0 |
 | `tap.cc` | 65 | 0 |
-| graduated: `erc32_cfg.h`, `erc32_error.h`, `erc32_mec.h`, `erc32_timer.h`, `erc32_uart.h`, `erc32.cc`, `exec.cc`, `greth.cc`, `grspw.cc`, `help.cc`, `riscv.cc`, `sisio.cc`, `sparc.cc`, `uartport.cc` | | 100% |
+| graduated: `erc32_cfg.h`, `erc32_error.h`, `erc32_mec.h`, `erc32_timer.h`, `erc32_uart.h`, `erc32.cc`, `exec.cc`, `gr1553.cc`, `greth.cc`, `grspw.cc`, `help.cc`, `interf.cc`, `riscv.cc`, `sisio.cc`, `sparc.cc`, `uartport.cc` | | 100% |
 
 Done, graduated in `tests/covered.txt`:
 
@@ -406,12 +406,14 @@ all of the concepts; each test file holds a small `TestEnv` per subsystem.
    `func.cc`'s `remove_event` is a seventh, found while chasing an
    unreachable GPTIMER guard: after unlinking a node it advances
    `ev1 = ev1->nxt` unconditionally, skipping the node it just spliced in,
-   so two consecutive matching entries leave the second queued. Fixing it
-   changes the event queue, so it wants its own change with the fingerprint
-   run attached rather than folding into a coverage commit. **Fixed**, with
-   `tests/event.cc` written first and shown to fail without it. The end to
-   end runs report the same 234 passes and an unchanged fingerprint, so the
-   stale entries were latent in those binaries rather than firing.
+   so two consecutive matching entries leave the second queued. **Fixed**,
+   with `tests/event.cc` written first and shown to fail without it. A first
+   attempt was reverted after it hung, and the cause was misrecorded as an
+   ordering fault in `advance_time`; see the lesson on that below. The real
+   cause was `tests/rv32board.cc`, removed in the same revert, and the repair
+   went back in unchanged once that file was gone. The end to end runs report
+   the same 234 passes and an unchanged fingerprint, so the stale entries were
+   latent in those binaries rather than firing.
 
    **Two arcs are left in `grlib.cc` and both are honest gaps, not
    oversights.** `grlib_apb_bus`'s test for a bridge that no board has
@@ -777,27 +779,47 @@ Hard-won here, so the next person does not rediscover them.
   caught the bug coming back. Pick a few production lines per merged file,
   break them, and check the suite notices.
 
-- **`advance_time` frees the firing cell before it runs the callback**
-  (`func.cc`, the loop that pops `ebase.eq.nxt`). A cell can therefore be on
-  the event queue and the free list at once. `remove_event` survives that
-  only by accident, because it steps on after unlinking and so walks past
-  the cell which has just moved up. Repairing the removal, which is a real
-  defect and leaves every second matching entry queued, makes it reach that
-  cell twice and link it to itself, and the next insertion walks a list
-  which points at itself and hangs. **Fix the ordering in `advance_time`
-  first**; both are recorded as known defects in `tests/event.cc`. The
-  removal repair passed the whole suite, eight seeds and an unchanged
-  fingerprint before the board tests existed, so the gates did not catch
-  it: they proved it broke nothing that existed, not that it was safe.
+- **A mechanism that explains the symptom is not the cause.** The hang the
+  `remove_event` repair produced was recorded here as an ordering fault in
+  `advance_time`, which frees the firing cell before running its callback.
+  That reads well and is wrong. A correct removal walk cannot link a cell to
+  itself unless the queue is already malformed, and the queue was being
+  malformed by `tests/rv32board.cc`, the file removed in the same revert. With
+  that file gone the repair passes the whole suite over eight random
+  orderings, under AddressSanitizer, with the fingerprints unchanged, and
+  `advance_time` was never touched. The lesson is not about the event queue:
+  a diagnosis reached by reading code and reasoning backwards from a symptom
+  needs an experiment that can falsify it before it is written down as fact,
+  because a wrong one blocks the real fix and sends the next reader after the
+  wrong file. `tests/event.cc` now checks the queue invariant directly, so
+  the corruption is a failed assertion rather than a hang to be diagnosed.
+
+- **Run the sanitizers, not only the coverage gate.** Building the suite with
+  `-fsanitize=address,undefined` and leak detection on found two real bugs in
+  a single pass, both in code the gate already called finished: `greth.cc`,
+  graduated at 100%, read past the end of the received frame when swapping the
+  tail of the last word, and `init_bpt` dropped the instruction history buffer
+  without freeing it. Coverage proves a line ran and mutation proves an
+  assertion holds; neither says the line was memory safe. The sweep is cheap
+  in a throwaway `git worktree` and is worth repeating whenever a batch
+  merges.
+
+- **A test may not name a fixed path under `/tmp`.** Three cases in
+  `tests/funcq.cc` wrote to one, and when several builds of the suite ran at
+  once one of them removed the file another had just written and was about to
+  open. The failure looks exactly like an order dependent bug and is not one.
+  Every other test file already builds its scratch name from an `mkstemp`
+  template; these now append the process id.
 
 - **Do not register a real board into the test binary.** `tests/rv32board.cc`
   did it from a static constructor to reach `gr740.cc` and `rv32.cc`, which
-  fills an APB bridge to its sixteen core cap and produces the self linked
-  cell above. Removing the file makes every ordering pass. This is the same
-  wall `leon3.cc`'s `init_sim` already hit, and the reason those two board
-  files are back at zero: they need tests which drive the `memsys` entry
-  points without `init_sim`. The ROM mask fix those tests found is kept and
-  is currently unguarded, so guard it when they are rebuilt.
+  fills an APB bridge to its sixteen core cap and corrupts the event queue.
+  Removing the file makes every ordering pass, and it was the whole cause of
+  the hang blamed above on `advance_time`. This is the same wall `leon3.cc`'s
+  `init_sim` already hit, and the reason those two board files are back at
+  zero: they need tests which drive the `memsys` entry points without
+  `init_sim`. The ROM mask fix those tests found is kept and is currently
+  unguarded, so guard it when they are rebuilt.
 
 - **Coverage measured on a build configured without `--enable-coverage`
   reads as zero, not as an error.** The `.gcno` files survive a reconfigure,
