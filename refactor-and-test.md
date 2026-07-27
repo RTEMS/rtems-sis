@@ -82,7 +82,7 @@ against real descriptors the way `tests/sisio.cc` does.
 ## Where the tree stands
 
 Measured with `./waf configure --enable-coverage && ./waf`, branch metric,
-4247 of 5007 arcs (85%). The totals move as headers join the filter and as
+4158 of 5007 arcs (83%). The totals move as headers join the filter and as
 duplicated and dead code is removed, so compare per file rather than against
 an older total. Read the per file rows of the gcovr report, not its `TOTAL`
 line: that row counts the standard library headers the build pulls in, whose
@@ -99,8 +99,8 @@ tree.
 | `gr1553.cc` | 142 | 125 |
 | `leon2.cc` | 150 | 141 |
 | `leon3.cc` | 42 | 38 |
-| `gr740.cc` | 42 | 40 |
-| `rv32.cc` | 50 | 49 |
+| `gr740.cc` | 42 | 0 |
+| `rv32.cc` | 50 | 0 |
 | `elf.cc` | 97 | 91 |
 | `interf.cc` | 120 | 13 |
 | `remote.cc` | 226 | 0 |
@@ -767,6 +767,37 @@ Hard-won here, so the next person does not rediscover them.
   instead. Two test files also collided by both choosing `0x50000000` for a
   fake slave, which passed for each agent alone and failed on merge, so pick
   a fake address by grepping the tree for it first.
+
+- **Audit the agents' mutation claims, do not take them.** Every agent this
+  round reported its cases mutation-killed. An independent pass over the
+  files they had just covered found the ROM write of `gr740.cc` and
+  `rv32.cc` unprotected: restoring the unmasked address, a wild store three
+  gigabytes past a sixteen megabyte array, changed nothing any case could
+  see. Coverage had gone from 0 to 95% on those files and would not have
+  caught the bug coming back. Pick a few production lines per merged file,
+  break them, and check the suite notices.
+
+- **`advance_time` frees the firing cell before it runs the callback**
+  (`func.cc`, the loop that pops `ebase.eq.nxt`). A cell can therefore be on
+  the event queue and the free list at once. `remove_event` survives that
+  only by accident, because it steps on after unlinking and so walks past
+  the cell which has just moved up. Repairing the removal, which is a real
+  defect and leaves every second matching entry queued, makes it reach that
+  cell twice and link it to itself, and the next insertion walks a list
+  which points at itself and hangs. **Fix the ordering in `advance_time`
+  first**; both are recorded as known defects in `tests/event.cc`. The
+  removal repair passed the whole suite, eight seeds and an unchanged
+  fingerprint before the board tests existed, so the gates did not catch
+  it: they proved it broke nothing that existed, not that it was safe.
+
+- **Do not register a real board into the test binary.** `tests/rv32board.cc`
+  did it from a static constructor to reach `gr740.cc` and `rv32.cc`, which
+  fills an APB bridge to its sixteen core cap and produces the self linked
+  cell above. Removing the file makes every ordering pass. This is the same
+  wall `leon3.cc`'s `init_sim` already hit, and the reason those two board
+  files are back at zero: they need tests which drive the `memsys` entry
+  points without `init_sim`. The ROM mask fix those tests found is kept and
+  is currently unguarded, so guard it when they are rebuilt.
 
 - **Coverage measured on a build configured without `--enable-coverage`
   reads as zero, not as an error.** The `.gcno` files survive a reconfigure,
