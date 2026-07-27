@@ -706,6 +706,30 @@ TEST_CASE_FIXTURE (elf_fixture,
   CHECK (word == 0x05060708);
 }
 
+/* The program header array is allocated from e_phnum, and the field reaches
+   65535, so the count alone can ask for two megabytes.  A capped address
+   space refuses it and the loader answers with a read error rather than
+   indexing a null pointer.  The headroom is below that two megabytes and
+   above what the small allocations before it need.  */
+TEST_CASE_FIXTURE (elf_fixture,
+		   "elf_load reports program headers it cannot buffer")
+{
+  elf_layout l;
+  bytes b = build_elf (&l);
+  put16 (b, offsetof (Elf32_Ehdr, e_phnum), 0xffff, true);
+  elf_on_disk file (b);
+
+  std::string text;
+  int res;
+  {
+    address_space_cap cap (1024 * 1024);
+    res = load (file.name (), 1, &text);
+  }
+
+  CHECK (res == -1);
+  CHECK (text.find ("File read error") != std::string::npos);
+}
+
 TEST_CASE_FIXTURE (elf_fixture, "elf_load reports a section it cannot buffer")
 {
   elf_layout l;
