@@ -1050,8 +1050,21 @@ TEST_CASE_FIXTURE (leon2_regs_fixture,
   CHECK (*(uint16 *) &ramb[0x1200 ^ 2] == 0xcdef);
 
   uint32 dbl[2] = { 0x11111111u, 0x22222222u };
+  ws = 99;
   CHECK (leon2.memory_write (0x40001300, dbl, 3, &ws) == 0); /* double word */
   CHECK (memcmp (&ramb[0x1300], dbl, 8) == 0);
+
+  /* leon2.cc models none of the memory configuration registers section 6
+     gives waitstates in, and runs memory at none, so every size reports
+     zero.  This is the simulator's contract, not the hardware's.  */
+  CHECK (ws == 0);
+  for (int32 sz = 0; sz < 4; sz++)
+    {
+      CAPTURE (sz);
+      ws = 99;
+      CHECK (leon2.memory_write (0x40001400, dbl, sz, &ws) == 0);
+      CHECK (ws == 0);
+    }
 
   /* The same three sizes on the ROM side of memory_write's own dispatch.  */
   CHECK (leon2.memory_write (0x200, &data, 0, &ws) == 0);
