@@ -475,8 +475,7 @@ exec_cmd (const char *cmd)
 		  sregs[i].npc = sregs[i].pc + 4;
 		}
 	    }
-	  if (ebase.simtime == 0)
-	    ms->boot_init ();
+	  ms->boot_init ();
 	  if ((cmd1 = strtok (NULL, " \t\n\r")) == NULL)
 	    {
 	      stat = run_sim (UINT64_MAX / 2, 0);
@@ -569,7 +568,7 @@ exec_cmd (const char *cmd)
 		  sregs[i].npc = sregs[i].pc + 4;
 		}
 	    }
-	  if ((sregs->pc != 0) && (ebase.simtime == 0))
+	  if (sregs->pc != 0)
 	    ms->boot_init ();
 	  ebase.tlimit = limcalc (ebase.freq);
 	  stat = run_sim (UINT64_MAX / 2, 0);
