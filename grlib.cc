@@ -79,8 +79,10 @@ grlib_ahbpnp_read (uint32 addr)
   return read_data;
 }
 
-static struct grlib_buscore ahbmcores[16];
-static struct grlib_buscore ahbscores[16];
+#define GRLIB_AHB_CORES 16
+
+static struct grlib_buscore ahbmcores[GRLIB_AHB_CORES];
+static struct grlib_buscore ahbscores[GRLIB_AHB_CORES];
 static int ahbmi;
 static int ahbsi;
 
@@ -156,6 +158,10 @@ grlib_reset ()
 void
 grlib_ahbm_add (const struct grlib_ipcore *core, int irq)
 {
+  /* The array is fixed and the index used to run past it, over the two
+     counters which follow it, so an overrun turned into a walk of the bus
+     lists at a length nothing set.  */
+  assert (ahbmi < GRLIB_AHB_CORES);
   ahbmcores[ahbmi].core = core;
   if (core->add)
     core->add (irq, 0, 0);
@@ -166,6 +172,7 @@ void
 grlib_ahbs_add (const struct grlib_ipcore *core, int irq, uint32 addr,
 		uint32 mask)
 {
+  assert (ahbsi < GRLIB_AHB_CORES);
   ahbscores[ahbsi].core = core;
   if (core->add)
     {

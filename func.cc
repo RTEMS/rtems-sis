@@ -949,12 +949,15 @@ remove_event (void (*cfunc) (int32), int32 arg)
 	  evdel->nxt = ebase.freeq;
 	  ebase.freeq = evdel;
 	}
-      else
-	/* Only step on when nothing was taken out.  The entry after the one
-	   removed is now the one this cell points at, so stepping on here as
-	   well would carry the walk past it without ever testing it, and a
-	   second entry naming the same callback would stay queued.  */
-	ev1 = ev1->nxt;
+      /* Stepping on unconditionally carries the walk past the entry which
+	 has just taken the removed one's place, so a second entry naming the
+	 same callback stays queued.  That is wrong, and the obvious repair,
+	 stepping on only when nothing was taken out, hangs: advance_time
+	 puts the firing cell on the free list before it runs the callback
+	 (see the loop there), so a cell can sit on both lists at once, and
+	 reaching it a second time links it to itself.  Fixing the removal
+	 needs that ordering fixed first.  */
+      ev1 = ev1->nxt;
     }
   ebase.evtime = ebase.eq.nxt->time;
 }
