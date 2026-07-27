@@ -74,7 +74,9 @@ an older total.
 |---|---|---|
 | `riscv.cc` | 1106 | 1106 |
 | `func.cc` | 603 | 30 |
-| `grlib.cc`, `grspw.cc`, `gr1553.cc`, `greth.cc`, `memscrub.cc`, `tap.cc` | 1002 | 0 |
+| `grlib.cc` | 384 | 143 |
+| `greth.cc` | 109 | 84 |
+| `grspw.cc`, `gr1553.cc`, `memscrub.cc`, `tap.cc` | 507 | 0 |
 | `sis.cc`, `remote.cc`, `interf.cc` | 547 | 0 |
 | `leon2.cc`, `leon3.cc`, `gr740.cc`, `rv32.cc` | 284 | 0 |
 | `elf.cc` | 97 | 91 |
@@ -300,8 +302,53 @@ all of the concepts; each test file holds a small `TestEnv` per subsystem.
    from switches whose scrutinee range the compiler could not see. Expect
    the restructure to pay only where the range is not already obvious.
 
-2. `grlib.cc` and the GRLIB cores. One file behind four boards, and the GRLIB
-   manual in `ref/` is already scoped to the cores SIS models.
+2. `grlib.cc` and the GRLIB cores. **In progress.** One file behind four
+   boards. `tests/grlibcore.h` is the harness: it drives one
+   `struct grlib_ipcore` through its own `read`, `write`, `init` and `reset`
+   with no bus, because `grlib.cc` cannot unregister a core and does not
+   bound `grlib_ahbs_add`/`grlib_ahbm_add`. It clears the event queue and
+   resets the core, which is what stops a case inheriting a running timer or
+   a latched engine flag. `tests/irqmp.cc` is the worked example.
+
+   **What `ref/` actually specifies decides the order, and it is narrower
+   than the file list suggests.** `SOURCES.md` says the GRLIB manual was
+   converted for eight cores only. Checked per core:
+
+   - **IRQMP**: complete, sections 96.3.1 to 96.3.12. Done first for that
+     reason, and because every other core raises through `grlib_set_irq`, so
+     a test of one of them asserts on `ext_irl` and needs IRQMP working.
+   - **GRETH**: chapter 53, enough to work from. Covered behind
+     `tests/faketap.cc`, which redefines `sis_tap_init` and `sis_tap_write`
+     so the linker never extracts `tap.o` and no real device is opened.
+   - **GPTIMER**: only the scaler pair, tables 464 and 465. The counter,
+     reload and control registers are **not** in `ref/`.
+   - **APBUART, L2C, DSU3, APBCTRL**: partial. The APBCTRL chapter is a VHDL
+     component declaration with no register table.
+   - **GR1553B and GRSPW2**: **nothing.** Chapter 16 of the GR740 manual has
+     the descriptor formats and the operation sections, but the register
+     tables the code cites (292, 321, 326) are in the full GRIP manual,
+     which was not converted for either core.
+
+   That last one is 348 of the remaining arcs and is an **open decision**:
+   either convert those GRIP chapters into `ref/`, or cover the two files as
+   frozen behaviour with an explicit note that the cases assert what the
+   code does rather than what the manual says. Do not let it happen by
+   accident.
+
+   A case which pins current behaviour rather than a specified requirement
+   says so in its name and its comment. When a defect is then fixed, those
+   are exactly the cases which have to change, and the label is what makes
+   that obvious rather than alarming.
+
+   Four defects found and fixed here so far: the scaler value register had
+   no write case, the timer control register cleared the interrupt pending
+   bit on every write so its write one to clear test was dead code, a
+   control write which disabled a timer left the underflow queued so it
+   still wrapped the counter, and the interrupt controller picked its mask
+   with a test the -1 default of the extended interrupt line passed. Only
+   the first and last are backed by a table in `ref/`; the two control
+   register fixes are inferred from the code's own stated intent and should
+   be re-checked if the GPTIMER chapter is ever converted.
 3. `leon2.cc`, `leon3.cc`, `gr740.cc`, `rv32.cc`. Thin once `grlib.cc` and the
    shared port module are done.
 4. `func.cc`, `elf.cc`, `interf.cc`, `remote.cc`, `sis.cc`. Simulator

@@ -55,6 +55,17 @@ linked against `libsis.a`. `./waf` builds and runs them; a failure fails the bui
 `--notests` skips them. They share one process, so a case that touches machine state
 must start from a fixture that sets `ms`/`arch` and calls `reset_all`.
 
+**Check a new or changed case with `./build/tests/sis-test --order-by=rand` over a
+few seeds.** The default order is the order they are declared, which hides a case
+that passes on state an earlier one left. Running the suite randomly found four
+which did, two of them in files already graduated at 100%: one asserted a field the
+code under test only reads, one named a floating point register without the swap the
+core applies on a little endian host, and two inherited host state, since
+`fesetround` and `sync_rt` are process wide and no fixture restored them. Coverage
+does not catch this; a leaking case still executes the lines. The per-file gate does
+catch the tail of it, because a new subsystem's cases can drop a finished file below
+100%.
+
 The target is 100% line and branch coverage of every simulator source, gated per file:
 `tests/covered.txt` lists the files that have reached it and `tests/check-coverage.py`
 fails if one of them slips. Settings live in `gcovr.cfg`; see `doc/building-sis.md` for
