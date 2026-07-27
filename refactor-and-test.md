@@ -74,13 +74,12 @@ an older total.
 |---|---|---|
 | `riscv.cc` | 1106 | 1106 |
 | `func.cc` | 603 | 30 |
-| `grlib.cc` | 384 | 143 |
-| `greth.cc` | 109 | 84 |
+| `grlib.cc` | 384 | 301 |
 | `grspw.cc`, `gr1553.cc`, `memscrub.cc`, `tap.cc` | 507 | 0 |
 | `sis.cc`, `remote.cc`, `interf.cc` | 547 | 0 |
 | `leon2.cc`, `leon3.cc`, `gr740.cc`, `rv32.cc` | 284 | 0 |
 | `elf.cc` | 97 | 91 |
-| graduated: `erc32_cfg.h`, `erc32_error.h`, `erc32_mec.h`, `erc32_timer.h`, `erc32_uart.h`, `erc32.cc`, `exec.cc`, `help.cc`, `sisio.cc`, `sparc.cc`, `uartport.cc` | | 100% |
+| graduated: `erc32_cfg.h`, `erc32_error.h`, `erc32_mec.h`, `erc32_timer.h`, `erc32_uart.h`, `erc32.cc`, `exec.cc`, `help.cc`, `sisio.cc`, `sparc.cc`, `uartport.cc`, `greth.cc` | | 100% |
 
 Done, graduated in `tests/covered.txt`:
 
@@ -302,8 +301,8 @@ all of the concepts; each test file holds a small `TestEnv` per subsystem.
    from switches whose scrutinee range the compiler could not see. Expect
    the restructure to pay only where the range is not already obvious.
 
-2. `grlib.cc` and the GRLIB cores. **In progress.** One file behind four
-   boards. `tests/grlibcore.h` is the harness: it drives one
+2. `grlib.cc` and the GRLIB cores. **In progress, 301 of 384.** One file
+   behind four boards. `tests/grlibcore.h` is the harness: it drives one
    `struct grlib_ipcore` through its own `read`, `write`, `init` and `reset`
    with no bus, because `grlib.cc` cannot unregister a core and does not
    bound `grlib_ahbs_add`/`grlib_ahbm_add`. It clears the event queue and
@@ -349,6 +348,39 @@ all of the concepts; each test file holds a small `TestEnv` per subsystem.
    the first and last are backed by a table in `ref/`; the two control
    register fixes are inferred from the code's own stated intent and should
    be re-checked if the GPTIMER chapter is ever converted.
+
+   **Two documents were added to `ref/` on 2026-07-27 to close the RV32
+   gap**, both indexed in `INDEX.md` and `SOURCES.md`. The SiFive FU540-C000
+   manual specifies the CLINT and PLIC memory maps, which no RISC-V
+   specification fixes and which `rv32.cc` follows exactly: its table 36
+   matches `grlib.cc`'s `msip` at 0, `mtimecmp` at `0x4000` and `mtime` at
+   `0xbff8`. The PC16550D datasheet specifies the `ns16550` core. That core
+   is a 16550 at a 4-byte register stride, not the hybrid it looks like: the
+   `0x80` mask on LCR is DLAB, the `0x60` read of LSR is the master reset
+   value, and the interrupt condition is IER bit 1 gated by MCR bit 3. Only
+   the identifier `uart_txctrl` is SiFive naming, on the register the
+   datasheet calls IIR/FCR.
+
+   **Six defects found here and left unfixed**, each pinned by a case named
+   as a suspected defect so a silent change is loud:
+   - `clint_read` shifts `mip` right by 4 for `msip`, which is bit 3, so a
+     read of it is always zero.
+   - `clint_write`'s mtimecmp range test is inclusive of `CLINT_TIMEBASE`,
+     so a write to `mtime`'s low word lands in hart 3's `mtimecmp`.
+   - `plic_check_irq` scans without a break and so claims the **highest**
+     pending id; section 10.3 gives the lowest id the highest priority.
+   - `plic_check_irq` never reads `plic_prio`, so a source left at the
+     reserved priority zero still interrupts.
+   - `ns16550` offset `0x08` is a scratch register, where 8.5 and 8.6 make
+     it a write-only FCR and a computed IIR.
+   - `ns16550` has no read case for LCR, which 8.1 makes readable.
+
+   `func.cc`'s `remove_event` is a seventh, found while chasing an
+   unreachable GPTIMER guard: after unlinking a node it advances
+   `ev1 = ev1->nxt` unconditionally, skipping the node it just spliced in,
+   so two consecutive matching entries leave the second queued. Fixing it
+   changes the event queue, so it wants its own change with the fingerprint
+   run attached rather than folding into a coverage commit.
 3. `leon2.cc`, `leon3.cc`, `gr740.cc`, `rv32.cc`. Thin once `grlib.cc` and the
    shared port module are done.
 4. `func.cc`, `elf.cc`, `interf.cc`, `remote.cc`, `sis.cc`. Simulator
@@ -645,6 +677,33 @@ Hard-won here, so the next person does not rediscover them.
   `--enable-coverage` build is `-O0`; the shipping build is `-O2`. Do not
   compare timings across the two, and see `doc/building-sis.md` for why a single
   percentage is configuration-specific.
+
+- **A crash in the suite is nobody's job when the work is fanned out.**
+  Five parallel agents each hit the random-order segfault, each correctly
+  verified it against a clean baseline, and each correctly reported it as
+  pre-existing and out of their scope. All five were right and it stayed
+  unfixed. It was a real defect in shipped code: `uart_port_open` did not
+  reset `open`, `fd` and `ifd`, so a failed reattachment kept the flags of
+  the attachment before it while `fin` went back to null, and
+  `uart_port_close` then handed that null to `fclose`. The boards read that
+  same flag to decide whether a port can still carry a character. Build with
+  `-fsanitize=address` and read the backtrace rather than reasoning about
+  it; two guesses at the cause from the symptom were both wrong. When
+  splitting work up, keep this class centrally rather than per agent.
+
+- **Parallel agents collide through statics, not through files.** Two
+  agents given disjoint files both drove the `ns16550` core, whose
+  `plic_ip`, `uart_ie`, `uart_mcr` and `ns16550_irq` are process-global with
+  no reset entry point. The result passed for each agent alone and failed
+  once merged. Assume any core with no `reset` in its `struct grlib_ipcore`
+  is shared state between test files, and say so in the brief.
+
+- **A drain loop can be a no-op and look thorough.** The PLIC fixture
+  claimed until the claim read returned zero, but `plic_claim[hart]` is only
+  written by `plic_check_irq`, which a claim read does not run, and which
+  `plic_read` zeroes on the way out. The first read therefore always
+  returned a stale zero and the loop cleared nothing. Assert the state a
+  cleanup routine is supposed to have reached, at the end of the routine.
 
 ## Moving to another machine
 
