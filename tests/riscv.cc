@@ -2676,3 +2676,162 @@ TEST_CASE_FIXTURE (riscv_fixture,
   CHECK (exec (0xe111) == 0); /* not taken */
   CHECK ((cov.at (0x380) & COV_BNT) == COV_BNT);
 }
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V a watchpoint stops a store")
+{
+  /* The shell's watchpoints are checked on the memory path, so a store into
+     a watched word reports a hit and leaves the memory alone.  */
+  uint32 saved = ebase.wpwnum;
+
+  ebase.wpwnum = 1;
+  ebase.wpws[0] = 0x2000;
+  ebase.wpwm[0] = 3; /* the word at that address */
+  ebase.wphit = 0;
+
+  set (1, 0x2000);
+  set (2, 0x12345678);
+  sis_tests::flatmem_poke (0x2000, 0);
+  CHECK (exec (stype (OP_STORE, SW, 1, 2, 0)) == WPT_TRAP);
+  CHECK (ebase.wphit != 0);
+  CHECK (sis_tests::flatmem_peek (0x2000) == 0);
+
+  /* A store elsewhere is not a hit.  */
+  ebase.wphit = 0;
+  set (1, 0x2100);
+  CHECK (exec (stype (OP_STORE, SW, 1, 2, 0)) == 0);
+  CHECK (ebase.wphit == 0);
+
+  /* A float store is watched the same way.  */
+  ebase.wphit = 0;
+  set (1, 0x2000);
+  fsi (3) = 0x0badf00d;
+  CHECK (exec (stype (OP_FSW, 2, 1, 3, 0)) == WPT_TRAP);
+  CHECK (ebase.wphit != 0);
+
+  ebase.wpwnum = saved;
+  ebase.wphit = 0;
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V a resumed store is not repeated")
+{
+  /* Under the stub a write watchpoint reports after the write has gone
+     through, with the program counter left on the store.  The store must not
+     run a second time when the user continues.  */
+  int saved_break = sis_gdb_break;
+  uint32 saved = ebase.wpwnum;
+
+  sis_gdb_break = 1;
+  ebase.wpwnum = 0;
+  ebase.wphit = 1;
+  set (1, 0x40);
+  set (2, 0x11);
+  sis_tests::flatmem_poke (0x40, 0x12345678);
+
+  CHECK (exec (stype (OP_STORE, SW, 1, 2, 0)) == 0);
+  CHECK (sis_tests::flatmem_peek (0x40) == 0x12345678);
+  CHECK (ebase.wphit == 0);
+
+  /* And the float store carries the same guard.  */
+  ebase.wphit = 1;
+  fsi (3) = 0x0badf00d;
+  CHECK (exec (stype (OP_FSW, 2, 1, 3, 0)) == 0);
+  CHECK (sis_tests::flatmem_peek (0x40) == 0x12345678);
+  CHECK (ebase.wphit == 0);
+
+  /* With the stub running the write is let through and only the trap is
+     reported, so the debugger sees the value the program stored.  */
+  ebase.wpwnum = 1;
+  ebase.wpws[0] = 0x40;
+  ebase.wpwm[0] = 3;
+  ebase.wphit = 0;
+  CHECK (exec (stype (OP_STORE, SW, 1, 2, 0)) == WPT_TRAP);
+  CHECK (sis_tests::flatmem_peek (0x40) == 0x11);
+
+  ebase.wpwnum = saved;
+  ebase.wphit = 0;
+  sis_gdb_break = saved_break;
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V a read watchpoint stops a load")
+{
+  uint32 saved = ebase.wprnum;
+
+  ebase.wprnum = 1;
+  ebase.wprs[0] = 0x2000;
+  ebase.wprm[0] = 3;
+  ebase.wphit = 0;
+
+  sis_tests::flatmem_poke (0x2000, 0x12345678);
+  set (1, 0x2000);
+  CHECK (exec (itype (OP_LOAD, 3, LW, 1, 0)) == WPT_TRAP);
+  CHECK (ebase.wphit != 0);
+  CHECK (get (3) == 0);
+
+  ebase.wphit = 0;
+  set (1, 0x2100);
+  CHECK (exec (itype (OP_LOAD, 3, LW, 1, 0)) == 0);
+  CHECK (ebase.wphit == 0);
+
+  ebase.wprnum = saved;
+  ebase.wphit = 0;
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V a store outside memory faults")
+{
+  /* The flat memory answers an access past its window with an exception,
+     which is the store access fault of the privileged specification.  Every
+     width reports it, and the address is kept for the report.  */
+  const uint32 outside = 0x20000;
+  struct
+  {
+    uint32 funct3;
+    uint32 offset;
+  } cases[] = { { SW, 0 }, { SH, 0 }, { SB, 1 } };
+
+  set (1, outside);
+  set (2, 0x12345678);
+
+  for (auto c : cases)
+    {
+      INFO ("width " << c.funct3);
+      CHECK (exec (stype (OP_STORE, c.funct3, 1, 2, c.offset)) == TRAP_SEXC);
+      CHECK (sregs[0].wpaddress == outside + c.offset);
+    }
+
+  /* And the float store.  */
+  fsi (3) = 1;
+  CHECK (exec (stype (OP_FSW, 2, 1, 3, 0)) == TRAP_SEXC);
+  CHECK (exec (stype (OP_FSW, 3, 1, 3, 0)) == TRAP_SEXC);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V a load outside memory faults")
+{
+  const uint32 outside = 0x20000;
+  struct
+  {
+    uint32 funct3;
+    uint32 offset;
+  } cases[] = { { LW, 0 }, { LB, 1 }, { LBU, 1 }, { LH, 0 }, { LHU, 0 } };
+
+  set (1, outside);
+
+  for (auto c : cases)
+    {
+      INFO ("width " << c.funct3);
+      CHECK (exec (itype (OP_LOAD, 3, c.funct3, 1, c.offset)) == TRAP_LEXC);
+      CHECK (sregs[0].wpaddress == outside + c.offset);
+      CHECK (get (3) == 0);
+    }
+
+  /* And the float load.  */
+  CHECK (exec (itype (OP_FLOAD, 3, 2, 1, 0)) == TRAP_LEXC);
+  CHECK (exec (itype (OP_FLOAD, 3, 3, 1, 0)) == TRAP_LEXC);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V an all zero word is not a load")
+{
+  /* A zero instruction word would otherwise decode as a byte load through
+     x0, so running off into cleared memory would go unnoticed.  The core
+     catches it as the illegal instruction the specification reserves.  */
+  CHECK (exec (0) == TRAP_ILLEG);
+}
