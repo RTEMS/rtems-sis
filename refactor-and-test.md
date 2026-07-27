@@ -911,6 +911,18 @@ Hard-won here, so the next person does not rediscover them.
   `tests/elf.cc`'s `address_space_cap` is the helper; copy it rather
   than documenting the next such arc as unreachable.
 
+- **A killed `./waf` leaves a binary built from source you no longer have.**
+  waf decides what to rebuild by hashing content, and it writes its record of
+  what it built only when the run finishes. A run killed part way through,
+  by a timeout or by the SIGPIPE that `head` sends, has already compiled and
+  linked but has recorded nothing. Restoring the source then leaves the tree
+  in the state waf last recorded, so the next `./waf` reports nothing to do
+  and the stale objects stay. This bit a mutation experiment: the mutation
+  was reverted, `git status` was clean, and the suite still failed the case
+  the mutation targeted, on a binary built from a header that no longer
+  existed. `./waf clean` is the way out, and a mutation loop whose build can
+  be interrupted should end with one rather than trusting the revert.
+
 - **A test may not name a fixed path under `/tmp`.** Three cases in
   `tests/funcq.cc` wrote to one, and when several builds of the suite ran at
   once one of them removed the file another had just written and was about to
