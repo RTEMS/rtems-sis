@@ -2626,6 +2626,47 @@ TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the GDB stub packs every register")
   CHECK ((unsigned char) buf[32 * 4 + 1] == 0x20);
 }
 
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the stub reads one register")
+{
+  /* The p packet asks for a single register, which is the only way a
+     debugger reaches what the g packet has no room for.  The answer is the
+     value in target order and the count of bytes it took.  */
+  char buf[8];
+
+  set (1, 0x11223344);
+  sregs[0].pc = 0x2000;
+  sregs[0].mstatus = MSTATUS_MASK;
+  fd (1) = 1.0;
+
+  CHECK (arch->gdb_get_regi (&sregs[0], 1, buf) == 4);
+  CHECK ((unsigned char) buf[0] == 0x44);
+  CHECK ((unsigned char) buf[3] == 0x11);
+
+  CHECK (arch->gdb_get_regi (&sregs[0], 32, buf) == 4);
+  CHECK ((unsigned char) buf[1] == 0x20);
+
+  /* A floating point register answers with all eight bytes, since the core
+     has the double extension.  A double 1.0 is zero in its low word and
+     0x3ff00000 in its high one.  */
+  CHECK (arch->gdb_get_regi (&sregs[0], 33 + 1, buf) == 8);
+  CHECK ((unsigned char) buf[0] == 0x00);
+  CHECK ((unsigned char) buf[3] == 0x00);
+  CHECK ((unsigned char) buf[6] == 0xf0);
+  CHECK ((unsigned char) buf[7] == 0x3f);
+
+  /* A control register sits at its own address above the g packet's
+     numbering, so mstatus is 65 plus 0x300.  This is the read the stub had
+     no way to answer while it wrote the same register through P.  */
+  CHECK (arch->gdb_get_regi (&sregs[0], 65 + CSR_MSTATUS, buf) == 4);
+  CHECK ((unsigned char) buf[0] == (MSTATUS_MASK & 0xff));
+  CHECK ((unsigned char) buf[1] == ((MSTATUS_MASK >> 8) & 0xff));
+
+  /* Above the control registers there is nothing, and a zero length is how
+     the stub says so.  */
+  CHECK (arch->gdb_get_regi (&sregs[0], 4161, buf) == 0);
+  CHECK (arch->gdb_get_regi (&sregs[0], -1, buf) == 0);
+}
+
 TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the register displays print")
 {
   stdout_capture cap;

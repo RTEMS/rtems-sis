@@ -1517,6 +1517,30 @@ TEST_CASE_FIXTURE (sparc_fixture, "SPARC the GDB stub packs every register")
   CHECK ((unsigned char) buf[7] == 0x44);
 }
 
+TEST_CASE_FIXTURE (sparc_fixture, "SPARC the stub reads one register")
+{
+  /* The p packet asks for a single register.  Every SPARC register the stub
+     knows is one word, the floating point file included, so the answer is
+     always four bytes and it matches the same register in the g packet.  */
+  char buf[8];
+
+  set (1, 0x11223344);
+  sregs[0].pc = 0x2000;
+
+  CHECK (arch->gdb_get_regi (&sregs[0], 1, buf) == 4);
+  CHECK ((unsigned char) buf[0] == 0x11);
+  CHECK ((unsigned char) buf[3] == 0x44);
+
+  /* Register 68 is the program counter, at the top of the control group.  */
+  CHECK (arch->gdb_get_regi (&sregs[0], 68, buf) == 4);
+  CHECK ((unsigned char) buf[2] == 0x20);
+
+  /* There are 72 of them and no more.  */
+  CHECK (arch->gdb_get_regi (&sregs[0], 71, buf) == 4);
+  CHECK (arch->gdb_get_regi (&sregs[0], 72, buf) == 0);
+  CHECK (arch->gdb_get_regi (&sregs[0], -1, buf) == 0);
+}
+
 TEST_CASE_FIXTURE (sparc_fixture,
 		   "SPARC the register displays print something")
 {

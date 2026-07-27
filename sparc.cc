@@ -2387,6 +2387,19 @@ sparc_gdb_get_reg (char *buf)
   return (72 * 4);
 }
 
+/* The numbering the g packet lays out, one register at a time.  Every SPARC
+   register the stub knows is one word, the floating point file included,
+   since a double is named there as its two halves.  */
+static int
+sparc_gdb_get_regi (struct pstate *sregs, int32 reg, char *buf)
+{
+  if ((reg < 0) || (reg >= 72))
+    return (0);
+
+  sparc_get_regi (sregs, reg, buf, 4);
+  return (4);
+}
+
 /* op decoding */
 #define FMT2 0
 #define CALL 1
@@ -3489,6 +3502,7 @@ const struct cpu_arch sparc32 = {
   sparc_check_interrupts,
   sparc_print_insn,
   sparc_gdb_get_reg,
+  sparc_gdb_get_regi,
   sparc_set_register,
   sparc_display_registers,
   sparc_display_ctrl,

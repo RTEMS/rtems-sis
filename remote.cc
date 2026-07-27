@@ -259,6 +259,21 @@ gdb_remote_exec (char *buf)
       len = arch->gdb_get_reg (membuf);
       int2hex (txbuf, membuf, len);
       break;
+    case 'p': /* read one register */
+      i = 1;
+      addr = 0;
+      while (buf[i] && (buf[i] != '#'))
+	{
+	  addr = (addr << 4) | hex (buf[i]);
+	  i++;
+	}
+      len = arch->gdb_get_regi (&sregs[cpu], addr, membuf);
+
+      /* An empty reply is how the protocol says a register is not there.
+	 The debugger falls back on the g packet, which is what it did
+	 before this packet answered at all.  */
+      int2hex (txbuf, membuf, len);
+      break;
     case 'm': /* read memory */
       i = 1;
       len = 0;

@@ -2205,7 +2205,12 @@ riscv_get_regi (struct pstate *sregs, int32 reg, char *buf, int length)
 {
   uint32 rval = 0;
 
-  if ((reg >= 0) && (reg < 32))
+  /* The numbering runs the integer file, the pc, the floating point file and
+     then the control registers at their own address plus 65, so each range
+     only has to rule out the one above it.  Both callers bound it.  */
+  assert ((reg >= 0) && (reg < 4161));
+
+  if (reg < 32)
     {
       rval = sregs->r[reg];
     }
@@ -2213,7 +2218,7 @@ riscv_get_regi (struct pstate *sregs, int32 reg, char *buf, int length)
     {
       rval = sregs->pc;
     }
-  else if ((reg >= 33) && (reg < 65))
+  else if (reg < 65)
     {
       if (length == 8)
 	{
@@ -2225,7 +2230,7 @@ riscv_get_regi (struct pstate *sregs, int32 reg, char *buf, int length)
 	}
       rval = sregs->fsi[((reg - 33) << 1) + BEH];
     }
-  else if ((reg >= 65) && (reg < 4161))
+  else
     {
       rval = get_csr (reg - 65, sregs);
     }
@@ -2244,6 +2249,25 @@ riscv_gdb_get_reg (char *buf)
     riscv_get_regi (&sregs[cpu], i, &buf[i * 4], 4);
 
   return (65 * 4);
+}
+
+/* The numbering the g packet lays out, then the control registers above it
+   at their own address plus 65, which is where the p packet reaches what the
+   g packet has no room for.  A floating point register is eight bytes wide
+   because this core has the double extension, so a debugger reading one
+   through p gets the whole value rather than the half the g packet
+   carries.  */
+static int
+riscv_gdb_get_regi (struct pstate *sregs, int32 reg, char *buf)
+{
+  int length;
+
+  if ((reg < 0) || (reg >= 4161))
+    return (0);
+
+  length = ((reg >= 33) && (reg < 65)) ? 8 : 4;
+  riscv_get_regi (sregs, reg, buf, length);
+  return (length);
 }
 
 /* The control registers the shell may write, by the name the disassembler and
@@ -3407,6 +3431,7 @@ const struct cpu_arch riscv = {
   riscv_check_interrupts,
   riscv_print_insn,
   riscv_gdb_get_reg,
+  riscv_gdb_get_regi,
   riscv_set_register,
   riscv_display_registers,
   riscv_display_ctrl,

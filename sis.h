@@ -191,6 +191,10 @@ struct cpu_arch
   int (*check_interrupts) (struct pstate *sregs);
   void (*disas) (uint32 addr);
   int (*gdb_get_reg) (char *buf);
+
+  /* One register, in target order, for the GDB p packet.  Returns the number
+     of bytes written, or zero when the core has no such register.  */
+  int (*gdb_get_regi) (struct pstate *sregs, int32 reg, char *buf);
   void (*set_register) (struct pstate *sregs, char *reg, uint32 rval,
 			uint32 addr);
   void (*display_registers) (struct pstate *sregs);
