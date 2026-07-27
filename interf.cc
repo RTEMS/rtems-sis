@@ -33,8 +33,14 @@
 #define SIM_RC	    int
 #define SIM_RC_FAIL 0
 #define SIM_RC_OK   1
-#define EBREAK	    0x00100073
-#define CEBREAK	    0x90002
+/* The breakpoint instruction a Z0 packet patches into the target.  EBREAK is
+   the RISC-V unprivileged ISA SYSTEM encoding, CEBREAK its C extension form
+   (c.ebreak shares the c.add opcode with rd and rs2 both zero).  TABREAK is
+   the SPARC V8 ta 1, appendix B.27 format 3 with cond TA, which sparc.cc
+   recognises as the debugger breakpoint.  */
+#define EBREAK	0x00100073
+#define CEBREAK 0x9002
+#define TABREAK 0x91d02001
 
 static int
 run_sim_gdb (uint64 icount, int dis)
@@ -352,7 +358,7 @@ sim_insert_swbreakpoint (uint32 addr, int len)
       ms->sis_memory_read (addr, (char *) &ebase.bpsave[ebase.bptnum], len);
       if (len == 4)
 	{
-	  breakinsn = EBREAK;
+	  breakinsn = (archtype == CPU_SPARC) ? TABREAK : EBREAK;
 	  ms->sis_memory_write (addr, (char *) &breakinsn, 4);
 	}
       else

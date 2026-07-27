@@ -566,18 +566,36 @@ TEST_CASE ("Z0 patches a word breakpoint and saves the opcode")
   interf_fixture f;
 
   /* A Z0 packet carries the address and a kind, the instruction length in
-     bytes.  Kind 4 is the 32 bit encoding, and the patched word is the
-     RISC-V EBREAK, 0x00100073 (RISC-V unprivileged ISA, table of SYSTEM
-     encodings).  The replaced opcode is kept so z0 can put it back.  */
+     bytes (GDB manual, "Packets", Z0).  Kind 4 is a 32 bit instruction, and
+     the patched word is the target's breakpoint instruction: EBREAK,
+     0x00100073, on RISC-V (RISC-V unprivileged ISA, "Environment Call and
+     Breakpoint"), and ta 1, 0x91d02001, on SPARC (SPARC V8 appendix B.27,
+     format 3 with cond TA, i = 1 and software_trap# = 1), which is the word
+     sparc.cc treats as a debugger breakpoint.  The replaced opcode is kept
+     so z0 can put it back.  */
   set_ram_word (RAM, 0x12345678);
   set_ram_word (RAM + 4, 0x87654321);
+
+  uint32 expected;
+
+  SUBCASE ("RISC-V target")
+  {
+    archtype = CPU_RISCV;
+    expected = 0x00100073;
+  }
+
+  SUBCASE ("SPARC target")
+  {
+    archtype = CPU_SPARC;
+    expected = 0x91d02001;
+  }
 
   CHECK (sim_set_watchpoint (RAM, 4, 0) == 1);
 
   CHECK (ebase.bptnum == 1);
   CHECK (ebase.bpts[0] == RAM);
   CHECK (ebase.bpsave[0] == 0x12345678);
-  CHECK (ram_word (RAM) == 0x00100073);
+  CHECK (ram_word (RAM) == expected);
   CHECK (ram_word (RAM + 4) == 0x87654321);
 
   CHECK (sim_clear_watchpoint (RAM, 4, 0) == 1);
@@ -585,28 +603,24 @@ TEST_CASE ("Z0 patches a word breakpoint and saves the opcode")
   CHECK (ram_word (RAM) == 0x12345678);
 }
 
-TEST_CASE ("Z0 kind 2 patches a halfword breakpoint (suspected defect)")
+TEST_CASE ("Z0 kind 2 patches a halfword breakpoint with C.EBREAK")
 {
   interf_fixture f;
 
-  /* Kind 2 is the compressed encoding, so the patch must be C.EBREAK, which
-     the RISC-V C extension encodes as 0x9002.  interf.cc writes the low half
-     of CEBREAK, defined as 0x90002, so the halfword actually stored is
-     0x0002, a reserved compressed encoding and not a breakpoint.  Pinned as
-     a suspected defect: the constant looks like 0x9002 with a stray digit.
-     SIS itself stops on the breakpoint address rather than on the patched
-     instruction, so only the memory image GDB reads back is wrong.  */
-  const uint32 cebreak = 0x90002;
+  /* Kind 2 is a 16 bit instruction, so the patch is the compressed
+     breakpoint.  The RISC-V unprivileged ISA, C extension, "Breakpoint
+     Instruction", defines c.ebreak as the c.add opcode with rd and rs2 both
+     zero: funct4 1001, rd 00000, rs2 00000, op 10, which is 0x9002.  */
   unsigned short patched;
 
+  archtype = CPU_RISCV;
   set_ram_word (RAM, 0x12345678);
 
   CHECK (sim_set_watchpoint (RAM, 2, 0) == 1);
   CHECK (ebase.bptnum == 1);
 
   memcpy (&patched, fake_ram, 2);
-  CHECK (patched == (unsigned short) cebreak);
-  CHECK (patched != 0x9002);
+  CHECK (patched == 0x9002);
 
   /* Only the halfword is touched, and z0 with the same kind restores it.  */
   CHECK (sim_clear_watchpoint (RAM, 2, 0) == 1);
@@ -631,7 +645,9 @@ TEST_CASE ("z0 restores the opcode and closes the gap in the table")
   interf_fixture f;
 
   /* Three breakpoints, the middle one removed: its opcode goes back and the
-     entries above it move down, so the table stays dense.  */
+     entries above it move down, so the table stays dense.  The target is
+     RISC-V here, so the patched word is EBREAK.  */
+  archtype = CPU_RISCV;
   set_ram_word (RAM, 0x11111111);
   set_ram_word (RAM + 4, 0x22222222);
   set_ram_word (RAM + 8, 0x33333333);
