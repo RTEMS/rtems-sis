@@ -50,8 +50,6 @@
 /* Memory exception waitstates */
 #define MEM_EX_WS 1
 
-#define MOK 0
-
 /* LEON2 APB register addresses */
 
 #define IRQCTRL_IPR   0x094
@@ -125,8 +123,8 @@ static void leon2_reset (void);
 static void irqctrl_intack (int32 level, int32 cpu);
 static void chk_irq (void);
 static void set_irq (int32 level);
-static int32 apb_read (uint32 addr, uint32 *data);
-static int apb_write (uint32 addr, uint32 data);
+static void apb_read (uint32 addr, uint32 *data);
+static void apb_write (uint32 addr, uint32 data);
 static void port_init (void);
 static uint32 grlib_read_uart (uint32 addr);
 static void grlib_write_uart (uint32 addr, uint32 data);
@@ -206,8 +204,6 @@ exit_sim (void)
 static void
 leon2_reset (void)
 {
-  int i;
-
   irqctrl_ipr = 0;
   irqctrl_imr = 0;
   irqctrl_ifr = 0;
@@ -226,7 +222,6 @@ static void
 irqctrl_intack (int32 level, int32 cpu)
 {
   (void) cpu;
-  int irq_test;
 
   if (sis_verbose > 2)
     printf ("interrupt %d acknowledged\n", level);
@@ -249,16 +244,14 @@ chk_irq (void)
   ext_irl[0] = 0;
   if (itmp != 0)
     {
-      for (i = 15; i > 0; i--)
-	{
-	  if (((itmp >> i) & 1) != 0)
-	    {
-	      if ((sis_verbose > 2) && (i > old_irl))
-		printf ("IU irl: %d\n", i);
-	      ext_irl[0] = i;
-	      break;
-	    }
-	}
+      /* Interrupt 15 has the highest priority and interrupt 1 the lowest,
+	 so the search runs down.  The mask above keeps bits 15 to 1 only,
+	 so a nonzero ITMP always has a set bit and the search stops.  */
+      for (i = 15; ((itmp >> i) & 1) == 0; i--)
+	;
+      if ((sis_verbose > 2) && (i > old_irl))
+	printf ("IU irl: %d\n", i);
+      ext_irl[0] = i;
     }
 }
 
@@ -269,7 +262,9 @@ set_irq (int32 level)
   chk_irq ();
 }
 
-static int32
+/* Every register in the window answers, so an APB access never faults.  */
+
+static void
 apb_read (uint32 addr, uint32 *data)
 {
 
@@ -340,11 +335,9 @@ apb_read (uint32 addr, uint32 *data)
 
   if (sis_verbose > 1)
     printf ("APB read  a: %08x, d: %08x\n", addr, *data);
-
-  return MOK;
 }
 
-static int
+static void
 apb_write (uint32 addr, uint32 data)
 {
   if (sis_verbose > 1)
@@ -413,7 +406,6 @@ apb_write (uint32 addr, uint32 data)
     default:
       break;
     }
-  return MOK;
 }
 
 /* APBUART. */
@@ -437,16 +429,14 @@ port_init (void)
   wnuma = 0;
 }
 
+/* Only apb_read and uart_intr call this, and only for the data and the
+   status register, so the two are the whole address space it decodes.  */
+
 static uint32
 grlib_read_uart (uint32 addr)
 {
-
-  unsigned tmp = 0;
-
-  switch (addr & 0xfff)
+  if ((addr & 0xfff) == APBUART_RXTX)
     {
-
-    case 0x070: /* UART 1 RX/TX */
 #ifndef _WIN32
       if (aind < anum)
 	{
@@ -473,38 +463,30 @@ grlib_read_uart (uint32 addr)
 #else
       return 0;
 #endif
-      break;
-
-    case 0x074: /* UART status register  */
-#ifndef _WIN32
-
-      Ucontrol = 0;
-      if (aind < anum)
-	Ucontrol |= 0x00000001;
-      else
-	{
-	  if (porta.open)
-	    anum = uart_port_read (&porta, (char *) aq, UARTBUF);
-	  else
-	    anum = 0;
-	  if (anum > 0)
-	    {
-	      Ucontrol |= 0x00000001;
-	      aind = 0;
-	      set_irq (3);
-	    }
-	}
-      Ucontrol |= 0x00000006;
-      return Ucontrol;
-#else
-      return 0x00060006;
-#endif
-      break;
-    default:
-      if (sis_verbose)
-	printf ("Read from unimplemented LEON2 register (%x)\n", addr);
     }
-  return 0;
+
+#ifndef _WIN32
+  Ucontrol = 0;
+  if (aind < anum)
+    Ucontrol |= 0x00000001;
+  else
+    {
+      if (porta.open)
+	anum = uart_port_read (&porta, (char *) aq, UARTBUF);
+      else
+	anum = 0;
+      if (anum > 0)
+	{
+	  Ucontrol |= 0x00000001;
+	  aind = 0;
+	  set_irq (3);
+	}
+    }
+  Ucontrol |= 0x00000006;
+  return Ucontrol;
+#else
+  return 0x00060006;
+#endif
 }
 
 static void
@@ -513,10 +495,11 @@ grlib_write_uart (uint32 addr, uint32 data)
   unsigned char c;
 
   c = (unsigned char) data;
-  switch (addr & 0xfff)
-    {
 
-    case 0x070: /* UART A */
+  /* Only apb_write calls this, and only for the data and the status
+     register.  A status register write is discarded.  */
+  if ((addr & 0xfff) == APBUART_RXTX)
+    {
       if (porta.open)
 	{
 	  if (wnuma < UARTBUF)
@@ -531,13 +514,6 @@ grlib_write_uart (uint32 addr, uint32 data)
 	    }
 	}
       set_irq (3);
-      break;
-
-    case 0x074: /* UART status register */
-      break;
-    default:
-      if (sis_verbose)
-	printf ("Write to unimplemented APB register (%x)\n", addr);
     }
 }
 
@@ -631,31 +607,31 @@ timer_ctrl (uint32 val, int i)
 static void
 store_bytes (char *mem, uint32 waddr, uint32 *data, int32 sz, int32 *ws)
 {
-  switch (sz)
+  /* sz is the two-bit store size: 0 byte, 1 half-word, 2 word, 3 double, so
+     the final case needs no test of its own.  */
+  if (sz == 0)
     {
-    case 0:
 #ifdef HOST_LITTLE_ENDIAN
       waddr ^= 3;
 #endif
       mem[waddr] = *data & 0x0ff;
-      *ws = 0;
-      break;
-    case 1:
+    }
+  else if (sz == 1)
+    {
 #ifdef HOST_LITTLE_ENDIAN
       waddr ^= 2;
 #endif
       *((uint16 *) &mem[waddr]) = *data & 0x0ffff;
-      *ws = 0;
-      break;
-    case 2:
-      memcpy (&mem[waddr], data, 4);
-      *ws = 0;
-      break;
-    case 3:
-      memcpy (&mem[waddr], data, 8);
-      *ws = 0;
-      break;
     }
+  else if (sz == 2)
+    {
+      memcpy (&mem[waddr], data, 4);
+    }
+  else
+    {
+      memcpy (&mem[waddr], data, 8);
+    }
+  *ws = 0;
 }
 
 /* Memory emulation.  */
@@ -685,8 +661,6 @@ memory_iread (uint32 addr, uint32 *data, int32 *ws)
 static int
 memory_read (uint32 addr, uint32 *data, int32 *ws)
 {
-  int32 mexc;
-
   if ((addr >= RAM_START) && (addr < RAM_END))
     {
       memcpy (data, &ramb[addr & RAM_MASK], 4);
@@ -695,12 +669,9 @@ memory_read (uint32 addr, uint32 *data, int32 *ws)
     }
   else if ((addr >= APBSTART) && (addr < APBEND))
     {
-      mexc = apb_read (addr, data);
-      if (mexc)
-	*ws = MEM_EX_WS;
-      else
-	*ws = 0;
-      return mexc;
+      apb_read (addr, data);
+      *ws = 0;
+      return 0;
     }
   else if (addr < ROM_END)
     {
@@ -718,13 +689,7 @@ memory_read (uint32 addr, uint32 *data, int32 *ws)
 static int
 memory_write (uint32 addr, uint32 *data, int32 sz, int32 *ws)
 {
-  uint32 byte_addr;
-  uint32 byte_mask;
   uint32 waddr;
-  uint32 *ram;
-  int32 mexc;
-  int i;
-  int wphit[2];
 
   if ((addr >= RAM_START) && (addr < RAM_END))
     {
