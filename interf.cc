@@ -313,10 +313,11 @@ sim_clear_watchpoint (uint32 mem, int length, int type)
       res = sis_remove_watchpoint_read (mem);
       break;
     case 4:
-      if ((res = sis_remove_watchpoint_write (mem)) == SIM_RC_OK)
-	res = sis_remove_watchpoint_read (mem);
-      else
-	sis_remove_watchpoint_read (mem);
+      /* Both halves are removed unconditionally.  Removal reports success
+	 whether or not the address was in the table, so there is nothing to
+	 branch on.  */
+      sis_remove_watchpoint_write (mem);
+      res = sis_remove_watchpoint_read (mem);
       break;
     default:
       res = 0;
