@@ -1164,6 +1164,16 @@ TEST_CASE_FIXTURE (riscv_fixture, "RISC-V single precision comparisons")
   CHECK (exec (fpu (F_CMP, FMT_S, 3, 2, 1, 2)) == 0);
   CHECK (get (3) == 1);
 
+  /* The greater ordering, where neither the equality nor the less than
+     answers yes.  */
+  setfs (2, 0.5f);
+  CHECK (exec (fpu (F_CMP, FMT_S, 3, 0, 1, 2)) == 0);
+  CHECK (get (3) == 0);
+  CHECK (exec (fpu (F_CMP, FMT_S, 3, 1, 1, 2)) == 0);
+  CHECK (get (3) == 0);
+  CHECK (exec (fpu (F_CMP, FMT_S, 3, 2, 1, 2)) == 0);
+  CHECK (get (3) == 0);
+
   CHECK (exec (fpu (F_CMP, FMT_S, 3, 3, 1, 2)) == TRAP_ILLEG);
 }
 
@@ -2091,6 +2101,100 @@ TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the disassembler names its operands")
   CHECK (disas (0x87ba | 0xffff0000).find ("a5,a4") != std::string::npos);
 }
 
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the disassembler spells the aliases")
+{
+  /* Several encodings have a shorter assembly form the specification lists
+     in its table of pseudoinstructions, and the disassembler prints that
+     form instead of the base instruction.  A pseudoinstruction leaves out
+     the operand it fixes, so here the mnemonic is what the case is about and
+     the operand check alone would not see the choice.  */
+  uint32 addr = 0x200;
+
+  auto disas = [&] (uint32 inst)
+    {
+      stdout_capture cap;
+
+      sis_tests::flatmem_poke (addr, inst);
+      arch->disas (addr);
+      return cap.str ();
+    };
+
+  auto has = [] (const std::string &text, const char *what)
+    { return text.find (what) != std::string::npos; };
+
+  /* jalr x0, x1, 0 returns from a call, and jalr x1, rs1, 0 leaves out the
+     link register it always writes.  A displacement is printed only when it
+     is there.  */
+  CHECK (has (disas (itype (OP_JALR, 0, 0, 1, 0)), "ret"));
+  /* The mnemonic is padded to a column, so a form whose whole operand list
+     is one register is checked against the pair.  */
+  CHECK (has (disas (itype (OP_JALR, 1, 0, 11, 0)), "jalr        a1"));
+  CHECK (has (disas (itype (OP_JALR, 10, 0, 11, 8)), "a0,a1,0x8"));
+
+  /* All three of the return form's conditions have to hold.  Discarding the
+     link register is not enough on its own, whether it is the displacement
+     or the source register that differs.  */
+  CHECK (!has (disas (itype (OP_JALR, 0, 0, 11, 0)), "ret"));
+  CHECK (!has (disas (itype (OP_JALR, 0, 0, 1, 8)), "ret"));
+
+  /* addi rd, x0, imm loads the immediate, and addi rd, rs1, 0 moves the
+     register.  */
+  CHECK (has (disas (itype (OP_IMM, 10, ADD, 0, 7)), "li"));
+  CHECK (has (disas (itype (OP_IMM, 10, ADD, 0, 7)), "a0,7"));
+  CHECK (has (disas (itype (OP_IMM, 10, ADD, 11, 0)), "mv"));
+  CHECK (has (disas (itype (OP_IMM, 10, ADD, 11, 0)), "a0,a1"));
+
+  /* A branch against x0 drops the register and takes a z in the mnemonic.
+     blt x0, rs2 reads as a greater than zero test of rs2, so it swaps its
+     name rather than gaining the z where the others do.  */
+  CHECK (has (disas (btype (B_BLT, 0, 11, 0x40)), "bgtz"));
+  CHECK (has (disas (btype (B_BLT, 0, 11, 0x40)), "a1,0x"));
+  CHECK (has (disas (btype (B_BGE, 10, 0, 0x40)), "bgez"));
+  CHECK (has (disas (btype (B_BGE, 10, 0, 0x40)), "a0,0x"));
+
+  /* A control register write which discards the old value drops the
+     destination.  */
+  CHECK (has (disas (itype (OP_SYS, 0, CSRRW, 11, CSR_MSTATUS)), "csrw"));
+  CHECK (
+      has (disas (itype (OP_SYS, 0, CSRRW, 11, CSR_MSTATUS)), "mstatus,a1"));
+  CHECK (has (disas (itype (OP_SYS, 0, CSRRS, 11, CSR_MSTATUS)), "csrs"));
+  CHECK (has (disas (itype (OP_SYS, 0, CSRRSI, 5, CSR_MSTATUS)), "csrsi"));
+  CHECK (has (disas (itype (OP_SYS, 0, CSRRSI, 5, CSR_MSTATUS)), "mstatus,5"));
+
+  /* The ordering bits of an atomic are suffixes on the mnemonic.  The
+     reservation names one source, the conditional store two.  */
+  CHECK (
+      has (disas (rtype (OP_AMO, 10, 2, 11, 0, (LRQ << 2) | 2)), "lr.w.aq"));
+  CHECK (
+      has (disas (rtype (OP_AMO, 10, 2, 11, 0, (LRQ << 2) | 1)), "lr.w.rl"));
+  CHECK (
+      has (disas (rtype (OP_AMO, 10, 2, 11, 0, (LRQ << 2) | 0)), "a0,(a1)"));
+  CHECK (
+      has (disas (rtype (OP_AMO, 10, 2, 11, 12, (SCQ << 2) | 2)), "sc.w.aq"));
+  CHECK (
+      has (disas (rtype (OP_AMO, 10, 2, 11, 12, (SCQ << 2) | 1)), "sc.w.rl"));
+
+  /* The compressed register forms, which name registers the wide encoding
+     would spell out.  The three bit fields select from x8 up, so a0 and a1
+     are the values 2 and 3 there.  */
+  CHECK (has (disas (0x8d0d | 0xffff0000), "sub"));
+  CHECK (has (disas (0x8d0d | 0xffff0000), "a0,a0,a1"));
+  CHECK (has (disas (0x8d2d | 0xffff0000), "xor"));
+  CHECK (has (disas (0x8d4d | 0xffff0000), "or"));
+  CHECK (has (disas (0x8d6d | 0xffff0000), "and"));
+
+  /* Quadrant two selects on the twelfth bit and on whether either register
+     field is zero, which is where its four control transfers and its break
+     live.  */
+  CHECK (has (disas (0x952e | 0xffff0000), "add"));
+  CHECK (has (disas (0x952e | 0xffff0000), "a0,a0,a1"));
+  CHECK (has (disas (0x9082 | 0xffff0000), "jalr"));
+  CHECK (has (disas (0x9082 | 0xffff0000), "ra,ra"));
+  CHECK (has (disas (0x9002 | 0xffff0000), "ebreak"));
+  CHECK (has (disas (0x8082 | 0xffff0000), "ret"));
+  CHECK (has (disas (0x8782 | 0xffff0000), "a5"));
+}
+
 TEST_CASE_FIXTURE (riscv_fixture, "RISC-V a double value is classified")
 {
   /* The classification table is the same for both formats, but the bit which
@@ -2225,6 +2329,16 @@ TEST_CASE_FIXTURE (riscv_fixture, "RISC-V double precision comparisons")
   CHECK (exec (fpu (F_CMP, FMT_D, 3, 2, 2, 4)) == 0);
   CHECK (get (3) == 1);
 
+  /* The greater ordering, where neither the equality nor the less than
+     answers yes.  */
+  fd (4) = 0.5;
+  CHECK (exec (fpu (F_CMP, FMT_D, 3, 0, 2, 4)) == 0);
+  CHECK (get (3) == 0);
+  CHECK (exec (fpu (F_CMP, FMT_D, 3, 1, 2, 4)) == 0);
+  CHECK (get (3) == 0);
+  CHECK (exec (fpu (F_CMP, FMT_D, 3, 2, 2, 4)) == 0);
+  CHECK (get (3) == 0);
+
   CHECK (exec (fpu (F_CMP, FMT_D, 3, 3, 2, 4)) == TRAP_ILLEG);
 }
 
@@ -2297,15 +2411,61 @@ TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the fused multiply and add")
       CHECK (fbox (3) == -1);
     }
 
-  /* And the double forms.  */
+  /* And the double forms, which sign their terms the same way.  The third
+     source is named by the top five bits, so register 8 there is fd8.  */
+  struct
+  {
+    uint32 op;
+    float64 result;
+  } dcases[] = {
+    { OP_FMADD, 7.0 },
+    { OP_FMSUB, 5.0 },
+    { OP_FNMSUB, -5.0 },
+    { OP_FNMADD, -7.0 },
+  };
+
   fd (2) = 2.0;
   fd (4) = 3.0;
   fd (8) = 1.0;
-  CHECK (exec (rtype (OP_FMADD, 6, 0, 2, 4, (8 << 2) | FMT_D)) == 0);
-  CHECK (fd (6) == 7.0);
+  for (auto c : dcases)
+    {
+      INFO ("double opcode " << c.op);
+      CHECK (exec (rtype (c.op, 6, 0, 2, 4, (8 << 2) | FMT_D)) == 0);
+      CHECK (fd (6) == c.result);
+    }
 
-  /* The remaining format codes are unassigned.  */
-  CHECK (exec (rtype (OP_FMADD, 6, 0, 2, 4, (8 << 2) | 2)) == TRAP_ILLEG);
+  /* The remaining format codes are unassigned, in each of the four.  */
+  for (auto c : dcases)
+    {
+      INFO ("unassigned format under opcode " << c.op);
+      CHECK (exec (rtype (c.op, 6, 0, 2, 4, (8 << 2) | 2)) == TRAP_ILLEG);
+    }
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the unassigned float encodings")
+{
+  /* Chapter 21 assigns the format field of the floating point group two of
+     its four values on this core, and leaves gaps in the operation field
+     above it.  Every gap is an illegal instruction, not a silent no
+     operation.  */
+  setfs (1, 1.0f);
+  setfs (2, 2.0f);
+  fd (2) = 1.0;
+  fd (4) = 2.0;
+
+  /* The quad and half formats, which this core does not have.  */
+  CHECK (exec (fpu (F_ADD, 2, 3, 0, 1, 2)) == TRAP_ILLEG);
+  CHECK (exec (fpu (F_ADD, 3, 3, 0, 1, 2)) == TRAP_ILLEG);
+
+  /* An operation code above the assigned ones, in both formats.  */
+  CHECK (exec (fpu (0x1f, FMT_S, 3, 0, 1, 2)) == TRAP_ILLEG);
+  CHECK (exec (fpu (0x1f, FMT_D, 3, 0, 2, 4)) == TRAP_ILLEG);
+
+  /* The move and classify group shares one operation code and splits on the
+     function field, which has only two of its eight values assigned for a
+     single and one for a double.  There is no fmv.x.d on a 32 bit core.  */
+  CHECK (exec (fpu (0x1c, FMT_S, 3, 2, 1, 2)) == TRAP_ILLEG);
+  CHECK (exec (fpu (0x1c, FMT_D, 3, 0, 2, 4)) == TRAP_ILLEG);
 }
 
 /* The ABI register names of the calling convention.  They are written out
