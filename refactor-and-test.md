@@ -82,7 +82,7 @@ against real descriptors the way `tests/sisio.cc` does.
 ## Where the tree stands
 
 Measured with `./waf configure --enable-coverage && ./waf`, branch metric,
-4786 of 5182 arcs (92%). The totals move as headers join the filter and as
+4981 of 5143 arcs (97%). The totals move as headers join the filter and as
 duplicated and dead code is removed, so compare per file rather than against
 an older total. Read the per file rows of the gcovr report, not its `TOTAL`
 line: that row counts the standard library headers the build pulls in, whose
@@ -91,16 +91,14 @@ tree.
 
 | Area | Arcs | Taken |
 |---|---|---|
-| `riscv.cc` | 1106 | 1106 |
 | `sparc.cc` | 1133 | 1133 |
-| `func.cc` | 579 | 579 |
+| `riscv.cc` | 1106 | 1106 |
 | `grlib.cc` | 387 | 385 |
-| `leon3.cc` | 42 | 41 |
 | `gr740.cc` | 42 | 41 |
-| `remote.cc` | 226 | 14 |
+| `leon3.cc` | 42 | 41 |
 | `memscrub.cc` | 94 | 1 |
 | `tap.cc` | 65 | 0 |
-| graduated: `elf.cc`, `erc32.cc`, `erc32_cfg.h`, `erc32_error.h`, `erc32_mec.h`, `erc32_timer.h`, `erc32_uart.h`, `exec.cc`, `func.cc`, `getdelim.h`, `gr1553.cc`, `greth.cc`, `grspw.cc`, `help.cc`, `interf.cc`, `leon2.cc`, `riscv.cc`, `rv32.cc`, `sis.cc`, `sisio.cc`, `sparc.cc`, `uartport.cc` | | 100% |
+| graduated: `elf.cc`, `erc32.cc`, `erc32_cfg.h`, `erc32_error.h`, `erc32_mec.h`, `erc32_timer.h`, `erc32_uart.h`, `exec.cc`, `func.cc`, `getdelim.h`, `gr1553.cc`, `greth.cc`, `grspw.cc`, `help.cc`, `interf.cc`, `leon2.cc`, `remote.cc`, `remote_socket.h`, `riscv.cc`, `rv32.cc`, `sis.cc`, `sisio.cc`, `sparc.cc`, `uartport.cc` | | 100% |
 
 Done, graduated in `tests/covered.txt`:
 
@@ -952,6 +950,16 @@ Hard-won here, so the next person does not rediscover them.
   allocation fail while every ordinary one still succeeds.
   `tests/elf.cc`'s `address_space_cap` is the helper; copy it rather
   than documenting the next such arc as unreachable.
+
+- **An agent working from a stale base leaves a hole the gate catches.** Six
+  of the seven agents this round started on a commit well behind the campaign
+  tip; most noticed and fast forwarded, and the one that did not still
+  produced a faithful patch. The cost showed up only at the merge:
+  `remote.cc` gained a `p` packet on this branch after that base, so the GDB
+  stub tests, complete against the tree they were written for, left its case
+  arc untouched and the per file gate failed the moment the file was
+  graduated. Tell an agent to fast forward before it starts, and measure
+  coverage after the merge rather than trusting the number from the worktree.
 
 - **A killed `./waf` leaves a binary built from source you no longer have.**
   waf decides what to rebuild by hashing content, and it writes its record of
