@@ -1347,56 +1347,20 @@ TEST_CASE_FIXTURE (remote_fixture, "vCont lists what it supports")
   CHECK (body_of (query) == "vCont;c;s");
 }
 
-TEST_CASE_FIXTURE (remote_fixture,
-		   "vCont ignores the action it announced (suspected defect)")
+TEST_CASE_FIXTURE (remote_fixture, "vCont runs the action it announced")
 {
-  /* "Packets", 'vCont[;action]...': the action follows the semicolon, so
-     for "vCont;c" the action letter is at offset 6 of the packet data.
-     The stub switches on offset 5, which is the semicolon itself, so no
-     vCont action is ever recognised even though vCont? announces two.
-     Both requests fall into the unknown action arm.
-
-     That arm is a second defect.  An unsupported action is answered with
-     the empty packet "$#00"; the stub builds it as "$#" and then runs the
-     checksum routine over the '#' it just wrote, sending "$##23", a packet
-     whose data is a single '#'.  */
-  std::string cont, step, bad;
-  {
-    gdb_session session;
-    poke (RAM, 0x01000000); /* nop */
-    poke (RAM + 4, 0x01000000);
-    cont = session.request (pkt ("vCont;c"));
-    step = session.request (pkt ("vCont;s"));
-    bad = session.request (pkt ("vCont;X"));
-    session.finish ();
-  }
-
-  CHECK (cont == "+$##23");
-  CHECK (step == "+$##23");
-  CHECK (bad == "+$##23");
-
-  /* The program never ran, because no action was recognised.  */
-  CHECK (sregs[0].pc == RAM);
-}
-
-TEST_CASE_FIXTURE (remote_fixture,
-		   "the vCont actions answer only misspelled (suspected "
-		   "defect)")
-{
-  /* The continue and step arms of the vCont switch are reachable only by
-     leaving out the semicolon the protocol requires, which puts the action
-     letter at the offset the stub reads.  "vContc" and "vConts" are not
-     protocol; they are the shape that reaches the code GDB cannot.  This
-     case pins what those arms do so that the defect above is fixable
-     without guessing at their behaviour.  */
+  /* "Packets", 'vCont[;action[:thread-id]]...': the action follows the
+     semicolon, so for "vCont;s" the action letter is at offset 6 of the
+     packet data.  's' steps one instruction and 'c' continues, and each is
+     answered with a stop reply.  */
   std::string step, cont;
   {
     gdb_session session;
     poke (RAM, 0x01000000); /* nop */
     poke (RAM + 4, 0x01000000);
-    step = session.request (pkt ("vConts"));
+    step = session.request (pkt ("vCont;s"));
     (void) session.request (pkt ("Z0,2001008,4"));
-    cont = session.request (pkt ("vContc"));
+    cont = session.request (pkt ("vCont;c"));
     session.finish ();
   }
 
@@ -1405,6 +1369,51 @@ TEST_CASE_FIXTURE (remote_fixture,
   CHECK (body_of (step) == "S05");
   CHECK (body_of (cont) == "S05");
   CHECK (sregs[0].pc == RAM + 8);
+}
+
+TEST_CASE_FIXTURE (remote_fixture, "vCont takes an action with a thread id")
+{
+  /* "Packets", vCont: an action may be followed by a colon and the thread
+     it applies to, and a packet may carry several actions.  A thread that
+     no action names keeps running.  The target has a single thread, so the
+     leftmost action is the one it runs.  */
+  std::string step;
+  {
+    gdb_session session;
+    poke (RAM, 0x01000000); /* nop */
+    poke (RAM + 4, 0x01000000);
+    step = session.request (pkt ("vCont;s:1;c"));
+    session.finish ();
+  }
+
+  CHECK (body_of (step) == "S05");
+  CHECK (sregs[0].pc == RAM + 4);
+}
+
+TEST_CASE_FIXTURE (remote_fixture, "an unknown vCont action gets the empty "
+				   "packet")
+{
+  /* "Overview": a stub answers a request it does not support with the empty
+     packet, "$#00".  An action outside the list vCont? announced is such a
+     request, and so is a vCont carrying no action at all.  An action that
+     the semicolon does not introduce is not a vCont action either, however
+     much it looks like one.  */
+  std::string bad, bare, nosemi;
+  {
+    gdb_session session;
+    poke (RAM, 0x01000000); /* nop */
+    bad = session.request (pkt ("vCont;X"));
+    bare = session.request (pkt ("vCont"));
+    nosemi = session.request (pkt ("vContc"));
+    session.finish ();
+  }
+
+  CHECK (bad == "+$#00");
+  CHECK (bare == "+$#00");
+  CHECK (nosemi == "+$#00");
+
+  /* Neither ran the program.  */
+  CHECK (sregs[0].pc == RAM);
 }
 
 TEST_CASE_FIXTURE (remote_fixture, "vKill and vRun restart the program")

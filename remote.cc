@@ -408,7 +408,18 @@ gdb_remote_exec (char *buf)
 	}
       else if (strncmp (&buf[1], "Cont", 4) == 0)
 	{ /* continue/step */
-	  switch (buf[5])
+	  /* Each action is introduced by a semicolon and may name a thread
+	     after a colon.  The target has one thread, so the first action is
+	     the one that applies.  An action the stub does not implement, and
+	     a vCont with no action at all, get the empty packet.  */
+	  char action = buf[5];
+
+	  if (action == ';')
+	    action = buf[6];
+	  else if (action != '?')
+	    action = 0;
+
+	  switch (action)
 	    {
 	    case '?':
 	      strcpy (txbuf, "vCont;c;s");
@@ -424,7 +435,7 @@ gdb_remote_exec (char *buf)
 	      sprintf (txbuf, "S%02x", i);
 	      break;
 	    default:
-	      strcpy (sendbuf, "$#");
+	      break;
 	    }
 	}
       break;
