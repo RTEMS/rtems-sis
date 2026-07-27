@@ -30,6 +30,10 @@
 
 using sis_tests::stdout_capture;
 
+/* The coverage bitmap of func.cc, one byte per word of memory.  It has no
+   declaration in sis.h because nothing outside func.cc reads it.  */
+extern unsigned char covram[];
+
 namespace
 {
 
@@ -1514,4 +1518,497 @@ TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the compressed breakpoint")
 
   sregs[0].bphit = 0;
   sis_gdb_break = saved;
+}
+
+TEST_CASE_FIXTURE (riscv_fixture,
+		   "RISC-V the compressed floating point accesses")
+{
+  /* The compressed format reaches the floating point file too, in both the
+     three register and the stack pointer form, and in both widths.  */
+  sis_tests::flatmem_poke (0x48, 0x3f800000);
+  sis_tests::flatmem_poke (0x4c, 0x40000000);
+  set (11, 0x40); /* a1 */
+  set (2, 0x40);  /* sp */
+
+  CHECK (exec (0x6588) == 0); /* c.flw fa0, 8(a1) */
+  CHECK (fs (10) == 1.0f);
+  CHECK (fbox (10) == -1);
+
+  CHECK (exec (0x2588) == 0); /* c.fld fa0, 8(a1) */
+  CHECK (fsi (10) == 0x3f800000);
+  CHECK (fbox (10) == 0x40000000);
+
+  CHECK (exec (0x67a2) == 0); /* c.flwsp fa5, 8(sp) */
+  CHECK (fs (15) == 1.0f);
+
+  CHECK (exec (0x27a2) == 0); /* c.fldsp fa5, 8(sp) */
+  CHECK (fsi (15) == 0x3f800000);
+  CHECK (fbox (15) == 0x40000000);
+
+  /* And back out again.  */
+  setfs (10, 2.5f);
+  sis_tests::flatmem_poke (0x48, 0);
+  CHECK (exec (0xe588) == 0); /* c.fsw fa0, 8(a1) */
+  CHECK (sis_tests::flatmem_peek (0x48) == 0x40200000);
+
+  CHECK (exec (0xa588) == 0); /* c.fsd fa0, 8(a1) */
+  CHECK (sis_tests::flatmem_peek (0x48) == 0x40200000);
+  CHECK (sis_tests::flatmem_peek (0x4c) == 0xffffffff);
+
+  setfs (15, 3.5f);
+  CHECK (exec (0xe43e) == 0); /* c.fswsp fa5, 8(sp) */
+  CHECK (sis_tests::flatmem_peek (0x48) == 0x40600000);
+
+  CHECK (exec (0xa43e) == 0); /* c.fsdsp fa5, 8(sp) */
+  CHECK (sis_tests::flatmem_peek (0x48) == 0x40600000);
+  CHECK (sis_tests::flatmem_peek (0x4c) == 0xffffffff);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture,
+		   "RISC-V a compressed floating point access reports faults")
+{
+  /* Each width checks its own alignment, and a word outside memory is an
+     access fault.  */
+  set (11, 0x42);
+  set (2, 0x42);
+
+  CHECK (exec (0x6588) == TRAP_LMALI); /* c.flw */
+  CHECK (exec (0xe588) == TRAP_SMALI); /* c.fsw */
+  CHECK (exec (0x67a2) == TRAP_LMALI); /* c.flwsp */
+  CHECK (exec (0xe43e) == TRAP_SMALI); /* c.fswsp */
+
+  set (11, 0x44);
+  set (2, 0x44);
+  CHECK (exec (0x2588) == TRAP_LMALI); /* c.fld */
+  CHECK (exec (0xa588) == TRAP_SMALI); /* c.fsd */
+  CHECK (exec (0x27a2) == TRAP_LMALI); /* c.fldsp */
+  CHECK (exec (0xa43e) == TRAP_SMALI); /* c.fsdsp */
+
+  set (11, sis_tests::FLATMEM_SIZE);
+  set (2, sis_tests::FLATMEM_SIZE);
+  CHECK (exec (0x6588) == TRAP_LEXC);
+  CHECK (exec (0xe588) == TRAP_SEXC);
+  CHECK (exec (0x2588) == TRAP_LEXC);
+  CHECK (exec (0xa588) == TRAP_SEXC);
+  CHECK (exec (0x67a2) == TRAP_LEXC);
+  CHECK (exec (0xe43e) == TRAP_SEXC);
+  CHECK (exec (0x27a2) == TRAP_LEXC);
+  CHECK (exec (0xa43e) == TRAP_SEXC);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture,
+		   "RISC-V the compressed transfers reach both directions")
+{
+  /* A forward and a backward displacement of each transfer, and the target
+     of zero which halts the run.  */
+  sregs[0].pc = 0x2000;
+  sregs[0].npc = 0x2002;
+  CHECK (exec (0xa801) == 0); /* c.j .+16 */
+  CHECK (sregs[0].pc == 0x2010);
+
+  sregs[0].pc = 0x2000;
+  sregs[0].npc = 0x2002;
+  CHECK (exec (0x2801) == 0); /* c.jal .+16 */
+  CHECK (sregs[0].pc == 0x2010);
+  CHECK (get (1) == 0x2002);
+
+  sregs[0].pc = 0x2000;
+  sregs[0].npc = 0x2002;
+  set (10, 0);
+  CHECK (exec (0xc901) == 0); /* c.beqz a0, .+16 */
+  CHECK (sregs[0].pc == 0x2010);
+
+  sregs[0].pc = 0x2000;
+  sregs[0].npc = 0x2002;
+  set (10, 1);
+  CHECK (exec (0xe901) == 0); /* c.bnez a0, .+16 */
+  CHECK (sregs[0].pc == 0x2010);
+
+  /* Backward, which is how a compressed loop closes.  */
+  sregs[0].pc = 0x2000;
+  sregs[0].npc = 0x2002;
+  set (10, 0);
+  CHECK (exec (0xd965) == 0); /* c.beqz a0, .-16 */
+  CHECK (sregs[0].pc == 0x1ff0);
+
+  sregs[0].pc = 0x2000;
+  sregs[0].npc = 0x2002;
+  set (10, 1);
+  CHECK (exec (0xf965) == 0); /* c.bnez a0, .-16 */
+  CHECK (sregs[0].pc == 0x1ff0);
+
+  /* A branch not taken with a backward displacement falls through.  */
+  sregs[0].pc = 0x2000;
+  sregs[0].npc = 0x2002;
+  set (10, 1);
+  CHECK (exec (0xd965) == 0);
+  CHECK (sregs[0].pc == 0x2002);
+
+  sregs[0].pc = 0x2000;
+  sregs[0].npc = 0x2002;
+  set (10, 0);
+  CHECK (exec (0xf965) == 0);
+  CHECK (sregs[0].pc == 0x2002);
+
+  /* A jump to zero halts rather than running from the bottom of memory.  */
+  sregs[0].pc = 0;
+  sregs[0].npc = 2;
+  CHECK (exec (0xa001) == NULL_TRAP); /* c.j . */
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the compressed negative immediates")
+{
+  /* The immediate of the first quadrant is signed, so each of these takes
+     the sign extension path.  */
+  set (15, 10);
+  CHECK (exec (0x17ed) == 0); /* c.addi a5, -5 */
+  CHECK (get (15) == 5);
+
+  CHECK (exec (0x77fd) == 0); /* c.lui a5, 0xfffff */
+  CHECK (get (15) == 0xfffff000);
+
+  set (2, 0x1000);
+  CHECK (exec (0x713d) == 0); /* c.addi16sp sp, -32 */
+  CHECK (get (2) == 0x0fe0);
+
+  set (10, 0xf0f0);
+  CHECK (exec (0x9961) == 0); /* c.andi a0, -8 */
+  CHECK (get (10) == (0xf0f0u & (uint32) -8));
+}
+
+TEST_CASE_FIXTURE (riscv_fixture,
+		   "RISC-V the reserved compressed encodings are illegal")
+{
+  /* Each quadrant leaves encodings unassigned on RV32, and the shift
+     amounts which need a sixth bit belong to the wider architecture.  */
+  CHECK (exec (0x9001 | (1u << 12) | (0u << 10)) == TRAP_ILLEG); /* srli 32+ */
+  CHECK (exec (0x9001 | (1u << 12) | (1u << 10)) == TRAP_ILLEG); /* srai 32+ */
+  CHECK (exec (0x9001 | (1u << 12) | (3u << 10)) == TRAP_ILLEG); /* subw */
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V a register is set by its number")
+{
+  /* The debugger names a register by its number: the integer file, then the
+     program counter, then the floating point file.  A value written to one
+     must read back from the same place.  */
+  char buf[65 * 4];
+
+  arch->set_register (&sregs[0], NULL, 0x11, 1);
+  CHECK (get (1) == 0x11);
+
+  arch->set_register (&sregs[0], NULL, 0x2000, 32);
+  CHECK (sregs[0].pc == 0x2000);
+
+  arch->set_register (&sregs[0], NULL, 0x3f800000, 33 + 2);
+  CHECK (fsi (2) == 0x3f800000);
+
+  /* And the whole file as one packet reports what was written.  */
+  CHECK (arch->gdb_get_reg (buf) == 65 * 4);
+  CHECK ((buf[(33 + 2) * 4] & 0xff) == 0x00);
+  CHECK ((buf[(33 + 2) * 4 + 3] & 0xff) == 0x3f);
+}
+
+namespace
+{
+
+int riscv_intack_level;
+int riscv_intack_calls;
+
+void
+riscv_count_intack (int32 level, int32 cpu)
+{
+  (void) cpu;
+  riscv_intack_level = level;
+  riscv_intack_calls++;
+}
+
+} /* namespace */
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V a trap enters the handler")
+{
+  /* The privileged specification: a trap saves the program counter in mepc,
+     records the cause in mcause, drops to machine mode and enters the
+     handler the trap vector names.  */
+  sregs[0].mtvec = 0x4000;
+  sregs[0].pc = 0x2000;
+  sregs[0].mstatus = MSTATUS_MIE;
+  sregs[0].mode = 3;
+  sregs[0].trap = TRAP_EBREAK;
+
+  CHECK (riscv.execute_trap (&sregs[0]) == 0);
+  CHECK (sregs[0].pc == 0x4000);
+  CHECK (sregs[0].epc == 0x2000);
+  CHECK (sregs[0].mcause == TRAP_EBREAK);
+  CHECK (sregs[0].mtval == 0x2000);
+  CHECK (sregs[0].mode == 1);
+  CHECK (sregs[0].mpp == 3);
+
+  /* The interrupt enable moves into its saved copy and is cleared, so the
+     handler runs with interrupts off.  */
+  CHECK ((sregs[0].mstatus & MSTATUS_MPIE) != 0);
+  CHECK ((sregs[0].mstatus & MSTATUS_MIE) == 0);
+  CHECK (sregs[0].icnt >= TRAP_C);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V a trap records what it was about")
+{
+  /* Each group of causes leaves a different value behind for the handler to
+     read, and the ones a bare program cannot recover from stop the run.  */
+  sregs[0].mtvec = 0x4000;
+  sregs[0].pc = 0x2000;
+
+  SUBCASE ("an illegal instruction reports the word")
+  {
+    sregs[0].inst = 0x12345678;
+    sregs[0].trap = TRAP_ILLEG;
+    CHECK (riscv.execute_trap (&sregs[0]) == ERROR_MODE);
+    CHECK (sregs[0].mtval == 0x12345678);
+  }
+
+  SUBCASE ("the RTEMS unimplemented test is allowed to continue")
+  {
+    /* RTEMS plants one encoding to check that an illegal instruction traps,
+       so that one does not stop the run.  */
+    sregs[0].inst = 0xc0001073;
+    sregs[0].trap = TRAP_ILLEG;
+    CHECK (riscv.execute_trap (&sregs[0]) == 0);
+    CHECK (sregs[0].err_mode == 0);
+
+    sregs[0].inst = 0x00010000;
+    sregs[0].trap = TRAP_ILLEG;
+    CHECK (riscv.execute_trap (&sregs[0]) == 0);
+  }
+
+  SUBCASE ("an access fault reports the address")
+  {
+    sregs[0].wpaddress = 0x1234;
+    sregs[0].trap = TRAP_LEXC;
+    CHECK (riscv.execute_trap (&sregs[0]) == ERROR_MODE);
+    CHECK (sregs[0].mtval == 0x1234);
+  }
+
+  SUBCASE ("an instruction fetch fault stops the run")
+  {
+    sregs[0].trap = TRAP_IEXC;
+    CHECK (riscv.execute_trap (&sregs[0]) == ERROR_MODE);
+    CHECK (sregs[0].mtval == 0x2000);
+  }
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V an interrupt is marked as one")
+{
+  /* An interrupt cause has its top bit set, which is how a handler tells it
+     from an exception.  A controller interrupt is numbered 16 upwards, which
+     the cause keeps, while the controller is told the level below that so it
+     stops asserting it.  */
+  sregs[0].intack = riscv_count_intack;
+  sregs[0].mtvec = 0x4000;
+  riscv_intack_calls = 0;
+
+  sregs[0].trap = 16 + 5;
+  CHECK (riscv.execute_trap (&sregs[0]) == 0);
+  CHECK (sregs[0].mcause == (0x80000000 | 21));
+  CHECK (riscv_intack_calls == 1);
+  CHECK (riscv_intack_level == 5);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture,
+		   "RISC-V the local interrupts clear their bit")
+{
+  /* The software, timer and external interrupts of the machine level clear
+     the pending bit they were raised by and drop the external line rather
+     than acknowledging a controller level.  */
+  struct
+  {
+    uint32 trap, bit;
+  } cases[] = {
+    { 0x23, MIP_MSIP },
+    { 0x27, MIP_MTIP },
+    { 0x2b, MIP_MEIP },
+  };
+
+  for (auto c : cases)
+    {
+      INFO ("cause " << c.trap);
+      sregs[0].mtvec = 0x4000;
+      sregs[0].mip = MIP_MSIP | MIP_MTIP | MIP_MEIP;
+      ext_irl[0] = 0x1b;
+      sregs[0].trap = c.trap;
+
+      CHECK (riscv.execute_trap (&sregs[0]) == 0);
+      /* The three local causes mask down to the numbers the privileged
+	 specification gives them: software 3, timer 7, external 11.  */
+      CHECK ((sregs[0].mcause & 0x80000000) != 0);
+      CHECK ((sregs[0].mcause & 0x1f) == (c.trap & 0x1f));
+      CHECK ((sregs[0].mip & c.bit) == 0);
+      CHECK (ext_irl[0] == 0);
+    }
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the pseudo traps report their state")
+{
+  /* The traps at or above 256 are the simulator's own, not the
+     architecture's: they stop the run rather than entering a handler.  */
+  sregs[0].trap = ERROR_TRAP;
+  CHECK (riscv.execute_trap (&sregs[0]) == ERROR_MODE);
+
+  sregs[0].trap = WPT_TRAP;
+  CHECK (riscv.execute_trap (&sregs[0]) == WPT_HIT);
+
+  sregs[0].trap = NULL_TRAP;
+  CHECK (riscv.execute_trap (&sregs[0]) == NULL_HIT);
+
+  /* And 256 restarts from the bottom of memory.  */
+  sregs[0].pc = 0x2000;
+  sregs[0].trap = 256;
+  CHECK (riscv.execute_trap (&sregs[0]) == 0);
+  CHECK (sregs[0].pc == 0);
+  CHECK (sregs[0].trap == 0);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V a trap is recorded for coverage")
+{
+  uint32 saved = ebase.coven;
+
+  sregs[0].mtvec = 0x4000;
+  sregs[0].pc = 0x2000;
+  sregs[0].trap = TRAP_EBREAK;
+  covram[0x2000 >> 2] = 0;
+  ebase.coven = 1;
+
+  CHECK (riscv.execute_trap (&sregs[0]) == 0);
+  CHECK (covram[0x2000 >> 2] != 0);
+
+  ebase.coven = saved;
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V an interrupt is taken when enabled")
+{
+  /* An external interrupt reaches the core only with the global enable and
+     the external enable both set, and it wakes a core in power-down.  */
+  ext_irl[0] = 0x1b;
+  sregs[0].trap = 0;
+
+  sregs[0].mstatus = 0;
+  sregs[0].mie = MIE_MEIE;
+  CHECK (riscv.check_interrupts (&sregs[0]) == 0);
+
+  sregs[0].mstatus = MSTATUS_MIE;
+  sregs[0].mie = 0;
+  CHECK (riscv.check_interrupts (&sregs[0]) == 0);
+
+  sregs[0].mie = MIE_MEIE;
+  CHECK (riscv.check_interrupts (&sregs[0]) == 0x1b);
+
+  /* A trap already pending is taken first.  */
+  sregs[0].trap = TRAP_EBREAK;
+  CHECK (riscv.check_interrupts (&sregs[0]) == 0);
+  sregs[0].trap = 0;
+
+  /* And it ends power-down.  */
+  sregs[0].pwd_mode = 1;
+  sregs[0].pwdstart = 0;
+  sregs[0].simtime = 100;
+  CHECK (riscv.check_interrupts (&sregs[0]) == 0x1b);
+  CHECK (sregs[0].pwd_mode == 0);
+  CHECK (sregs[0].pwdtime == 100);
+
+  ext_irl[0] = 0;
+}
+
+TEST_CASE_FIXTURE (riscv_fixture,
+		   "RISC-V the disassembler decodes every group")
+{
+  stdout_capture cap;
+
+  /* Sweep the instruction space so the decode tables are reached: every
+     opcode with every function code, both operand forms, and the whole
+     compressed space.  The output is not asserted on beyond being produced,
+     because the assembly syntax is the disassembler's own.  */
+  uint32 addr = 0x200;
+
+  for (uint32 op = 0; op < 0x20; op++)
+    {
+      for (uint32 funct3 = 0; funct3 < 8; funct3++)
+	{
+	  for (uint32 funct7 : { 0u, 1u, 0x20u })
+	    {
+	      sis_tests::flatmem_poke (addr,
+				       rtype (op, 3, funct3, 1, 2, funct7));
+	      arch->disas (addr);
+	    }
+	  sis_tests::flatmem_poke (addr, itype (op, 3, funct3, 1, 5));
+	  arch->disas (addr);
+	  sis_tests::flatmem_poke (addr, itype (op, 3, funct3, 1, -5));
+	  arch->disas (addr);
+	  sis_tests::flatmem_poke (addr, stype (op, funct3, 1, 2, 5));
+	  arch->disas (addr);
+	}
+    }
+
+  /* The atomic and floating point groups have their operation above the
+     function code.  */
+  for (uint32 funct5 = 0; funct5 < 0x20; funct5++)
+    {
+      sis_tests::flatmem_poke (addr, rtype (OP_AMO, 3, 2, 1, 2, funct5 << 2));
+      arch->disas (addr);
+
+      for (uint32 fmt = 0; fmt < 4; fmt++)
+	{
+	  for (uint32 funct3 = 0; funct3 < 4; funct3++)
+	    {
+	      for (uint32 rs2 = 0; rs2 < 4; rs2++)
+		{
+		  sis_tests::flatmem_poke (
+		      addr, fpu (funct5, fmt, 3, funct3, 1, rs2));
+		  arch->disas (addr);
+		}
+	    }
+	}
+    }
+
+  /* The fused multiplies, which name three source registers.  */
+  for (uint32 op : { OP_FMADD, OP_FMSUB, OP_FNMSUB, OP_FNMADD })
+    {
+      for (uint32 fmt = 0; fmt < 4; fmt++)
+	{
+	  sis_tests::flatmem_poke (addr,
+				   rtype (op, 3, 0, 1, 2, (4 << 2) | fmt));
+	  arch->disas (addr);
+	}
+    }
+
+  /* The control register group, over the registers the core models and one
+     it does not.  */
+  for (uint32 funct3 = 0; funct3 < 8; funct3++)
+    {
+      for (uint32 csr :
+	   { (uint32) CSR_MSTATUS, (uint32) CSR_MTVEC, (uint32) CSR_MEPC,
+	     (uint32) CSR_MIE, (uint32) CSR_MIP, (uint32) CSR_MSCRATCH,
+	     (uint32) CSR_MCAUSE, (uint32) CSR_MTVAL, (uint32) CSR_MISA,
+	     (uint32) CSR_MHARTID, (uint32) CSR_TIME, (uint32) CSR_TIMEH,
+	     (uint32) CSR_MSTATUSH, (uint32) CSR_FFLAGS, (uint32) CSR_FRM,
+	     (uint32) CSR_FCSR, 0x7c0u })
+	{
+	  sis_tests::flatmem_poke (addr, itype (OP_SYS, 3, funct3, 1, csr));
+	  arch->disas (addr);
+	}
+    }
+
+  /* The whole compressed space, which is only sixteen bits wide.  */
+  for (uint32 quadrant = 0; quadrant < 3; quadrant++)
+    {
+      for (uint32 funct3 = 0; funct3 < 8; funct3++)
+	{
+	  for (uint32 rest = 0; rest < 0x2000; rest += 0x111)
+	    {
+	      uint32 inst = quadrant | (funct3 << 13) | (rest & 0x1ffc);
+
+	      sis_tests::flatmem_poke (addr, inst | 0xffff0000);
+	      arch->disas (addr);
+	    }
+	}
+    }
+
+  CHECK (!cap.str ().empty ());
 }
