@@ -2307,3 +2307,207 @@ TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the fused multiply and add")
   /* The remaining format codes are unassigned.  */
   CHECK (exec (rtype (OP_FMADD, 6, 0, 2, 4, (8 << 2) | 2)) == TRAP_ILLEG);
 }
+
+/* The ABI register names of the calling convention.  They are written out
+   here rather than reached from the core, so a case checks the core against
+   the specification and not against itself.  */
+static const char *const abi_int[32] = {
+  "zero", "ra", "sp", "gp", "tp",  "t0",  "t1", "t2", "s0", "s1", "a0",
+  "a1",	  "a2", "a3", "a4", "a5",  "a6",  "a7", "s2", "s3", "s4", "s5",
+  "s6",	  "s7", "s8", "s9", "s10", "s11", "t3", "t4", "t5", "t6"
+};
+
+static const char *const abi_fp[32] = {
+  "ft0", "ft1", "ft2",	"ft3",	"ft4", "ft5", "ft6",  "ft7",
+  "fs0", "fs1", "fa0",	"fa1",	"fa2", "fa3", "fa4",  "fa5",
+  "fa6", "fa7", "fs2",	"fs3",	"fs4", "fs5", "fs6",  "fs7",
+  "fs8", "fs9", "fs10", "fs11", "ft8", "ft9", "ft10", "ft11"
+};
+
+TEST_CASE_FIXTURE (riscv_fixture,
+		   "RISC-V every integer register answers to its ABI name")
+{
+  stdout_capture cap;
+
+  for (int i = 1; i < 32; i++)
+    {
+      arch->set_register (&sregs[0], (char *) abi_int[i], 0x1000 + i, 0);
+      INFO ("register ", abi_int[i]);
+      CHECK (get (i) == (uint32) (0x1000 + i));
+    }
+
+  /* x0 is hard wired to zero and a write to it is refused, not silently
+     dropped.  */
+  arch->set_register (&sregs[0], (char *) "zero", 0x1234, 0);
+  CHECK (get (0) == 0);
+  CHECK (cap.str ().find ("cannot set zero") != std::string::npos);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture,
+		   "RISC-V every float register answers to its ABI name")
+{
+  stdout_capture cap;
+
+  for (int i = 0; i < 32; i++)
+    {
+      arch->set_register (&sregs[0], (char *) abi_fp[i], 0x2000 + i, 0);
+      INFO ("register ", abi_fp[i]);
+      CHECK (fsi (i) == (int32) (0x2000 + i));
+    }
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the named control registers")
+{
+  stdout_capture cap;
+
+  arch->set_register (&sregs[0], (char *) "pc", 0x2000, 0);
+  CHECK (sregs[0].pc == 0x2000);
+
+  /* A control register is written the way csrw writes it, so mstatus keeps
+     only the fields this core implements while mtvec keeps the whole word.  */
+  arch->set_register (&sregs[0], (char *) "mstatus", 0xffffffff, 0);
+  CHECK (sregs[0].mstatus == MSTATUS_MASK);
+
+  arch->set_register (&sregs[0], (char *) "mtvec", 0x40001234, 0);
+  CHECK (sregs[0].mtvec == 0x40001234);
+
+  arch->set_register (&sregs[0], (char *) "mepc", 0x40002000, 0);
+  CHECK (sregs[0].epc == 0x40002000);
+
+  arch->set_register (&sregs[0], (char *) "mcause", 7, 0);
+  CHECK (sregs[0].mcause == 7);
+
+  arch->set_register (&sregs[0], (char *) "mie", MIE_MEIE, 0);
+  CHECK (sregs[0].mie == MIE_MEIE);
+
+  arch->set_register (&sregs[0], (char *) "mip", MIP_MTIP, 0);
+  CHECK (sregs[0].mip == MIP_MTIP);
+
+  arch->set_register (&sregs[0], (char *) "mscratch", 0xcafe, 0);
+  CHECK (sregs[0].mscratch == 0xcafe);
+
+  /* The floating point status is one register seen through three windows:
+     fcsr is the whole of it, fflags its low five bits and frm the three
+     above them.  */
+  arch->set_register (&sregs[0], (char *) "fcsr", 0xff, 0);
+  CHECK (sregs[0].fsr == 0xff);
+
+  arch->set_register (&sregs[0], (char *) "fflags", 0x1f, 0);
+  CHECK ((sregs[0].fsr & 0x1f) == 0x1f);
+
+  arch->set_register (&sregs[0], (char *) "frm", 2, 0);
+  CHECK (((sregs[0].fsr >> 5) & 7) == 2);
+
+  CHECK (!cap.str ().empty ());
+
+  /* A name the core does not know is reported and changes nothing.  A
+     capture answers once, so each phase gets its own.  */
+  stdout_capture unknown;
+  arch->set_register (&sregs[0], (char *) "nosuchreg", 1, 0);
+  CHECK (unknown.str ().find ("no such register: nosuchreg") !=
+	 std::string::npos);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V registers are reachable by number")
+{
+  /* With no name the number selects the register.  That numbering is the
+     GDB one: x0 to x31, then the pc, then the float file, then the CSRs.  */
+  for (int i = 1; i < 32; i++)
+    {
+      arch->set_register (&sregs[0], NULL, 0x3000 + i, i);
+      INFO ("register number ", i);
+      CHECK (get (i) == (uint32) (0x3000 + i));
+    }
+
+  arch->set_register (&sregs[0], NULL, 0x4000, 32);
+  CHECK (sregs[0].pc == 0x4000);
+
+  for (int i = 0; i < 32; i++)
+    {
+      arch->set_register (&sregs[0], NULL, 0x5000 + i, 33 + i);
+      INFO ("float register number ", i);
+      CHECK (fsi (i) == (int32) (0x5000 + i));
+    }
+
+  /* A CSR is numbered by its address above the last float register.  */
+  arch->set_register (&sregs[0], NULL, 0x99, 65 + CSR_MSCRATCH);
+  CHECK (sregs[0].mscratch == 0x99);
+
+  /* A number below the first and past the last register changes nothing.  */
+  arch->set_register (&sregs[0], NULL, 0xdeadbeef, -1);
+  arch->set_register (&sregs[0], NULL, 0xdeadbeef, 4161);
+  CHECK (sregs[0].pc == 0x4000);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the GDB stub packs every register")
+{
+  char buf[65 * 4];
+
+  set (1, 0x11223344);
+  sregs[0].pc = 0x2000;
+
+  /* The stub carries the integer file, the pc and the float file, and packs
+     each register least significant byte first for a little endian target.  */
+  CHECK (arch->gdb_get_reg (buf) == 65 * 4);
+  CHECK ((unsigned char) buf[4] == 0x44);
+  CHECK ((unsigned char) buf[5] == 0x33);
+  CHECK ((unsigned char) buf[6] == 0x22);
+  CHECK ((unsigned char) buf[7] == 0x11);
+  CHECK ((unsigned char) buf[32 * 4] == 0x00);
+  CHECK ((unsigned char) buf[32 * 4 + 1] == 0x20);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the register displays print")
+{
+  stdout_capture cap;
+
+  set (10, 0x0a0a0a0a);
+  fd (5) = 1.5;
+  sregs[0].mtvec = 0x40000100;
+
+  arch->display_registers (&sregs[0]);
+  arch->display_ctrl (&sregs[0]);
+  arch->display_special (&sregs[0]);
+  arch->display_fpu (&sregs[0]);
+
+  std::string out = cap.str ();
+
+  /* The displays name the registers the way the ABI does, and the control
+     display disassembles the instruction the pc stands on.  */
+  CHECK (out.find ("0A0A0A0A") != std::string::npos);
+  CHECK (out.find ("mtvec") != std::string::npos);
+  CHECK (out.find ("40000100") != std::string::npos);
+  CHECK (out.find ("misa") != std::string::npos);
+  for (int i = 0; i < 32; i++)
+    {
+      INFO ("float name ", abi_fp[i]);
+      CHECK (out.find (abi_fp[i]) != std::string::npos);
+    }
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the control display reports a halt")
+{
+  /* A stopped core says why it stopped.  The two reasons are exclusive: a
+     core in error mode reports that and nothing else.  */
+  {
+    stdout_capture cap;
+    arch->display_ctrl (&sregs[0]);
+    CHECK (cap.str ().find (" mode") == std::string::npos);
+  }
+
+  {
+    sregs[0].pwd_mode = 1;
+    stdout_capture cap;
+    arch->display_ctrl (&sregs[0]);
+    CHECK (cap.str ().find ("power-down mode") != std::string::npos);
+  }
+
+  {
+    sregs[0].err_mode = 1;
+    stdout_capture cap;
+    arch->display_ctrl (&sregs[0]);
+    std::string out = cap.str ();
+    CHECK (out.find ("error mode") != std::string::npos);
+    CHECK (out.find ("power-down") == std::string::npos);
+  }
+}
