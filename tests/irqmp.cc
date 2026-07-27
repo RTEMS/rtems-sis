@@ -17,6 +17,8 @@
 #include "config.h"
 #include "grlibcore.h"
 
+using sis_tests::stdout_capture;
+
 namespace
 {
 
@@ -414,4 +416,159 @@ TEST_CASE_FIXTURE (irqmp_fixture,
   CHECK (ext_irl[3] == 8);
 
   ncpu = saved_ncpu;
+}
+
+TEST_CASE_FIXTURE (irqmp_fixture,
+		   "IRQMP verbose tracing follows the same interrupt path")
+{
+  /* Same scenario as "IRQMP intack finds the pending extended interrupt"
+     (96.3.10), with sis_verbose raised so the trace prints chk_irq and
+     irqmp_intack guard with "sis_verbose > 2" also execute.  The
+     interrupt-visible behaviour is identical to that case; only the trace
+     output differs, so this case exists to reach those prints rather than
+     to claim anything chapter 96 does not already cover above.  */
+  sis_verbose = 3;
+
+  use_extirq (14);
+  write (IMASK, (1 << 14) | (1 << 20));
+
+  std::string out;
+  {
+    stdout_capture cap;
+    write (IPEND, 1 << 20);
+    CHECK (ext_irl[0] == 14);
+    out = cap.str ();
+  }
+  /* chk_irq forwarding the extended interrupt (grlib.cc:583-585).  */
+  CHECK (out.find ("forward extended interrupt") != std::string::npos);
+  /* chk_irq reporting the new irl (grlib.cc:595-597).  */
+  CHECK (out.find ("irl:") != std::string::npos);
+
+  /* A second write that leaves the highest pending level unchanged makes
+     chk_irq recompute the same irl it already reported, which is the
+     "i != old_irl" half of the guard at grlib.cc:595 reading false: the
+     level does not change, so it must not print again.  */
+  {
+    stdout_capture cap;
+    write (IMASK, (1 << 14) | (1 << 20));
+    CHECK (ext_irl[0] == 14);
+    out = cap.str ();
+  }
+  CHECK (out.find ("irl:") == std::string::npos);
+
+  {
+    stdout_capture cap;
+    sregs[0].intack (14, 0);
+    out = cap.str ();
+  }
+
+  CHECK (read (PEXTACK0) == 20);
+  CHECK ((read (IPEND) & (1u << 20)) == 0);
+  CHECK (ext_irl[0] == 0);
+
+  /* irqmp_intack's general acknowledge log (grlib.cc:541-543).  */
+  CHECK (out.find ("acknowledged") != std::string::npos);
+  /* irqmp_intack finding the pending extended interrupt (grlib.cc:553-556). */
+  CHECK (out.find ("set extended interrupt acknowledge to") !=
+	 std::string::npos);
+}
+
+TEST_CASE_FIXTURE (irqmp_fixture,
+		   "IRQMP writing an unmapped offset changes nothing")
+{
+  /* irqmp_write's switch has no default case (unlike irqmp_read's, already
+     covered by "IRQMP reading an unmapped offset is zero" above): an
+     offset chapter 96 does not define, such as 0x00 (ILEVEL, 96.3.1), is a
+     silent no-op on the write side too.  */
+  write (IMASK, 0xfffe);
+  write (IPEND, 1 << 5);
+  CHECK (ext_irl[0] == 5);
+
+  write (0x00, 0xffffffff);
+
+  CHECK (ext_irl[0] == 5);
+  CHECK (read (IPEND) == (1u << 5));
+  CHECK (read (IMASK) == 0xfffe);
+}
+
+TEST_CASE_FIXTURE (irqmp_fixture,
+		   "IRQMP writing MPSTAT only starts the CPUs it names")
+{
+  /* Section 96.3.5: a one written to MPSTAT starts the processor at that
+     bit position if it is powered down.  irqmp_write's ISR/MPSTAT case
+     loops the written bits (96.3.5's per-CPU status field), so with
+     ncpu > 1 -- which "IRQMP the status register reports the CPUs" above
+     does not reach -- a bit left clear must leave its CPU alone, and a bit
+     for a CPU that is not powered down must be a no-op.  */
+  int saved_ncpu = ncpu;
+  ncpu = 4;
+
+  sregs[0].pwd_mode = 1; /* named and halted: starts */
+  sregs[0].pwdstart = ebase.simtime;
+  sregs[1].pwd_mode = 1; /* halted but its bit is not written: untouched */
+  sregs[1].pwdstart = ebase.simtime;
+  sregs[2].pwd_mode = 0; /* named but already running: no-op */
+
+  sis_verbose = 2;
+  stdout_capture cap;
+
+  write (MPSTAT, (1 << 0) | (1 << 2));
+
+  std::string out = cap.str ();
+
+  CHECK (sregs[0].pwd_mode == 0);
+  CHECK (out.find ("cpu 0 starting") != std::string::npos);
+
+  CHECK (sregs[1].pwd_mode == 1);
+
+  CHECK (sregs[2].pwd_mode == 0);
+  CHECK (out.find ("cpu 2 starting") == std::string::npos);
+
+  sregs[0].pwd_mode = 0;
+  sregs[1].pwd_mode = 0;
+  ncpu = saved_ncpu;
+}
+
+TEST_CASE_FIXTURE (irqmp_fixture, "IRQMP verbose add announces the controller")
+{
+  /* irqmp_add is grlib.cc's board registration hook, not part of chapter
+     96, and the fixture never calls it since the core is driven directly
+     with no bus.  It only touches the plug&play table grlib_apbpp_add
+     feeds, which this fixture does not expose, so the only observable
+     effect of calling it here is the verbose trace, on or off.  */
+  sis_verbose = 0;
+  {
+    stdout_capture quiet;
+    core->add (0, 0x80000f00, 0xfff);
+    CHECK (quiet.str ().empty ());
+  }
+
+  sis_verbose = 1;
+  stdout_capture cap;
+
+  core->add (0, 0x80000f00, 0xfff);
+
+  CHECK (cap.str ().find ("IRQMP Interrupt controller") != std::string::npos);
+}
+
+TEST_CASE_FIXTURE (
+    irqmp_fixture,
+    "IRQMP (current behaviour) an eirq line above 15 drops the interrupt")
+{
+  /* Not from chapter 96: MPSTAT's EIRQ field (96.3.5) is bits 19:16, four
+     bits wide, so the manual only ever describes eirq lines 0-15.
+     grlib.cc never range-checks irqmp_extirq -- it is set from the -eirq
+     command line option (sis.cc) with no bound -- so a line above 15 makes
+     chk_irq forward a bit into a position its own scan of bits 1-15
+     (96.3.2's plain interrupt range) can never see.  The pending extended
+     interrupt is then silently lost instead of reaching the CPU.  Named
+     "current behaviour" because the manual does not define this input at
+     all, not because it is a documented interface.  */
+  use_extirq (20);
+
+  write (IMASK, 1u << 20);
+  write (IPEND, 1u << 20);
+
+  CHECK ((read (IPEND) & (1u << 20)) != 0);
+  CHECK (ext_irl[0] == 0);
 }

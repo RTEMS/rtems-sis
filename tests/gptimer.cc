@@ -23,6 +23,8 @@
 #include "config.h"
 #include "grlibcore.h"
 
+using sis_tests::stdout_capture;
+
 namespace
 {
 
@@ -373,4 +375,44 @@ TEST_CASE_FIXTURE (gptimer_fixture,
 
   write (UNMAPPED, 0xdeadbeef);
   CHECK (read (UNMAPPED) == 0);
+}
+
+TEST_CASE_FIXTURE (
+    gptimer_fixture,
+    "GPTIMER pin: the reload and timer 2 registers read back what was "
+    "written")
+{
+  /* Not in the scoped manual.  RELOAD1, TIMER2 and RELOAD2 are otherwise
+     only ever written in this file (TIMER1 and CTRL1/CTRL2 are read back
+     elsewhere already); exercise gpt_read's cases for the three that are
+     not, so the register file's read side is covered end to end.  */
+  write (RELOAD1, 0x1111);
+  CHECK (read (RELOAD1) == 0x1111);
+
+  write (RELOAD2, 0x2222);
+  CHECK (read (RELOAD2) == 0x2222);
+
+  /* Timer 2 is disabled here, so gpt_counter_read (1) returns the raw
+     register instead of counting down from it.  */
+  write (TIMER2, 7);
+  CHECK (read (TIMER2) == 7);
+}
+
+TEST_CASE_FIXTURE (gptimer_fixture,
+		   "GPTIMER pin: verbose add and reset announce themselves")
+{
+  /* Not in the scoped manual.  gpt_add and gpt_reset are grlib.cc's board
+     registration and power-on hooks, not part of the register file; both
+     only print when sis_verbose is set.  gpt_add is otherwise only called
+     once, from the fixture with sis_verbose off, so call it again here to
+     reach its trace branch alongside gpt_reset's.  */
+  sis_verbose = 1;
+  stdout_capture cap;
+
+  core->add (GPT_IRQ, 0, 0);
+  core->reset ();
+
+  std::string out = cap.str ();
+  CHECK (out.find ("GPTIMER timer unit") != std::string::npos);
+  CHECK (out.find ("GPT started") != std::string::npos);
 }
