@@ -2511,3 +2511,168 @@ TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the control display reports a halt")
     CHECK (out.find ("power-down") == std::string::npos);
   }
 }
+
+/* The bits cov_bt, cov_bnt and cov_jmp set in the coverage bitmap, from
+   func.cc.  A word is marked executed, the start of a block, the site of a
+   jump, or a branch that was taken or not taken.  */
+#define COV_EXEC  1
+#define COV_START 2
+#define COV_JMP	  4
+#define COV_BT	  8
+#define COV_BNT	  16
+
+namespace
+{
+
+/* Turns coverage collection on for one case and clears the window of the
+   bitmap the case works in.  */
+struct coverage_on
+{
+  uint32 saved;
+
+  coverage_on () : saved (ebase.coven)
+  {
+    ebase.coven = 1;
+    for (int i = 0; i < 0x400; i++)
+      covram[i] = 0;
+  }
+
+  ~coverage_on () { ebase.coven = saved; }
+
+  unsigned char
+  at (uint32 addr)
+  {
+    return covram[addr >> 2];
+  }
+};
+
+} // namespace
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V a branch is recorded for coverage")
+{
+  coverage_on cov;
+
+  /* A taken branch marks its own word taken and the target as the start of a
+     block.  A branch not taken marks its word not taken and the word after
+     it as the start, which is where the run goes on.  */
+  sregs[0].pc = 0x200;
+  sregs[0].npc = 0x204;
+  set (1, 1);
+  set (2, 1);
+  CHECK (exec (btype (B_BE, 1, 2, 0x40)) == 0);
+  CHECK (sregs[0].pc == 0x240);
+  CHECK ((cov.at (0x200) & (COV_BT | COV_EXEC)) == (COV_BT | COV_EXEC));
+  CHECK ((cov.at (0x240) & COV_START) == COV_START);
+
+  sregs[0].pc = 0x300;
+  sregs[0].npc = 0x304;
+  set (2, 2);
+  CHECK (exec (btype (B_BE, 1, 2, 0x40)) == 0);
+  CHECK (sregs[0].pc == 0x304);
+  CHECK ((cov.at (0x300) & COV_BNT) == COV_BNT);
+  CHECK ((cov.at (0x304) & COV_START) == COV_START);
+
+  /* A backward branch is the loop case: taken costs nothing, and it is the
+     one not taken which pays the misprediction.  */
+  sregs[0].pc = 0x380;
+  sregs[0].npc = 0x384;
+  set (2, 1);
+  CHECK (exec (btype (B_BE, 1, 2, -0x40)) == 0);
+  CHECK (sregs[0].pc == 0x340);
+  CHECK ((cov.at (0x380) & COV_BT) == COV_BT);
+
+  sregs[0].pc = 0x390;
+  sregs[0].npc = 0x394;
+  set (2, 2);
+  CHECK (exec (btype (B_BE, 1, 2, -0x40)) == 0);
+  CHECK ((cov.at (0x390) & COV_BNT) == COV_BNT);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V a jump is recorded for coverage")
+{
+  coverage_on cov;
+
+  sregs[0].pc = 0x200;
+  sregs[0].npc = 0x204;
+  CHECK (exec (jtype (1, 0x40)) == 0);
+  CHECK (sregs[0].pc == 0x240);
+  CHECK ((cov.at (0x200) & (COV_JMP | COV_EXEC)) == (COV_JMP | COV_EXEC));
+  CHECK ((cov.at (0x240) & COV_START) == COV_START);
+
+  /* And the register form.  */
+  sregs[0].pc = 0x280;
+  sregs[0].npc = 0x284;
+  set (5, 0x300);
+  CHECK (exec (itype (OP_JALR, 1, 0, 5, 0)) == 0);
+  CHECK (sregs[0].pc == 0x300);
+  CHECK ((cov.at (0x280) & COV_JMP) == COV_JMP);
+  CHECK ((cov.at (0x300) & COV_START) == COV_START);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture,
+		   "RISC-V the compressed control flow is recorded too")
+{
+  coverage_on cov;
+
+  /* c.j and c.jal reach the same recording as the full width jump.  */
+  sregs[0].pc = 0x200;
+  sregs[0].npc = 0x204;
+  CHECK (exec (0xa011) == 0); /* c.j .+4 */
+  CHECK ((cov.at (0x200) & COV_JMP) == COV_JMP);
+  CHECK ((cov.at (sregs[0].pc) & COV_START) == COV_START);
+
+  sregs[0].pc = 0x280;
+  sregs[0].npc = 0x284;
+  CHECK (exec (0x2011) == 0); /* c.jal .+4 */
+  CHECK ((cov.at (0x280) & COV_JMP) == COV_JMP);
+  CHECK (get (1) == 0x282);
+
+  /* c.jr and c.jalr take the target from a register.  */
+  sregs[0].pc = 0x300;
+  sregs[0].npc = 0x304;
+  set (15, 0x340);
+  CHECK (exec (0x8782) == 0); /* c.jr a5 */
+  CHECK (sregs[0].pc == 0x340);
+  CHECK ((cov.at (0x300) & COV_JMP) == COV_JMP);
+  CHECK ((cov.at (0x340) & COV_START) == COV_START);
+
+  sregs[0].pc = 0x380;
+  sregs[0].npc = 0x384;
+  CHECK (exec (0x9782) == 0); /* c.jalr a5 */
+  CHECK ((cov.at (0x380) & COV_JMP) == COV_JMP);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture,
+		   "RISC-V the compressed branches are recorded too")
+{
+  coverage_on cov;
+
+  /* c.beqz and c.bnez, each taken and not taken, forward and back.  */
+  sregs[0].pc = 0x200;
+  sregs[0].npc = 0x204;
+  set (10, 0);
+  CHECK (exec (0xc111) == 0); /* c.beqz a0, .+4 */
+  CHECK (sregs[0].pc == 0x204);
+  CHECK ((cov.at (0x200) & COV_BT) == COV_BT);
+  CHECK ((cov.at (0x204) & COV_START) == COV_START);
+
+  sregs[0].pc = 0x280;
+  sregs[0].npc = 0x284;
+  set (10, 1);
+  CHECK (exec (0xc111) == 0); /* not taken */
+  CHECK (sregs[0].pc == 0x282);
+  CHECK ((cov.at (0x280) & COV_BNT) == COV_BNT);
+  CHECK ((cov.at (0x282) & COV_START) == COV_START);
+
+  sregs[0].pc = 0x300;
+  sregs[0].npc = 0x304;
+  CHECK (exec (0xe111) == 0); /* c.bnez a0, .+4, taken */
+  CHECK (sregs[0].pc == 0x304);
+  CHECK ((cov.at (0x300) & COV_BT) == COV_BT);
+
+  sregs[0].pc = 0x380;
+  sregs[0].npc = 0x384;
+  set (10, 0);
+  CHECK (exec (0xe111) == 0); /* not taken */
+  CHECK ((cov.at (0x380) & COV_BNT) == COV_BNT);
+}
