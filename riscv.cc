@@ -595,6 +595,8 @@ riscv_dispatch_instruction (struct pstate *sregs)
 			  sregs->r[1] = npc;
 			  npc = sregs->r[rs1];
 			  npc &= ~1;
+			  if (!npc)
+			    sregs->trap = NULL_TRAP; // halt on null pointer
 			  if (ebase.coven)
 			    cov_jmp (sregs->pc, npc);
 			}
@@ -620,6 +622,8 @@ riscv_dispatch_instruction (struct pstate *sregs)
 		    { /* jalr x0, rs1, 0 */
 		      npc = sregs->r[rs1];
 		      npc &= ~1;
+		      if (!npc)
+			sregs->trap = NULL_TRAP; // halt on null pointer
 		      if (ebase.coven)
 			cov_jmp (sregs->pc, npc);
 		    }
@@ -1145,11 +1149,9 @@ riscv_dispatch_instruction (struct pstate *sregs)
 		}
 	      break;
 	    case LB:
-	      if (sregs->inst == 0)
-		{
-		  sregs->trap = TRAP_ILLEG;
-		  break;
-		}
+	      /* An all zero word never reaches here.  Its low two bits are
+		 clear, so the compressed decoder takes it first and rejects
+		 it as the reserved encoding it is.  */
 	      mexc = ms->memory_read (address & ~3, (uint32 *) &data, &ws);
 	      sregs->hold += ws;
 	      if (mexc)
