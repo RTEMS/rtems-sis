@@ -349,7 +349,16 @@ greth_rxready (unsigned char *buffer, int len)
 	    {
 	      wlen = (len + 3) & ~3; // align up to 32-bit word
 	      for (i = 0; i < wlen; i++)
-		greth_rxbufptr[i] = buffer[arch->bswap ^ i];
+		{
+		  /* The descriptor buffer takes whole words, so the tail of
+		     the last one is written as well.  Swapping brings those
+		     bytes from past the end of the frame, which the caller
+		     need not have allocated.  The descriptor reports the
+		     unpadded length and no driver reads beyond it, so take
+		     them as zero rather than off the end.  */
+		  int src = arch->bswap ^ i;
+		  greth_rxbufptr[i] = src < len ? buffer[src] : 0;
+		}
 	    }
 	  else
 	    memcpy (greth_rxbufptr, buffer, len);
