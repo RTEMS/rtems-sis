@@ -1,0 +1,82 @@
+# RISC-V Privileged ISA, current (scoped) -- table of contents
+
+Source: `riscv-current-privileged-isa-scoped.adoc`
+
+- RISC-V Privileged ISA, current spec (scoped to Machine mode, as implemented by SIS riscv.c; no S-mode/U-mode/hypervisor)
+  - Preface
+  - Introduction
+    - RISC-V Privileged Software Stack Terminology
+    - Privilege Levels
+    - Debug Mode
+  - Control and Status Registers (CSRs)
+    - CSR Address Mapping Conventions
+    - CSR Listing
+      - Currently allocated RISC-V unprivileged CSR addresses
+      - Currently allocated RISC-V supervisor-level CSR addresses
+      - Currently allocated RISC-V hypervisor and VS CSR addresses
+      - Currently allocated RISC-V machine-level CSR addresses
+      - Currently allocated RISC-V indirect CSR (ext:smcsrind[]) mappings
+    - CSR Field Specifications
+      - Reserved Writes Preserve Values, Reads Ignore Values (WPRI)
+      - Write/Read Only Legal Values (WLRL)
+      - Write Any Values, Reads Legal Values (WARL)
+    - CSR Field Modulation
+    - Implicit Reads of CSRs
+    - CSR Width Modulation
+    - Explicit Accesses to CSRs Wider than XLEN
+  - Machine-Level ISA, Version 1.13
+    - Machine-Level CSRs
+      - Machine ISA (csr:misa[]) Register
+      - Machine Vendor ID (csr:mvendorid[]) Register
+      - Machine Architecture ID (csr:marchid[]) Register
+      - Machine Implementation ID (csr:mimpid[]) Register
+      - Hart ID (csr:mhartid[]) Register
+      - Machine Status (csr:mstatus[] and csr:mstatush[]) Registers
+        - Privilege and Global Interrupt-Enable Stack in csr:mstatus[] register
+        - Double Trap Control in csr:mstatus[] Register
+        - Base ISA Control in csr:mstatus[] Register
+        - Memory Privilege in csr:mstatus[] Register
+        - Endianness Control in csr:mstatus[] and csr:mstatush[] Registers
+        - Virtualization Support in csr:mstatus[] Register
+        - Extension Context Status in csr:mstatus[] Register
+        - Previous Expected Landing Pad (ELP) State in csr:mstatus[] Register
+      - Machine Trap-Vector Base-Address (csr:mtvec[]) Register
+      - Machine Trap Delegation (csr:medeleg[] and csr:mideleg[]) Registers
+      - Machine Interrupt (csr:mip[] and csr:mie[]) Registers
+      - Hardware Performance Monitor
+      - Machine Counter-Enable (csr:mcounteren[]) Register
+      - Machine Counter-Inhibit (csr:mcountinhibit[]) Register
+      - Machine Scratch (mscratch) Register
+      - Machine Exception Program Counter (mepc) Register
+      - Machine Cause (mcause) Register
+      - Machine Trap Value (mtval) Register
+      - Machine Configuration Pointer (mconfigptr) Register
+      - Machine Environment Configuration (menvcfg) Register
+      - Machine Security Configuration (mseccfg) Register
+    - Machine-Level Memory-Mapped Registers
+      - Machine Timer (mtime and mtimecmp) Registers
+    - Machine-Mode Privileged Instructions
+      - Environment Call and Breakpoint
+      - Trap-Return Instructions
+      - Wait for Interrupt
+      - Custom SYSTEM Instructions
+    - Reset
+    - Non-Maskable Interrupts
+    - Physical Memory Attributes
+      - Main Memory versus I/O Regions
+      - Supported Access Type PMAs
+      - Atomicity PMAs
+        - AMO PMA
+        - Reservability PMA
+      - Misaligned Atomicity Granule PMA
+      - Memory-Ordering PMAs
+      - Coherence and Cacheability PMAs
+      - Idempotency PMAs
+    - Physical Memory Protection
+      - Physical Memory Protection CSRs
+        - Address Matching
+        - Locking and Privilege Mode
+        - Priority and Matching Logic
+      - Physical Memory Protection and Paging
+  - Historical Rationale for Extensions
+    - ext:smepmp[] Extension for PMP Enhancements for memory access and execution prevention in Machine mode

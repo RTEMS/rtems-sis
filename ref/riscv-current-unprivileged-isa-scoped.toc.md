@@ -1,0 +1,117 @@
+# RISC-V Unprivileged ISA, current (scoped) -- table of contents
+
+Source: `riscv-current-unprivileged-isa-scoped.adoc`
+
+- RISC-V Unprivileged ISA, current spec (scoped to RV32IMAFDC + Zicsr/Zifencei, as implemented by SIS riscv.c)
+  - Preface
+  - Introduction
+    - RISC-V Hardware Platform Terminology
+    - RISC-V Software Execution Environments and Harts
+    - RISC-V ISA Overview
+    - Memory
+    - Base Instruction-Length Encoding
+    - Exceptions, Traps, and Interrupts
+    - UNSPECIFIED Behaviors and Values
+  - Base Instruction Sets
+    - RV32I Base Integer Instruction Set
+      - Programmers' Model for Base Integer ISA
+      - Base Instruction Formats
+      - Immediate Encoding Variants
+      - Integer Computational Instructions
+        - Integer Register-Immediate Instructions
+        - Integer Register-Register Instructions
+        - insn:nop[] Instruction
+      - Control Transfer Instructions
+        - Unconditional Jumps
+        - Conditional Branches
+      - Load and Store Instructions
+      - Memory Ordering Instructions
+      - Environment Call and Breakpoints
+      - HINT Instructions
+  - RISC-V Memory Models
+    - RVWMO Memory Consistency Model
+      - Definition of the RVWMO Memory Model
+        - Memory Model Primitives
+        - Syntactic Dependencies
+        - Preserved Program Order
+        - Memory Model Axioms
+          - Load Value Axiom
+          - Atomicity Axiom
+          - Progress Axiom
+      - CSR Dependency Tracking Granularity
+      - Source and Destination Register Listings
+    - ext:zifencei[] Extension for Instruction-Fetch Fence
+    - ext:zicsr[] Extension for Control and Status Register (CSR) Instructions
+      - CSR Instructions
+        - CSR Access Ordering
+    - ext:m[] Extension for Integer Multiplication and Division
+      - Multiplication Operations
+      - Division Operations
+    - ext:zmmul[] Extension for Integer Multiplication
+    - ext:a[] Extension for Atomic Instructions
+    - ext:zalrsc[] Extension for Load-Reserved/Store-Conditional Instructions
+      - Eventual Success of Store-Conditional Instructions
+    - ext:zaamo[] Extension for Atomic Memory Operations
+    - ext:f[] Extension for Single-Precision Floating-Point
+      - Floating-Point Register State
+      - Floating-Point Control and Status Register
+      - NaN Generation and Propagation
+      - Subnormal Arithmetic
+      - Single-Precision Load and Store Instructions
+      - Single-Precision Floating-Point Computational Instructions
+      - Single-Precision Floating-Point Conversion and Move Instructions
+      - Single-Precision Floating-Point Compare Instructions
+      - Single-Precision Floating-Point Classify Instruction
+    - ext:d[] Extension for Double-Precision Floating-Point
+      - ext:d[] Register State
+      - NaN Boxing of Narrower Values
+      - Double-Precision Load and Store Instructions
+      - Double-Precision Floating-Point Computational Instructions
+      - Double-Precision Floating-Point Conversion and Move Instructions
+      - Double-Precision Floating-Point Compare Instructions
+      - Double-Precision Floating-Point Classify Instruction
+    - ext:c[] Extension for Compressed Instructions
+    - ext:zca[] Extension for Integer Compressed Instructions
+      - Compressed Instruction Formats
+      - Load and Store Instructions
+        - Stack-Pointer-Based Loads and Stores
+        - Register-Based Loads and Stores
+      - Control Transfer Instructions
+      - Integer Computational Instructions
+        - Integer Constant-Generation Instructions
+        - Integer Register-Immediate Operations
+        - Integer Register-Register Operations
+        - Defined Illegal Instruction
+        - NOP Instruction
+        - Breakpoint Instruction
+      - Usage of Compressed Instructions in insn:lr[]/insn:sc[] Sequences
+      - HINT Instructions
+      - ext:zca[] Instruction Set Listings
+    - ext:zcf[] Extension for Single-Precision Floating-Point Compressed Instructions
+      - Stack-Pointer-Based Loads and Stores
+      - Register-Based Loads and Stores
+    - ext:zcd[] Extension for Double-Precision Floating-Point Compressed Instructions
+      - Stack-Pointer-Based Loads and Stores
+      - Register-Based Loads and Stores
+  - RV32/64G Instruction Set Listings
+  - ISA Extension Naming Conventions
+    - Case Sensitivity
+    - Base Integer ISA
+    - Instruction-Set Extension Names
+    - Underscores
+    - Additional Standard Unprivileged Extension Names
+    - User-Level Instruction-Set Extension Names
+    - Supervisor-Level Instruction-Set Extension Names
+    - Hypervisor-Level Instruction-Set Extension Names
+    - Machine-Level Instruction-Set Extension Names
+    - Non-Standard Extension Names
+    - Version Numbers
+    - Canonical Order
+    - Summary
+  - Historical Rationale for Extensions
+    - ext:f[], ext:d[], and ext:q[] Extensions for Floating-Point
+    - ext:zihintpause[] Extension for Pause Hint
+    - ext:zicond[] Extension for Integer Conditional Operations
+    - ext:zacas[] Extension for Atomic Compare-and-Swap (CAS) Instructions
+    - ext:zabha[] Extension for Byte and Halfword Atomic Memory Operations
+    - ext:zfbfmin[] Extension for Scalar BF16 Operations

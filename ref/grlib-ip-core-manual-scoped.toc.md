@@ -1,0 +1,96 @@
+# GRLIB IP Core Manual (scoped) -- table of contents
+
+Source: `grlib-ip-core-manual-scoped.md`
+
+- GRLIB IP Core manual, scoped to peripherals SIS models
+- 115-119: APBCTRL - AMBA AHB/APB bridge with plug&play support
+  - 16.9 Component declaration
+  - 16.10 Instantiation
+- 130-141: APBUART - AMBA APB UART Serial Interface
+  - 18.2.2 Transmitter break process
+  - 18.2.3 Receiver operation
+  - 18.7.3 UART Control Register
+  - 18.7.4 UART Scaler Register
+- 267-282: DSU3 - LEON3 Hardware Debug Support Unit
+  - 32.3.1 AHB trace buffer filters
+  - 32.3.2 AHB statistics
+  - 32.6.4 DSU trap register
+  - 32.6.5 DSU time tag counter
+  - 32.6.6 DSU ASI register
+  - 32.6.7 AHB Trace buffer control register
+  - 32.6.8 AHB trace buffer index register
+  - 32.6.9 AHB trace buffer filter control register
+  - 32.6.12 Instruction trace control register 0
+  - 32.6.13 Instruction trace control register 1
+- 455-464: GPTIMER - General Purpose Timer Unit
+    - 40.3.1 Scaler Value Register
+    - 40.3.2 Scaler Reload Value Register
+  - 40.4 Vendor and device identifiers
+  - 40.5 Implementation
+    - 40.5.1 Reset
+- 680-699: GRETH - Ethernet Media Access Controller (MAC) with EDCL support
+      - 53.2.2 Protocol support
+      - 53.2.3 Clocking
+      - 53.2.4 RAM debug support
+      - 53.2.5 Multibus version
+      - 53.3.3 Descriptor handling after transmission
+      - 53.3.4 Setting up the data for transmission
+    - 53.4 Rx DMA interface
+      - 53.4.1 Setting up descriptors
+      - 53.4.2 Starting reception
+      - 53.4.3 Descriptor handling after reception
+      - 53.6.1 Operation
+      - 53.6.2 EDCL protocols
+      - 53.6.3 EDCL IP and Ethernet address settings
+      - 53.6.4 EDCL buffer size
+    - 53.7 Media Independent Interfaces
+      - 53.9.1 Control Register
+      - 53.9.2 Status Register
+      - 53.9.6 Transmitter Descriptor Table Base Address Register
+      - 53.9.7 Receiver Descriptor Table Base Address Register
+      - 53.9.9 Hash Table Msb Register
+    - 53.14 Library dependencies
+    - 53.15 Instantiation
+      - 53.15.1 Non-MB version
+      - 53.15.2 MB version
+- 1557-1566: IRQMP - Multiprocessor Interrupt Controller
+    - 96.3.1 Interrupt Level Register
+    - 96.3.2 Interrupt Pending Register
+    - 96.3.3 Interrupt Force Register ( _ncpu_ = 1)
+    - 96.3.4 Interrupt Clear Register
+    - 96.3.5 Multiprocessor Status Register
+    - 96.3.6 Broadcast Register ( _ncpu_ > 1)
+    - 96.3.7 Error Mode Status Register
+    - 96.3.8 Processor N Interrupt Mask Register
+    - 96.3.9 Processor N Interrupt Force Register ( _ncpu_ > 1)
+    - 96.3.10 Processor N Extended Interrupt Acknowledge Register
+    - 96.3.11 Processor N Boot Address Register ( _bootreg_ = 1)
+    - 96.3.12 Interrupt Map Register N ( _irqmap_ > 0)
+- 1582-1606: L2C - Level 2 Cache controller
+  - 98.2.2 Write policy
+  - 98.2.3 Memory type range registers
+  - 98.2.4 Cachability
+  - 98.2.5 Cache tag entry
+  - 98.2.6 AHB address mapping
+  - 98.2.7 Memory protection and Error handling
+  - 98.2.8 Scrubber
+  - 98.2.9 Locked way
+  - 98.2.10 Data priming
+  - 98.4.1 Control Register
+  - 98.4.2 Status Register
+  - 98.4.5 Access Counter Register
+  - 98.4.6 Hit Counter Register
+  - 98.4.7 Front-side Bus Cycle Counter Register
+  - 98.4.8 Front-side Bus Usage Counter Register
+  - 98.4.9 Error Status/Control
+  - 98.4.13 Scrub Control/Status Register
+  - 98.4.14 Scrub Delay Register
+  - 98.4.15 Error Injection Register
+  - 98.4.16 Access control register
+  - 98.4.17 Priming start register 0
+  - 98.4.18 Priming stop register 0
+  - 98.4.19 Priming start register 1
+  - 98.4.20 Priming stop register 1
+  - 98.4.21 Error Handling / Injection configuration
+- 2037-2046: SDCTRL - 32/64-bit PC133 SDRAM Controller
+  - 126.3 Registers

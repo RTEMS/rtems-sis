@@ -1,0 +1,293 @@
+# SiFive FU540-C000 Manual -- table of contents
+
+Source: `sifive-fu540-c000-manual.md`
+
+- SiFive FU540-C000 Manual
+      - Proprietary Notice
+      - Release Information
+- Contents
+  - Chapter 1
+- Introduction
+    - 1.1 FU540-C000 Overview
+    - 1.2 E51 RISC‑V Monitor Core
+    - 1.3 U54 RISC‑V Application Cores
+    - 1.4 Interrupts
+    - 1.5 On-Chip Memory System
+    - 1.6 Universal Asynchronous Receiver/Transmitter
+    - 1.7 Pulse Width Modulation
+    - 1.8 I²C
+    - 1.9 Hardware Serial Peripheral Interface (SPI)
+    - 1.10 GPIO Peripheral
+    - 1.11 Gigabit Ethernet MAC
+    - 1.12 DDR Memory Subsystem
+    - 1.13 Debug Support
+  - Chapter 2
+- List of Abbreviations and Terms
+  - Chapter 3
+- E51 RISC-V Core
+    - 3.1 Instruction Memory System
+      - 3.1.1 I-Cache Reconfigurability
+    - 3.2 Instruction Fetch Unit
+    - 3.3 Execution Pipeline
+    - 3.4 Data Memory System
+    - 3.5 Atomic Memory Operations
+    - 3.6 Supported Modes
+    - 3.7 Physical Memory Protection (PMP)
+      - 3.7.1 Functional Description
+      - 3.7.2 Region Locking
+    - 3.8 Hardware Performance Monitor
+    - 3.9 ECC
+      - 3.9.1 Single Bit Errors
+  - Chapter 4
+- U54 RISC-V Core
+    - 4.1 Instruction Memory System
+      - 4.1.1 I-Cache Reconfigurability
+    - 4.2 Instruction Fetch Unit
+    - 4.3 Execution Pipeline
+    - 4.4 Data Memory System
+    - 4.5 Atomic Memory Operations
+    - 4.6 Floating-Point Unit (FPU)
+    - 4.7 Virtual Memory Support
+    - 4.8 Supported Modes
+    - 4.9 Physical Memory Protection (PMP)
+      - 4.9.1 Functional Description
+      - 4.9.2 Region Locking
+    - 4.10 Hardware Performance Monitor
+    - 4.11 ECC
+      - 4.11.1 Single Bit Errors
+  - Chapter 5
+- Memory Map
+  - Chapter 6
+- Boot Process
+    - 6.1 Reset Vector
+    - 6.2 Zeroth Stage Boot Loader (ZSBL)
+    - 6.3 First Stage Boot Loader (FSBL)
+    - 6.4 Berkeley Boot Loader (BBL)
+    - 6.5 Boot Methods
+      - 6.5.1 Flash Bit-Banged x1
+      - 6.5.2 Flash Memory-Mapped x1
+      - 6.5.3 Flash Memory-Mapped x4
+      - 6.5.4 SD Card Bit-Banged x1
+  - Chapter 7
+- Clocking and Reset
+    - 7.1 Clocking
+    - 7.2 Reset
+    - – 7.3 Memory Map (** **`0x1000_0000 0x1000_0FFF` )
+    - 7.4 Reset and Clock Initialization
+      - 7.4.1 Power-On
+      - 7.4.2 Setting** **`coreclk` frequency
+        - 1. `COREPLL` Setup
+      - 7.4.3 DDR and Ethernet Subsystem Clocking and Reset
+  - Chapter 8
+- Interrupts
+    - 8.1 Interrupt Concepts
+    - 8.2 Interrupt Entry and Exit
+    - 8.3 Interrupt Control Status Registers
+      - 8.3.1 Machine Status Register (** **`mstatus` )
+      - 8.3.2 Machine Interrupt Enable Register (** **`mie` )
+      - 8.3.3 Machine Interrupt Pending (** **`mip` )
+      - 8.3.4 Machine Cause Register (** **`mcause` )
+      - 8.3.5 Machine Trap Vector (** **`mtvec` )
+    - 8.4 Supervisor Mode Interrupts
+      - 8.4.1 Delegation Registers (** **`m*deleg` )
+      - 8.4.2 Supervisor Status Register (** **`sstatus` )
+      - 8.4.3 Supervisor Interrupt Enable Register (** **`sie` )
+      - 8.4.4 Supervisor Interrupt Pending (** **`sip` )
+      - 8.4.5 Supervisor Cause Register (** **`scause` )
+      - 8.4.6 Supervisor Trap Vector (** **`stvec` )
+      - 8.4.7 Delegated Interrupt Handling
+    - 8.5 Interrupt Priorities
+    - 8.6 Interrupt Latency
+  - Chapter 9
+- Core Local Interruptor (CLINT)
+    - 9.1 CLINT Memory Map
+    - 9.2 MSIP Registers
+    - 9.3 Timer Registers
+    - 9.4 Supervisor Mode Delegation
+  - Chapter 10
+- Platform-Level Interrupt Controller (PLIC)
+    - 10.1 Memory Map
+    - 10.2 Interrupt Sources
+    - 10.3 Interrupt Priorities
+    - 10.4 Interrupt Pending Bits
+    - 10.5 Interrupt Enables
+    - 10.6 Priority Thresholds
+    - 10.7 Interrupt Claim Process
+    - 10.8 Interrupt Completion
+  - Chapter 11
+- Level 2 Cache Controller
+    - 11.1 Level 2 Cache Controller Overview
+    - 11.2 Functional Description
+      - 11.2.1 Way Enable and the L2 Loosely Integrated Memory (L2-LIM)
+      - 11.2.2 Way Masking and Locking
+      - 11.2.3 L2 Scratchpad
+      - 11.2.4 Error Correcting Codes (ECC)
+    - 11.3 Memory Map
+    - 11.4 Register Descriptions
+      - 11.4.1 Cache Configuration Register (** **`Config` )
+      - 11.4.2 Way Enable Register (** **`WayEnable` )
+      - 11.4.3 ECC Error Injection Register (** **`ECCInjectError` )
+      - 11.4.4 ECC Directory Fix Address (** **`DirECCFix*` )
+      - 11.4.5 ECC Directory Fix Count (** **`DirECCFixCount` )
+      - 11.4.6 ECC Data Fix Address (** **`DatECCFix*` )
+      - 11.4.7 ECC Data Fix Count (** **`DatECCFixCount` )
+      - 11.4.8 ECC Data Fail Address (** **`DatECCFail*` )
+      - 11.4.9 ECC Data Fail Count (** **`DatECCFailCount` )
+      - 11.4.10 Cache Flush Registers (** **`Flush*` )
+      - 11.4.11 Way Mask Registers (** **`WayMask*` )
+  - Chapter 12
+- Platform DMA Engine (PDMA)
+    - 12.1 Functional Description
+      - 12.1.1 PDMA Channels
+      - 12.1.2 Interrupts
+    - 12.2 PDMA Memory Map
+    - 12.3 Register Descriptions
+      - 12.3.1 Channel Control Register (** **`Control` )
+      - 12.3.2 Channel Next Configuration Register (** **`NextConfig` )
+      - 12.3.3 Channel Byte Transfer Register (** **`NextBytes` )
+      - 12.3.4 Channel Destination Register (** **`NextDestination` )
+      - 12.3.5 Channel Source Address (** **`NextSource` )
+      - 12.3.6 Channel Exec Registers (** **`Exec*` )
+  - Chapter 13
+- Universal Asynchronous Receiver/ Transmitter (UART)
+    - 13.1 UART Overview
+    - 13.2 UART Instances in FU540-C000
+    - 13.3 Memory Map
+    - 13.4 Transmit Data Register (** **`txdata` )
+    - 13.5 Receive Data Register (** **`rxdata` )
+    - 13.6 Transmit Control Register (** **`txctrl` )
+    - 13.7 Receive Control Register (** **`rxctrl` )
+    - 13.8 Interrupt Registers (** **`ip` and** **`ie` )
+    - 13.9 Baud Rate Divisor Register (** **`div` )
+  - Chapter 14
+- Pulse Width Modulator (PWM)
+    - 14.1 PWM Overview
+    - 14.2 PWM Instances in FU540-C000
+    - 14.3 PWM Memory Map
+    - 14.4 PWM Count Register (** **`pwmcount` )
+    - 14.5 PWM Configuration Register (** **`pwmcfg` )
+    - 14.6 Scaled PWM Count Register (** **`pwms` )
+    - – 14.7 PWM Compare Registers (** **`pwmcmp0 pwmcmp3` )
+    - 14.8 Deglitch and Sticky Circuitry
+        - Note
+    - 14.9 Generating Left- or Right-Aligned PWM Waveforms
+    - 14.10 Generating Center-Aligned (Phase-Correct) PWM Waveforms
+    - 14.11 Generating Arbitrary PWM Waveforms using Ganging
+    - 14.12 Generating One-Shot Waveforms
+    - 14.13 PWM Interrupts
+  - Chapter 15
+- Inter-Integrated Circuit (I²C) Master Interface
+    - 15.1 I²C Instance in FU540-C000
+  - Chapter 16
+- Serial Peripheral Interface (SPI)
+    - 16.1 SPI Overview
+    - 16.2 SPI Instances in FU540-C000
+    - 16.3 Memory Map
+    - 16.4 Serial Clock Divisor Register (** **`sckdiv` )
+    - 16.5 Serial Clock Mode Register (** **`sckmode` )
+        - Value Description
+    - 16.6 Chip Select ID Register (** **`csid` )
+    - 16.7 Chip Select Default Register (** **`csdef` )
+    - 16.8 Chip Select Mode Register (** **`csmode` )
+    - 16.9 Delay Control Registers (** **`delay0` and** **`delay1` )
+    - 16.10 Frame Format Register (** **`fmt` )
+    - 16.11 Transmit Data Register (** **`txdata` )
+    - 16.12 Receive Data Register (** **`rxdata` )
+    - 16.13 Transmit Watermark Register (** **`txmark` )
+    - 16.14 Receive Watermark Register (** **`rxmark` )
+    - 16.15 SPI Interrupt Registers (** **`ie` and** **`ip` )
+    - 16.16 SPI Flash Interface Control Register (** **`fctrl` )
+    - 16.17 SPI Flash Instruction Format Register (** **`ffmt` )
+  - Chapter 17
+- General Purpose Input/Output Controller (GPIO)
+    - 17.1 GPIO Instance in FU540-C000
+    - 17.2 Memory Map
+    - 17.3 Input / Output Values
+    - 17.4 Interrupts
+    - 17.5 Internal Pull-Ups
+    - 17.6 Drive Strength
+    - 17.7 Output Inversion
+  - Chapter 18
+- One-Time Programmable Memory Interface (OTP)
+    - 18.1 OTP Overview
+    - 18.2 Memory Map
+    - 18.3 Detailed Register Fields
+    - 18.4 OTP Contents in the FU540-C000
+  - Chapter 19
+- Gigabit Ethernet Subsystem
+    - 19.1 Gigabit Ethernet Overview
+    - 19.2 Memory Map
+      - 19.2.1 GEMGXL Management Block Control Registers (** **`0x100A_0000` –** **`0x100A_FFFF` )
+      - 19.2.2 GEMGXL Control Registers (** **`0x1009_0000` –** **`0x1009_1FFF` )
+    - 19.3 Initialization and Software Interface
+  - Chapter 20
+- DDR Subsystem
+    - 20.1 DDR Subsystem Overview
+    - 20.2 Memory Map
+      - 20.2.1 Bus Blocker Control Registers (** **`0x100B_8000` –** **`0x100B_8FFF` )
+      - 20.2.2 DDR Controller and PHY Control Registers (** **`0x100B_0000` –** **`0x100B_3FFF` )
+      - 20.2.3 DDR Memory (** **`0x8000_0000` –** **`0x1F_7FFF_FFFF` )
+    - 20.3 Reset and Initialization
+  - Chapter 21
+- Error Device
+  - Chapter 22
+- ChipLink
+        - Note
+    - 22.1 Message Signaled Interrupts (MSI)
+  - Chapter 23
+- Debug
+    - 23.1 Debug CSRs
+      - 23.1.1 Trace and Debug Register Select (** **`tselect` )
+      - 23.1.2 Trace and Debug Data Registers (** **`tdata1-3` )
+      - 23.1.3 Debug Control and Status Register (** **`dcsr` )
+      - 23.1.4 Debug PC** **`dpc`
+      - 23.1.5 Debug Scratch** **`dscratch`
+    - 23.2 Breakpoints
+      - 23.2.1 Breakpoint Match Control Register** **`mcontrol`
+      - 23.2.2 Breakpoint Match Address Register (** **`maddress` )
+      - 23.2.3 Breakpoint Execution
+      - 23.2.4 Sharing Breakpoints Between Debug and Machine Mode
+    - 23.3 Debug Memory Map
+      - 23.3.1 Debug RAM and Program Buffer (** **`0x300` –** **`0x3FF` )
+      - 23.3.2 Debug ROM (** **`0x800` –** **`0xFFF` )
+      - 23.3.3 Debug Flags (** **`0x100` –** **`0x110` ,** **`0x400` –** **`0x7FF` )
+      - 23.3.4 Safe Zero Address
+  - Chapter 24
+- Debug Interface
+    - 24.1 JTAG TAPC State Machine
+    - 24.2 Resetting JTAG Logic
+    - 24.3 JTAG Clocking
+    - 24.4 JTAG Standard Instructions
+    - 24.5 JTAG Debug Commands
+  - Chapter 25
+- Errata
+    - 25.1 ROCK-1: ITIM de-allocation corrupts I-cache contents
+        - Problem
+        - Implication
+        - Workaround
+    - 25.2 ROCK-2: High 24 address bits are ignored
+        - Problem
+        - Implication
+        - Workaround
+    - 25.3 ROCK-3: E51 atomic operations not ordered correctly
+        - Problem
+        - Implication
+        - Workaround
+    - 25.4 ROCK-4: The DPC CSR is not sign-extended
+        - Problem
+        - Implication
+        - Workaround
+    - 25.5 ROCK-5: Watchpoints fire after stores are issued
+        - Problem
+        - Implication
+        - Workaround
+    - 25.6 CCACHE-1: L2 ECC failed address reporting flawed
+        - Problem
+        - Implication
+        - Workaround
+    - 25.7 I2C-1: I2C interrupt can not be cleared
+        - Problem
+        - Implication
+        - Workaround
+  - Chapter 26
+- References

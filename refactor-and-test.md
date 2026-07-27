@@ -22,8 +22,24 @@ from complete.
 Two properties are held alongside coverage:
 
 - **Spec-driven correctness.** Register fields, reset values, reserved-bit
-  behavior and interrupt levels come from the reference manuals under `ref/`.
-  A test that encodes what the code does cannot catch what the code gets wrong.
+  behavior and interrupt levels come from the reference manuals. A test that
+  encodes what the code does cannot catch what the code gets wrong.
+
+  **Look in `/opt/eb-docs` before `ref/`.** It is an indexed device
+  documentation corpus: per chapter chunks with page citations, a
+  `REGISTERS.md` naming every register, errata, and a `whereis.py` search
+  tool. Read `/opt/eb-docs/CLAUDE.md` for how to navigate it. It carries a
+  newer GR740 manual than `ref/` does, and it is what finally specified
+  `gr1553.cc` and `grspw.cc`.
+
+  Those two files were twice written off in this plan as unspecified, on the
+  strength of grepping `ref/gr740-users-manual.md` for the tables their
+  comments cite and finding nothing. The tables were always in the manual:
+  the markdown conversion drops 363 of its 587 tables as picture
+  placeholders, and every table those two files cite is among the ones lost.
+  `ref/gr740-table-index.md` now maps all 587 to a PDF page so the gap
+  cannot read as an absence again. A missing table is a tooling failure
+  until proven otherwise.
 - **No performance regression.** Neither in the simulated timing model nor in
   the simulator's own throughput. See "Performance" below for how each is held.
 
@@ -66,7 +82,7 @@ against real descriptors the way `tests/sisio.cc` does.
 ## Where the tree stands
 
 Measured with `./waf configure --enable-coverage && ./waf`, branch metric,
-3291 of 5208 arcs (63%). The totals move as headers join the filter and as
+4247 of 5007 arcs (85%). The totals move as headers join the filter and as
 duplicated and dead code is removed, so compare per file rather than against
 an older total. Read the per file rows of the gcovr report, not its `TOTAL`
 line: that row counts the standard library headers the build pulls in, whose
@@ -76,13 +92,22 @@ tree.
 | Area | Arcs | Taken |
 |---|---|---|
 | `riscv.cc` | 1106 | 1106 |
-| `func.cc` | 603 | 38 |
+| `sparc.cc` | 1133 | 1133 |
+| `func.cc` | 603 | 582 |
 | `grlib.cc` | 378 | 376 |
-| `grspw.cc`, `gr1553.cc`, `memscrub.cc`, `tap.cc` | 507 | 0 |
-| `sis.cc`, `remote.cc`, `interf.cc` | 547 | 0 |
-| `leon2.cc`, `leon3.cc`, `gr740.cc`, `rv32.cc` | 284 | 0 |
+| `grspw.cc` | 206 | 206 |
+| `gr1553.cc` | 142 | 125 |
+| `leon2.cc` | 150 | 141 |
+| `leon3.cc` | 42 | 38 |
+| `gr740.cc` | 42 | 40 |
+| `rv32.cc` | 50 | 49 |
 | `elf.cc` | 97 | 91 |
-| graduated: `erc32_cfg.h`, `erc32_error.h`, `erc32_mec.h`, `erc32_timer.h`, `erc32_uart.h`, `erc32.cc`, `exec.cc`, `help.cc`, `sisio.cc`, `sparc.cc`, `uartport.cc`, `greth.cc` | | 100% |
+| `interf.cc` | 120 | 13 |
+| `remote.cc` | 226 | 0 |
+| `sis.cc` | 207 | 0 |
+| `memscrub.cc` | 94 | 1 |
+| `tap.cc` | 65 | 0 |
+| graduated: `erc32_cfg.h`, `erc32_error.h`, `erc32_mec.h`, `erc32_timer.h`, `erc32_uart.h`, `erc32.cc`, `exec.cc`, `greth.cc`, `grspw.cc`, `help.cc`, `riscv.cc`, `sisio.cc`, `sparc.cc`, `uartport.cc` | | 100% |
 
 Done, graduated in `tests/covered.txt`:
 
@@ -731,6 +756,23 @@ Hard-won here, so the next person does not rediscover them.
   `plic_read` zeroes on the way out. The first read therefore always
   returned a stale zero and the loop cleared nothing. Assert the state a
   cleanup routine is supposed to have reached, at the end of the routine.
+
+- **A board's `init_sim` cannot be called from the test binary.** It mounts
+  the real cores at the addresses the board uses, `grlib.cc` resolves by
+  first match and can never unregister, so whichever test file registers
+  first wins and the other one's fixtures break under `--order-by=rand`.
+  This is what keeps the last four arcs of `leon3.cc` and two of `gr740.cc`
+  uncovered, and no better test closes it: only a teardown hook in
+  `grlib.cc` would. Board `init_sim` is proven by the end to end runs
+  instead. Two test files also collided by both choosing `0x50000000` for a
+  fake slave, which passed for each agent alone and failed on merge, so pick
+  a fake address by grepping the tree for it first.
+
+- **Coverage measured on a build configured without `--enable-coverage`
+  reads as zero, not as an error.** The `.gcno` files survive a reconfigure,
+  so gcovr reports every arc as untaken and it looks exactly like a test
+  suite that runs but touches nothing. Check for `.gcda` files before
+  believing a sudden collapse.
 
 ## Moving to another machine
 

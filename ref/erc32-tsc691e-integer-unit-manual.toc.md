@@ -1,0 +1,106 @@
+# ERC32 TSC691E Integer Unit Manual -- table of contents
+
+Source: `erc32-tsc691e-integer-unit-manual.md`
+
+- List of Tables
+- List of Figures
+- TSC691E RT Integer Unit
+  - 1. Introduction
+  - 2. TSC691E Overview
+    - 2.1. SPARC RISC STANDARD FUNCTIONS :
+    - 2.2. Fault Tolerant and Test Mechanism Improvements:
+    - 2.3. Presentation of the ERC32 computing core
+      - 2.3.1. Concept
+      - 2.3.2. Functional Description
+- 3. Standard IU Function
+    - 3.1. Introduction
+    - 3.2. Description Of Parts
+    - 3.3. Programming Model
+      - 3.3.1. Register Windows
+      - 3.3.2. Processor States
+      - 3.3.3. Supervisor/User Modes
+      - 3.3.4. Control/Status Registers
+      - 3.3.5. Data Types
+    - 3.4. Instruction Set
+      - 3.4.1. Instruction Formats
+      - 3.4.4. Op Codes
+    - 3.5. Signal Description
+      - 3.5.1. Memory Subsystem Interface Signals
+      - 3.5.2. Floating-Point/Coprocessor Interface Signals
+      - 3.5.3. Interrupt and Control Signals
+      - 3.5.4. TAP signals
+      - 3.5.5. Power and Clock Signals
+    - 3.6. Pipeline and Instruction Execution Timing
+      - 3.6.1.Stages
+      - 3.6.2. Multicycle Instructions
+      - 3.6.3. Pipeline Freezes
+      - 3.6.4. Traps
+      - 3.6.5. Traps
+    - 3.7. Bus Operation and Timing
+      - 3.7.1. Instruction Fetch
+      - 3.7.2. Load
+      - 3.7.3. Load with Interlock
+      - 3.7.4. Load Double
+      - 3.7.5. Store
+      - 3.7.6. Store Double
+      - 3.7.7. Atomic Load–Store
+      - 3.7.8. Floating-Point Operations
+      - 3.7.9. Bus Arbitration
+      - 3.7.10. Load with Cache Miss
+      - 3.7.11. Store with Cache Miss
+      - 3.7.12. Load/Store instruction with Trap
+      - 3.7.13. Memory Exceptions
+      - 3.7.14. Floating-Point Exceptions
+      - 3.7.15. Interrupts
+      - 3.7.16. Reset Condition
+      - 3.7.17. Error Condition
+    - 3.8. Exception Model
+      - 3.8.1. Reset
+      - 3.8.2. Synchronous Traps
+      - 3.8.3. Interrupts (Asynchronous Traps)
+      - 3.8.4. Floating-Point/Coprocessor Traps
+    - 3.9. Coprocessor Interface
+      - 3.9.1. Protocol
+      - 3.9.2. Register Model
+      - 3.9.3. Exceptions
+  - 4. Fault Tolerant and Test Mechanism
+    - 4.1. Fault Tolerant and Test Support signals
+      - 4.1.1. Address Parity Generation:
+      - 4.1.2. Data Parity Generation/Checking:
+      - 4.1.3. MEC control signal Parity Generation:
+      - 4.1.4. FPU control signal Parity Generation/Checking:
+      - 4.1.5. Parity Checking Error Output:
+      - 4.1.6. Master/Checker Mode:
+      - 4.1.7. Test Access Port:
+      - 4.1.8. Miscellaneous:
+    - 4.2. Program Flow Control
+      - 4.2.1. Introduction
+      - 4.2.2. Example of Program Flow Control
+    - 4.3. Parity Checking
+      - 4.3.1. Introduction
+      - 4.3.2. Trap handling
+      - 4.3.5. Parity Checking on Control Signal for the FPU
+      - 4.3.6. Parity Checking on Control Pads for the TSC693E (MEC)
+      - 4.3.7. Parity Checking on Control Pads for the Coprocessor
+      - 4.3.8. Parity Generation on ADDRESS Bus
+      - 4.3.9. Parity Checking on DATA Bus
+      - 4.3.10. Non CY7C601 Mode
+      - 4.3.11. Error Type for external signals parity errors
+    - 4.4. Master/checker operation
+      - 4.4.1. Basic function
+    - 4.5. IEEE Standard Test Access Port & Boundary-Scan Architecture
+      - 4.5.1. TAP
+      - 4.5.2. TAP Controller
+      - 4.5.3. The Instruction Register
+      - 4.5.4. The Device Identification Register
+      - 4.5.5. Internal Scan Path
+      - 4.5.6. Boundary scan test register
+    - 4.6. Interleaving register file bits
+  - 5. Electrical and Mechanical Specification
+    - 5.1. Maximum rating and DC Characteristics
+      - 5.1.1. Maximum Ratings
+      - 5.1.2. Operating Range
+      - 5.1.3. DC Characteristics Over the Operating Range
+      - 5.1.4. Capacitance Ratings<sup>[4,5]</sup>
+      - 5.2.2. Waveforms
+      - 5.3.2. 256-Pin MQFP_F Pin Assignments

@@ -1,0 +1,346 @@
+# GR740 Data Sheet and User's Manual -- table of contents
+
+Source: `gr740-users-manual.md`
+
+      - Quad Core LEON4 SPARC V8 Processor
+        - Table of contents
+        - 1.8 Document revision history
+        - 2 Architecture
+        - 2.1 Overview
+        - 3 Signals
+        - 3.1 Bootstrap signals
+        - 3.3.1 PROM/IO interface multiplexing
+        - 3.3.2 SDRAM interface multiplexing
+        - 3.4 Complete signal list
+        - 5.4 System integrity and debug communication links
+        - 5.5 Separation and ASMP configurations
+        - 6.2.8 Branch prediction
+        - 6.2.9 Register file data protection
+        - 6.2.10 Hardware breakpoints
+        - 6.2.11 Instruction trace buffer
+        - 6.2.12 Processor configuration register
+        - 6.2.13 Exceptions
+        - 6.2.15 Address space identifiers (ASI)
+        - 6.2.16 Partial WRPSR
+        - 6.2.17 Power-down
+        - 6.2.18 Processor reset operation
+        - 6.2.19 Multi-processor systems
+        - 6.3 Cache system
+        - 6.3.1 Overview
+        - 6.3.2 Cache operation
+        - 6.3.5 Write buffer
+        - 6.3.6 Operating with MMU
+        - 6.3.7 Snooping
+        - 6.3.8 Enabling and disabling cache
+        - 6.4.2 MMU/Cache operation
+        - 6.4.3 Translation look-aside buffer (TLB)
+        - 6.5
+        - Floating-point unit
+        - 6.9.6 ASI 0x10, 0x11, 0x13, 0x18 - Flush
+        - 6.10 Configuration registers
+        - 6.10.1 PSR, WIM, TBR registers
+        - 6.10.3 ASR17, LEON4 configuration register
+        - 6.10.5 ASR24-31, Hardware watchpoint/breakpoint registers
+        - Note: Setting IF=DL=DS=0 disables the breakpoint
+        - 6.10.6 Cache control register
+        - 6.10.7 I-cache and D-cache configuration registers
+        - 6.10.8 MMU control register
+        - 6.10.9 MMU context pointer and context registers
+        - 6.11.3 Data scrubbing
+        - 6.11.4 Other considerations
+        - 7 Floating-point Control Unit
+        - 7.1 Floating-Point register file
+        - 7.2 Floating-Point State Register (FSR)
+        - 7.3 Floating-Point Exceptions and Floating-Point Deferred-Queue
+        - 8 High-performance IEEE-754 Floating-point Unit
+        - 8.1 Overview
+        - 8.2 Functional description
+        - 8.2.1 Floating-point number formats
+        - 8.2.2 FP operations
+        - 8.2.3 Exceptions
+        - 8.2.4 Rounding
+        - 8.2.5 Denormalized numbers
+        - 9.2.3 Memory type range registers
+        - 9.2.4 Cachability
+        - 9.2.5 Cache tag entry
+        - 9.2.6 AHB address mapping
+        - 9.2.7 Memory protection and Error handling
+        - 9.3.3 Cache flushing
+        - 9.3.4 Disabling Cache
+        - 9.3.5 Diagnostic cache access
+        - 9.3.6 Error injection
+        - 9.3.7 AHB slave interface
+        - 9.3.8 AHB master interface
+        - 9.3.9 Cache status
+        - 9.4.1 Control register
+        - 9.4.2 Status register
+        - 9.4.5 Error status/control register
+        - 9.4.6 Error address register
+        - 9.4.7 TAG check bits register
+        - 9.4.8 Data check bits register
+        - 9.4.9 Scrub control/status register
+        - 9.4.10 Scrub delay register
+        - 9.4.11 Error injection register
+        - 9.4.12 Access control register
+        - 9.4.13 Error Handling / Injection configuration
+        - 9.4.14 Memory type range registers
+        - 10.4.5 Refresh
+        - 10.4.6 2T signaling mode
+        - 10.4.7 Double chip select mode
+        - 10.4.8 SDRAM commands
+        - 10.5 Fault-tolerant operation
+        - 10.5.1 Overview
+        - 10.6.2 SDRAM configuration register 2
+        - 10.6.3 Mux configuration register
+        - 10.6.4 FT diagnostic address register
+        - 11 Memory Scrubber and AHB Status Register
+        - 11.1 Overview
+        - 11.2 Operation
+        - 11.2.1 Errors
+        - 11.2.2 Correctable errors
+        - 11.2.3 Scrubbing
+        - 11.2.4 Scrubber error counters
+        - 11.2.5 External start
+        - 11.2.6 Memory regeneration
+        - 11.3.3 AHB error configuration register
+        - 11.3.4 Status register
+        - 11.3.11 Second range low address register
+        - 11.3.12 Second range high address register
+        - 12 IOMMU - Bridge connecting Master I/O AHB bus
+        - 12.1 Overview
+        - 12.2 Bridge operation
+        - 12.2.1 General
+        - 12.2.2 Multi-bus bridge
+        - 12.3 General access protection and address translation
+        - 12.3.1 Overview
+        - 12.4.1 Access Protection Vector cache
+        - 12.4.2 Access Protection Vector cache flush operation
+        - 12.5 IO Memory Management Unit (IOMMU) functionality
+        - _Size of translated address range in MiB = 16 MiB  2_<sup>_ITR_</sup>
+        - 12.5.1 IO Page Table Entry
+        - 12.5.2 Prefetch operations and IOMMU protection
+        - 12.5.3 Translation Lookaside Buffer operation
+        - 12.7 Statistics
+        - 12.8 ASMP support
+        - 12.9.1 Capability register 0
+        - 12.9.4 Control register
+        - 13.2.1 Port numbering
+        - 13.2.2 Routing table
+        - 13.2.3 Port mapping
+        - 13.2.4 Address control
+        - 13.2.5 Output port arbitration
+        - 13.2.14 Auto-disconnect
+        - 13.2.15 Port data character timers
+        - 13.3.1.1 Transmitter
+        - 13.3.1.2 Receiver
+        - 13.3.2 Setting link-rate
+        - 13.4.2.1 Protocol support
+        - 13.4.3 Time-Code / distributed interrupt interface
+        - 13.4.3.1 Sending and receiving Time-Codes
+        - 13.4.3.2 Sending and receiving distributed interrupts
+        - 13.4.4.3 Setting up the port for reception
+        - 13.4.4.4 Setting up the descriptor table address
+        - 13.4.4.5 Enabling descriptors
+        - 13.4.5.3 Enabling descriptors
+        - 13.4.5.4 Starting transmissions
+        - 31 RESERVED
+        - _Table 165._ 0xA0 - RTR.AMBAINTCTRL - AMBA port Distributed interrupt control
+        - 13.5 Configuration port
+        - 13.5.1 RMAP target
+        - 13.5.1.1 Overview
+        - 13.5.1.2 RMAP command support
+        - _Table 187._ 0x00000A0C - RTR.IDIV - Initialization divisor
+        - 31: 1 RESERVED
+        - 31: 16 RESERVED
+        - _Table 223._ 0x00008000 - RTR.PNPPCNT - SpaceWire Plug-and-Play - Protocol Count
+        - _Table 224._ 0x0000C000 - RTR.PNPACNT - SpaceWire Plug-and-Play - Application Count
+    - | ~~<u>et</u>~~
+        - 14.2 Operation
+        - 14.2.1 System overview
+        - 14.2.2 Protocol support
+        - 14.2.3 Dedicated EDCL AHB master interface
+        - 14.3 Tx DMA interface
+        - 14.3.1 Setting up a descriptor.
+        - _Table 225._ Address offset 0x0 - GRETH_GBIT transmit descriptor word 0
+        - 14.3.2 Starting transmissions
+        - 14.3.3 Descriptor handling after transmission
+        - 14.4.2 Starting reception
+        - 14.4.3 Descriptor handling after reception
+        - 14.4.4 Reception with AHB errors
+        - 14.4.5 Accepted MAC addresses
+        - 14.6.2 EDCL protocols
+        - 15.3.5 Memory and I/O accesses
+        - 15.3.6 Bursts
+        - 15.3.7 Host operation
+        - 15.4 PCI Initiator interface
+        - 15.4.1 Memory cycles
+        - 15.4.2 I/O cycles
+        - 15.4.3 Configuration cycles
+        - 15.4.4 Error handling
+        - 15.4.5 Bus parking
+        - 15.5 PCI Target interface
+        - 15.5.1 Supported PCI commands
+        - 15.5.2 Implemented PCI responses
+        - 15.5.3 Supported byte-enables (CBE)
+        - 15.5.4 PCI to AHB translation
+        - 15.5.5 PCI system host signal
+        - 15.5.6 Error handling
+        - 15.6 DMA Controller
+        - 15.7.2 Triggering function
+        - 15.7.3 Trace Buffer APB interface
+        - 15.8 Interrupts
+        - 15.10.1 Control register
+        - 15.10.2 Status and capability register
+        - 15.10.3 PCI master prefetch burst limit register
+        - 15.10.4 AHB to PCI mapping for PCI IO register
+        - 15.10.5 DMA control and status register
+        - 15.10.10PCI trace control and status register
+        - 15.10.11PCI trace counter and mode register
+        - 15.10.12PCI trace AD pattern register
+        - 15.10.13PCI trace AD mask register
+        - 15.10.14PCI trace ctrl signal pattern register
+        - 15.10.15PCI trace ctrl signal mask register
+        - 15.10.16PCI trace PCI AD state register
+        - 15.10.17PCI trace PCI control signal state register
+        - 16.3 Operation
+        - 16.3.1 Operating modes
+        - 16.3.2 Register interface
+        - 16.3.3 Interrupting
+        - 16.4.4 Secondary transfer list
+        - 16.4.5 Interrupt generation
+        - 16.4.6 Transfer list format
+        - 16.5 Remote Terminal Operation
+        - 16.5.1 Overview
+        - 16.5.2 Data transfer handling
+        - 16.6 Bus Monitor Operation
+        - 16.6.1 Overview
+        - 16.6.2 No-response handling
+        - 16.6.3 Log entry format
+        - 16.7 Clocking and reset
+        - 17.2 Interface
+        - 17.3 Protocol
+        - 17.4 Status and monitoring
+        - 17.5 Transmission
+        - 17.5.1 Circular buffer
+        - 17.5.2 Write and read pointers
+        - 17.5.3 Location
+        - 17.5.4 Transmission procedure
+        - 17.5.5 Straight buffer
+        - 17.5.6 AMBA AHB error
+        - 17.5.7 Enable and disable
+        - 17.5.8 Interrupts
+        - 17.6 Reception
+        - 17.6.1 Circular buffer
+        - 17.6.2 Write and read pointers
+        - 17.6.7 Enable and disable
+        - 17.6.8 Interrupts
+        - 17.7 Global reset and enable
+        - 17.9.1 Configuration Register [CanCONF]
+        - 18.2.3 AHB write transfers
+        - 18.2.4 Locked transfers
+        - 18.2.5 Read and write combining
+        - 19.7 Memory EDAC
+        - 19.7.1 BCH EDAC
+        - 19.7.2 EDAC Error reporting
+        - 19.8 Bus Ready signalling
+        - 19.9.1 Memory configuration register 1 (MCFG1)
+        - 19.9.2 Memory configuration register 3 (MCFG3)
+        - 31 : 28 RESERVED
+        - 19.9.3 Memory configuration register 5 (MCFG5)
+        - 19.9.4 Memory configuration register 7 (MCFG7)
+        - 21.3.3 Interrupt force register
+        - 21.3.4 Interrupt clear register
+        - 21.3.5 Multiprocessor status register
+        - 21.3.6 Broadcast register
+        - 21.3.7 Error Mode Status Register
+        - 21.3.19 Interrupt map registers
+        - 22.3.4 Interrupt mask register
+        - 22.3.5 Interrupt polarity register
+        - 22.3.6 Interrupt edge register
+        - 22.3.7 Capability register
+        - 22.3.8 Interrupt map registers
+        - 22.3.9 Interrupt available register
+        - 22.3.12 Logical-OR/AND-XOR registers
+        - 23.2.2 Receiver operation
+        - 23.7.3 UART Control Register
+        - 23.7.4 UART Scaler Register
+        - 24.3.1 Capability register
+        - 24.3.2 Mode register
+        - 24.3.4 Mask register
+        - 24.3.5 Command register
+        - 24.3.9 Automatic slave select register
+        - 25.3.4 CPU/FPU override register
+        - 30.3.6 PLL current configuration register
+        - 30.3.7 Drive strength configuration registers
+        - 30.3.8 Configuration lockdown register
+        - 31.3.4 Initiator
+        - 31.3.5 Target
+        - 31.3.6 Configuring initiator and target
+        - 31.3.7 SpaceWire Time-Code
+        - 31.3.8 Initialization and synchronisation of target through RMAP
+        - • Time message generation
+        - 31.3.10 External Datation
+        - 32.2.3 AHB write transfers
+        - 32.2.4 Read and write combining
+        - 32.3 Registers
+  - ~~<u>i</u> ASy~~
+        - 33.3.1 AHB trace buffer filters
+        - 33.3.2 AHB statistics
+        - 33.6 DSU registers
+        - 33.6.1 DSU control register
+        - 33.6.2 Time tag counter register
+        - 33.6.3 DSU Break and Single Step register
+        - 33.6.4 DSU Debug Mode Mask Register
+        - 33.6.5 DSU trap register
+        - _Table 511._ 0x400020 - DTR - DSU trap register
+        - 33.6.6 DSU ASI register
+        - 33.6.15 Instruction trace buffer control register 0
+        - 33.6.16 Instruction trace buffer control register 1
+        - _Table 526._ JTAG debug link Data register
+        - 34.3 Registers
+        - 35.2.2 Protocol support
+        - 35.3 Link interface
+        - 35.3.1 Link interface FSM
+        - 35.4 Time-Code distribution
+        - 35.4.1 Receiving time-codes
+        - 35.4.2 Transmitting time-codes
+        - 35.5 Receiver DMA channels
+        - 35.5.4 Setting up the descriptor table address
+        - 35.5.5 Enabling descriptors
+        - 35.6.2 Setting up the core for transmission
+        - 35.6.3 Enabling descriptors
+        - 35.6.4 Starting transmissions
+        - 35.6.6 The descriptor table address register
+        - 35.6.7 Error handling
+        - Abort Tx
+        - AHB error
+        - Link error
+        - 35.7 RMAP
+        - 36.3.3 Trace buffer index register
+        - 39.5.2 Clocks
+        - 39.5.9 Ethernet MDIO timing
+        - 40.2 Package placement diagram
+        - 40.3 Pin assignment
+        - 40.4 Package drawing
+        - 40.4.1 Overview
+        - 40.4.2 Package drawing for GR740-[CP,MP,MSQ,MSV,DD]-LG625
+        - 40.4.3 Package drawing for GR740-[CP,MP,MSQ,MSV,DD]-CG625
+        - 41 Temperature and thermal resistance
+- FRONTGRADE I) 7
+        - 43.2.2 PCI master/initiator lockup due to write burst waitstates
+        - 43.2.3 L2 cache scrubber malfunction on uncorrectable error when SH option disabled
+        - 43.2.4 SpaceWire router block of output ports used for distributing multicast packets
+        - 43.2.5 Stores to ASI 0x1C (MMU/cache bypass) can update data cache contents
+        - 43.2.6 LEON4 Statistics Unit time stamp register unavailable
+        - Workaround: None
+        - 43.2.7 PROC_ERRORN signal assertion during power up on the GR740
+        - 43.2.8 SDRAM memory controller COMMAND field documentation update
+        - 43.2.9 L2 cache issues H1 2023
+        - 43.2.9.1 Issue 1: L2 cache flush can cause reordering of write accesses
+        - 43.2.9.2 Issue 2: A R-W-R or R-A access sequence to the L2C register interface can cause L2C lockup
+        - 43.2.9.3 Issue 3: Corrupted cache line by R-W sequence for uncached memory or IO area access
+        - 43.2.9.4 Issue 4: L2C lockup after match in error status register for uncached memory access
+        - 43.2.9.5 Issue 5: Incorrect data when accessing uncached memory or IO areas with split responses enabled
+        - 43.2.9.6 Issue 6: AHB error not propagated for IO area accesses when split is enabled
+        - 43.2.9.7 Issue 7: Missing error status register updates for uncached memory and IO area access
+        - 43.2.10 Incorrect identification of non-IP packets as TCP/UDP in Gigabit Ethernet Controller

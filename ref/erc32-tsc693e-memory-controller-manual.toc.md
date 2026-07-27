@@ -1,0 +1,237 @@
+# ERC32 TSC693E Memory Controller (MEC) Manual -- table of contents
+
+Source: `erc32-tsc693e-memory-controller-manual.md`
+
+- TSC693E
+    - TABLE OF CONTENTS
+    - APPENDIX 1 - TIMING DIAGRAMS
+    - 1. INTRODUCTION
+    - 1.1. Scope
+    - 1.2. Documents
+    - 1.2.1. Applicable Documents
+    - 1.3. Glossary
+    - 1.4. Definitions
+    - 1.4.1. Bit Numbering
+    - 1.4.2. Signal Names
+    - 1.4.3. Registers
+    - 2. GENERAL OVERVIEW OF ERC32
+    - 2.1. ERC32 Overview
+    - 3. MEMORY CONTROLLER FUNCTIONS
+- MEC Architecture
+    - 3.1. Data Types
+    - 3.2. Memory Interface
+    - 3.2.1. Memory Control Signals
+    - 3.2.2. RAM
+    - 3.2.2.1. Extended RAM
+    - 3.2.3. Boot PROM
+    - 3.2.3.1. Extended PROM
+    - 3.2.4. Exchange Memory
+    - 3.2.5. I/O
+    - Table 2 - Bus Transaction Response Signals
+    - 3.2.5.1. Extended I/O
+    - 3.2.6. MEC Memory Map
+    - 3.3. DMA Interface
+    - 3.4. Bus Arbiter
+    - 3.5. Execution Modes
+    - 3.5.1. Reset Mode
+    - 3.5.2. Run Mode
+    - 3.5.3. System Halt Mode
+    - 3.5.4. Power-Down Mode
+    - 3.5.5. Error Halt Mode
+    - 3.6. Wait-State and Timeout Generator
+    - 3.7. Memory Access Protection
+    - 3.7.1. Unimplemented Areas
+    - 3.7.2. RAM Write Access Protection
+    - 3.7.3. Boot PROM Write Protection
+    - 3.8. Register Access Protection
+    - 3.9. EDAC
+    - 3.9.1. Check Bit Generator
+    - 3.9.2. Syndrome Generator
+    - 3.9.3. Syndrome Detector
+    - In case of Syndrome(7:0)
+    - 3.9.4. Fault Injection
+    - 3.9.5. Memory and I/O Parity
+    - 3.10. Memory Redundancy
+    - 3.11. Synchronous Traps
+    - Parity error on control bus
+    - Parity error on the data bus
+    - Parity error on address bus
+    - Access to protected area
+    - Access to unimplemented area
+    - MEC register access violation
+    - Uncorrectable error in memory
+    - Bus time-out
+    - System bus error
+    - 3.12. Interrupts (Asynchronous Traps)
+    - Watch Dog time-out
+    - DMA time-out
+    - DMA access error
+    - UART error
+    - UART A and B Data Ready or Transmitter Ready
+    - Real Time Clock
+    - General purpose timer
+    - Correctable error in memory
+    - Masked Hardware Errors
+    - 5 external individually prioritized interrupts
+    - Table 5 - Interrupt Trap Type and default priority assignments
+    - 3.13. General Purpose and Real Time Clock Timers
+  - Timer function
+    - Figure 6 - Timer implementation
+    - 3.14. Watch Dog
+    - 3.15. UART
+    - 3.16. Parity Checking
+    - 3.17. Error Handler
+- Master Checker on IU and FPU
+    - Figure 9 - Master/Slave configuration on IU and FPU
+    - 3.18. System Availability
+    - 3.19. Test mode and Test Access Port
+    - 3.19.1. EDAC Test
+    - 3.19.2. Parity Test
+    - 3.19.3. Interrupt Test
+    - When "Interrupt test" is not enabled:
+    - When "Interrupt test" is enabled:
+    - 3.19.4. Error Test
+    - 3.19.5. Test Access Port (TAP)
+    - 3.20. System Clock
+    - 3.21. MEC Registers
+    - 3.21.1. Register Address Map
+    - MEC Control Register
+    - 01F8 0000 H
+      - 1) The scaler shall be set to: Scaler = Clock/(32*Baudrate*(2-UBR))-1
+    - Software Reset Register
+    - 01F8 0004 H
+    - Power Down Register
+    - 01F8 0008 H
+    - Memory Configuration Register 01F8 0010 H
+    - I/O Configuration Register
+    - 01F8 0014 H
+    - Waitstate Configuration Register 01F8 0018 H
+    - Access Protection Segment 1 Base Register 01F8 0020 H Access Protection Segment 2 Base Register 01F8 0028 H
+    - Interrupt Shape Register
+    - 01F8 0044 H
+    - Interrupt Pending Register
+    - 01F8 0048 H
+    - Interrupt Mask Register
+    - 01F8 004C H
+    - Interrupt Clear Register
+    - 01F8 0050 H
+    - Interrupt Force Register
+    - 01F8 0054 H
+    - Watchdog Program and Timeout Acknowledge Register 01F8 0060 H
+    - Watchdog Trap Door Set
+    - 01F8 0064 H
+    - Real Time Clock Timer <Counter> 01F8 0080 H
+    - Real Time Clock Program Register <Counter> 01F8 0080 H
+    - Real Time Clock <Scaler> 01F8 0084 H
+    - Real Time Clock Program Register <Scaler> 01F8 0084 H
+    - General Purpose Timer <Counter> 01F8 0088 H
+    - General Purpose Timer <Scaler> 01F8 008C H
+    - General Purpose Timer Program Register <Scaler> 01F8 008C H
+    - Timer Control Register 01F8 0098 H
+    - System Fault Status Register
+    - 01F8 00A0 H
+    - Access type
+    - Failing Address Register01F8 00A4 H
+    - Error and Reset Status Register 01F8 00B0 H
+    - Test Control Register 01F8 00D0 H
+    - UART Channel A RX and TX Register 01F8 00E0 H
+    - UART Channel B RX and TX Register 01F8 00E4 H
+    - UART Status Register 01F8 00E8 H
+    - 4. MEMORY CONTROLLER SIGNAL DESCRIPTIONS
+    - 4.1. Memory Controller Signal Summary
+    - 4.2. MEC Detailed Signal Descriptions
+    - A[31:0] - Address Bus (input)
+    - APAR - Address Bus Parity (input)
+    - ASI[3:0] - Address Space Identifier (input)
+    - SIZE[1:0] - Bus Transaction Size (input)
+    - ASPAR - ASI and SIZE Parity (input)
+    - D[31:0] - Data Bus (bi-directional)
+    - DPARIO - Data Bus Parity Input/Output (bi-directional)
+    - DMAAS - DMA Address Strobe (input)
+    - DRDY* - Data Ready during DMA access (output)
+    - INULL - Integer Unit Nullify Cycle (input)
+    - ExtHOLD* - External unit Hold (input)
+    - ExtCCV - External unit Condition Codes Valid (input)
+    - DXFER - Data Transfer (input)
+    - LDSTO - Atomic Load-Store (input)
+    - LOCK -Bus Lock (input)
+    - RD - Read Access (input)
+    - WE* - Write Enable (input)
+    - WRT - Advanced Write (input)
+    - IMPAR - IU to MEC Control Parity (input)
+    - AOE* - Address Output Enable (output)
+    - COE* - Control Output Enable (output)
+    - DOE* - Data Output Enable (output)
+    - BHOLD* - Bus Hold (output)
+    - MDS* - Memory Data Strobe (output)
+    - MEXC* - Memory Exception (output)
+    - MHOLD* - Memory Bus Hold (output)
+    - 4.2.2. Memory System Interface Signals
+    - BA[1:0] - Boot PROM Latched Address used for 8-bit Wide PROM (output)
+    - Table 7 - BA[1:0] Sequence
+    - CB[6:0] - Check Bits (bi-directional)
+    - ALE* - Address Latch Enable (output)
+    - PROM8* - Select 8-bit Wide PROM (input)
+    - ROMCS* - PROM Chip Select (output)
+    - MEMCS*[9:0] - Memory Chip Select (output)
+    - OE*[1:0] - Output Enable (output)
+    - MEMWR1*[1:0] - Memory Write (output)
+    - MEMWR2*[1:0] - Check Bit Write (output)
+    - RAMBEN* - RAM Buffer Enable (output)
+    - ROMBEN* - Boot PROM Buffer Enable (output)
+    - MEMBEN* - Memory Buffer Enable (output)
+    - DDIR - Data Direction (output)
+    - DDIR* - Data Direction (output)
+    - IOSEL*[3:0] - IO Chip Select (output)
+    - IOWR* - IO Write (output)
+    - IOBEN* - IO Buffer Enable (output)
+    - EXMCS* - Exchange Memory Chip Select (output)
+    - BUSRDY* - Bus Ready (input)
+    - BUSERR* - Bus Error (input)
+    - DMAREQ* - DMA Request (input)
+    - DMAGNT* - DMA Grant (output)
+    - 4.2.3. Interrupt and Control Signals
+    - IRL[3:0] - Interrupt Request Level (output)
+    - INTACK - Interrupt Acknowledge (input)
+    - EXTINT[4:0] - External Interrupt (input)
+    - EXTINTACK - External Interrupt Acknowledge (output)
+    - SYSRESET* - System Reset (input)
+    - RESET* - Reset (output)
+    - IUERR* - IU Error (input)
+    - IUHWERR* - IU Hardware Error (input)
+    - IUCMPERR* - IU Comparison Error (input)
+    - FPUHWERR* - FPU Hardware Error (input)
+    - FPUCMPERR* - FPU Comparison Error (input)
+    - MECHWERR* - MEC Hardware Error (output)
+    - SYSERR* - System Error (output)
+    - SYSAV - System Availability (output)
+    - SYSHALT* - System Halt (input)
+    - NOPAR* - No Parity (input)
+    - ROMWRT* - ROM Write Enable (input)
+    - CPUHALT* - Processor (IU and FPU) Halt (output)
+    - 4.2.4. Test Access Port Signals
+    - TCK - Test Clock (input)
+    - TRST* - Test Reset (input)
+    - TMS - Test Mode Select (input)
+    - TDI - Test Data Input (input)
+    - TDO - Test Data Output (output)
+    - WDCLK - Watch Dog Clock (input)
+    - RXA - Receive Data channel A (input)
+    - RXB - Receive Data channel B (input)
+    - TXA - Transmit Data channel A (output)
+    - TXB - Transmit Data channel B (output)
+    - CLK2 - Double Frequency Clock (input)
+    - SYSCLK[1:0] - Clock (output)
+    - VCCI, VCCO - Power (inputs)
+    - VSSI, VSSO - Ground (inputs)
+    - 5. ELECTRICAL AND MECHANICAL SPECIFICATION
+    - 5.1. Maximum Rating and DC Characteristics
+    - 5.1.1. Maximum Ratings
+    - 5.1.2. Operating Range
+    - 5.1.3. DC Characteristics over the Operating Range
+    - Notes:
+    - 5.1.4. Capacitance Ratings
+    - 5.2. Package Description
+    - 5.2.1. Pin Assignments
+    - 5.2.2. Package Diagram
+- APPENDIX 1 TIMING DIAGRAMS

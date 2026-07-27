@@ -1,0 +1,171 @@
+# SPARC V8 Architecture Manual -- table of contents
+
+Source: `sparc-v8-architecture-manual.md`
+
+- The SPARC Architecture Manual
+  - Contents
+      - Appendix I Suggested ASI Assignments for SPARC Systems .............. 261
+  - Tables
+  - Figures
+  - Preface
+  - Introduction
+      - 1.1. SPARC Attributes
+      - 1.4. SPARC Features
+      - 1.5. Conformability to SPARC
+      - 1.6. Fonts in Manual
+      - 1.7. Notes
+      - 1.8. Glossary
+      - 1.9. References
+  - Overview
+      - 2.1. SPARC Processor
+      - 2.2. Instructions
+      - 2.3. Memory Model
+  - Data Formats
+  - Registers
+      - 4.1. IU _r_ Registers
+      - 4.2. IU Control/Status Registers
+      - 4.3. FPU _f_ Registers
+      - 4.4. FPU Control/Status Registers
+      - 4.5. CP Registers
+  - Instructions
+      - 5.1. Instruction Execution
+      - 5.2. Instruction Formats
+  - Memory Model
+      - 6.1.
+      - 6.2. Total Store Ordering (TSO)
+      - 6.3. Partial Store Ordering (PSO)
+  - Traps
+      - 7.1. Trap Categories
+      - 7.2. Trap Models
+      - 7.3. Trap Control
+      - 7.5. Trap Definition
+      - 7.6. Exception/Interrupt Descriptions
+  - Suggested Assembly Language Syntax
+      - A.1. Notation Used
+      - A.2. Syntax Design
+      - A.3. Synthetic Instructions
+      - B.1. Load Integer Instructions
+      - B.2. Load Floating-point Instructions
+      - B.3. Load Coprocessor Instructions
+      - B.4. Store Integer Instructions
+      - B.5. Store Floating-point Instructions
+      - B.6. Store Coprocessor Instructions
+      - B.7. Atomic Load-Store Unsigned Byte Instructions
+      - B.8. SWAP Register with Memory Instruction
+      - B.9. SETHI Instruction
+      - B.10. NOP Instruction
+      - B.11. Logical Instructions
+      - B.12. Shift Instructions
+      - B.13. Add Instructions
+      - B.14. Tagged Add Instructions
+      - B.15. Subtract Instructions
+      - B.16. Tagged Subtract Instructions
+      - B.17. Multiply Step Instruction
+      - B.18. Multiply Instructions
+      - B.19. Divide Instructions
+      - B.20. SAVE and RESTORE Instructions
+      - B.21. Branch on Integer Condition Codes Instructions
+      - B.22. Branch on Floatingpoint Condition Codes Instructions
+      - B.23. Branch on Coprocessor Condition Codes Instructions
+      - B.24. Call and Link Instruction
+      - B.25. Jump and Link Instruction
+      - B.26. Return from Trap Instruction
+      - B.27. Trap on Integer Condition Codes Instruction
+      - B.28. Read State Register Instructions
+      - B.29. Write State Register Instructions
+      - B.30. STBAR Instruction
+      - B.31. Unimplemented Instruction
+      - B.32. Flush Instruction Memory
+      - B.33. Floating-point Operate (FPop) Instructions
+      - B.34. Coprocessor Operate Instructions
+  - ISP Descriptions
+      - C.1. ISP Notation
+      - C.2. Processor External
+      - C.3. Register Field
+      - C.4. Instruction Field
+      - C.5. Processor States and Instruction Dispatch
+      - C.6. Instruction Dispatch
+      - C.7. Floating-point Execution
+      - C.8. Traps
+      - C.9.
+      - C.10. Floating-Point Operate Instructions
+  - Software Considerations
+      - D.1. Registers
+      - D.2. The Memory Stack
+      - D.3. Functions Returning Aggregate Values
+      - D.4. Tagged Arithmetic
+      - D.5. Leaf Procedure Optimization
+      - D.6. Example Code
+      - D.7. Register Allocation Within a Window
+      - D.8. Other Register Window Usage Models
+      - E.1. Signed Multiplication
+      - E.2. Unsigned Multiplication
+      - E.3. Division
+  - SPARC ABI Software Considerations
+      - G.9. Instruction Scheduling
+  - SPARC Reference MMU Architecture
+      - H.1. Introduction
+      - H.2. Overview
+      - H.3. Software Architecture
+      - H.4. Hardware Architecture Accessing MMU Registers
+      - H.5. Fault Status Register
+      - H.6. Fault Address Register
+      - H.7. Operation
+  - Suggested ASI Assignments for SPARC Systems
+      - I.1. Introduction
+      - I.2. ASI Summary
+      - I.3. Detailed Descriptions
+  - Programming with the Memory Model
+      - J.1. Memory Operations
+      - J.2. Processors and Processes
+      - J.3. Portability and Recommended Programming Style
+      - J.4. Spin Locks
+    - Buffer data structure:
+      - J.6. Process Switch Sequence
+      - J.7. Dekker’s Algorithm
+      - J.8. Code Patching
+      - J.9. Fetch and Add
+      - J.10. Barrier Synchronization
+  - Formal Specification of the Memory Model
+      - K.1. Notation
+      - K.2. Total Store Ordering
+      - K.3. Partial Store Ordering
+      - K.4. FLUSH: Synchronizing Instruction Fetches with Memory Operations
+  - Implementation Characteristics
+      - L.1. PSR _impl_ and _ver_ Values
+      - L.2. FSR _ver_ Values
+      - L.3. Characteristics of Existing Implementations
+  - SPARC IEEE 754 Implementation Recommendations
+      - N.1. Misaligned floatingpoint data registers
+      - N.2. Reading an empty FQ
+      - N.3. Traps inhibit results
+      - N.4. NaN operand and
+      - N.5. Trapped Underflow definition (UFM=1)
+      - N.6. Untrapped underflow definition (UFM=0)
+      - N.7. Integer overflow
+      - N.8. Nonstandard mode
+  - Index
+      - A
+      - B
+      - C
+      - D
+      - E
+      - F
+      - H
+      - I
+      - J
+      - L
+      - M
+      - N
+      - O
+      - P
+      - Q
+      - R
+      - S
+      - T
+      - U
+      - V
+      - W
+      - X
+      - Y
+      - Z
