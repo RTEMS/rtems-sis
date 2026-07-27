@@ -72,7 +72,7 @@ an older total.
 
 | Area | Arcs | Taken |
 |---|---|---|
-| `riscv.cc` | 1122 | 12 |
+| `riscv.cc` | 1125 | 1053 |
 | `func.cc` | 603 | 30 |
 | `grlib.cc`, `grspw.cc`, `gr1553.cc`, `greth.cc`, `memscrub.cc`, `tap.cc` | 1002 | 0 |
 | `sis.cc`, `remote.cc`, `interf.cc` | 547 | 0 |
@@ -237,12 +237,16 @@ all of the concepts; each test file holds a small `TestEnv` per subsystem.
    before its swap, so a store charges its hold for the sibling register.
    It is timing only, not a wrong result.
 
-   Then `riscv.cc`. **In progress**, at 841 of 1140 arcs. Same shape as the
+   Then `riscv.cc`. **In progress**, at 1053 of 1125 arcs. Same shape as the
    SPARC core and it reuses the flat memory, which now swaps a sub-word
    address by `arch->bswap` rather than by the host so one window serves
    both.
 
-   Five bugs so far, each confirmed against `ref/` before the test:
+   What is left is the disassembler's remaining format corners, a handful of
+   compressed decoder cases the sweep reaches but does not execute, and the
+   two branches of `riscv_get_regi` the `p` packet gap below makes dead.
+
+   Eight bugs so far, each confirmed against `ref/` before the test:
 
    - **A divide by zero reached the host divide instruction**, so a guest
      program doing something the M extension explicitly defines killed the
@@ -255,7 +259,20 @@ all of the concepts; each test file holds a small `TestEnv` per subsystem.
    - **A debugger write of a floating point register indexed the file flat**
      while the read side indexes the low half of the double register, so a
      write of `f1` landed in the boxing half of `f0`.
-   - Two dead switch defaults in the arithmetic groups.
+   - **The named register write knew `x1` to `x7` and nothing else**, under
+     numeric names neither the disassembler nor the register display prints,
+     and it carried `psr` and `g0` over from SPARC. `doc/commands.md` already
+     documented the ABI names as valid, so the manual was right and the code
+     was not.
+   - **`c.jr` and `c.jalr` had no null pointer guard** while every other jump
+     did, including the direct compressed ones. That pair is how a program
+     built for the compressed set calls a function pointer, so `grv32imac`,
+     the one configuration where the check matters, was the one without it.
+   - **`MIE_MSIE` was missing from `riscv.h`** while the software interrupt
+     it enables was already handled.
+   - Two dead switch defaults in the arithmetic groups, one unreachable
+     pseudo trap default, and an unreachable all zero word guard in the byte
+     load which the compressed decoder already catches.
 
    One gap found and left alone, because closing it is protocol visible:
    `remote.cc` handles `g` and `P` but not `p`, so a debugger can **write** a
