@@ -736,6 +736,29 @@ TEST_CASE_FIXTURE (leon2_regs_fixture,
   CHECK (sregs[0].hold > hold_before);
 }
 
+/* Every register of the APB window answers, so no access to it faults and
+   none of them costs a waitstate, in contrast to the memory exception an
+   address outside RAM, ROM and the window takes.  This holds for a
+   register the decode knows and for one it does not.  */
+TEST_CASE_FIXTURE (leon2_regs_fixture,
+		   "LEON2 an APB access never faults and never waits")
+{
+  uint32 data = 0;
+  int32 ws = 99;
+
+  CHECK (leon2.memory_read (APB + R_LEON2_CONFIG, &data, &ws) == 0);
+  CHECK (ws == 0);
+
+  ws = 99;
+  CHECK (leon2.memory_read (APB + 0x000, &data, &ws) == 0);
+  CHECK (ws == 0);
+
+  ws = 99;
+  data = 0;
+  CHECK (leon2.memory_write (APB + R_CACHE_CTRL, &data, SZ_WORD, &ws) == 0);
+  CHECK (ws == 0);
+}
+
 TEST_CASE_FIXTURE (leon2_regs_fixture,
 		   "LEON2 (current behaviour) an unimplemented register "
 		   "reads as zero and is quiet by default, narrated at "
