@@ -1568,16 +1568,10 @@ riscv_dispatch_instruction (struct pstate *sregs)
 		  sregs->fhold += T_FSUBs;
 		  break;
 #ifdef FPU_D_ENABLED
-		case 0x08: /* FCVTSD / FCVTDS */
-		  switch (funct2)
-		    {
-		    case 0: /* FCVTSD */
-		      sregs->fs[frd] = (float32) sregs->fd[rs1];
-		      sregs->fsi[frd ^ 1] = -1;
-		      break;
-		    default:
-		      sregs->trap = TRAP_ILLEG;
-		    }
+		case 0x08: /* FCVTSD: the single precision group, so the
+			      format is already known to be single */
+		  sregs->fs[frd] = (float32) sregs->fd[rs1];
+		  sregs->fsi[frd ^ 1] = -1;
 		  break;
 #endif
 		case 0x0b: /* FSQRTS */
@@ -1756,15 +1750,9 @@ riscv_dispatch_instruction (struct pstate *sregs)
 		  sregs->fhold += T_FSUBd;
 		  break;
 #ifdef FPU_D_ENABLED
-		case 0x08: /* FCVTSD / FCVTDS */
-		  switch (funct2)
-		    {
-		    case 1: /* FCVTDS */
-		      sregs->fd[rd] = (float64) sregs->fs[(rs1 << 1) + BEH];
-		      break;
-		    default:
-		      sregs->trap = TRAP_ILLEG;
-		    }
+		case 0x08: /* FCVTDS: the double precision group, so the
+			      format is already known to be double */
+		  sregs->fd[rd] = (float64) sregs->fs[(rs1 << 1) + BEH];
 		  break;
 #endif
 		case 0x0b: /* FSQRTD */
@@ -1835,8 +1823,9 @@ riscv_dispatch_instruction (struct pstate *sregs)
 			case FP_NAN:
 			  /* The classification table separates the two: a
 			     quiet value has the most significant bit of its
-			     significand set, a signalling one does not.  */
-			  if (sregs->fsi[frs1] & 0x00400000)
+			     significand set, a signalling one does not.  For
+			     a double that is bit 19 of the high word.  */
+			  if (sregs->fsi[(rs1 << 1) + 1 - BEH] & 0x00080000)
 			    op1 = (1 << 9);
 			  else
 			    op1 = (1 << 8);
