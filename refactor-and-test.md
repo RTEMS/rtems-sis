@@ -929,7 +929,11 @@ Hard-won here, so the next person does not rediscover them.
   without freeing it. Coverage proves a line ran and mutation proves an
   assertion holds; neither says the line was memory safe. The sweep is cheap
   in a throwaway `git worktree` and is worth repeating whenever a batch
-  merges. A later sweep found a third: `-c` built its shell command by
+  merges. Run it as
+  `ASAN_OPTIONS=allocator_may_return_null=1 ./build/tests/sis-test`: the
+  cases that force an allocation failure ask for four gigabytes, and the
+  sanitizer's allocator aborts on a request that size instead of returning
+  the null the case is there to check. A later sweep found a third: `-c` built its shell command by
   copying an unbounded command line path into a fixed 256 byte allocation.
   The sanitizer reported only the leak; the overflow came out of reading
   what the leaked buffer was for, so treat a leak report as a pointer at
