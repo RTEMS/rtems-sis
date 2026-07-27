@@ -158,6 +158,12 @@ struct sparc_fixture
     sregs[0].y = 0;
     sregs[0].fsr = 0;
     sregs[0].fpstate = FP_EXE_MODE;
+
+    /* The pipeline timing is per case.  Nothing in the core clears these,
+       so a case which left one set would decide a later case's answer.  */
+    sregs[0].hold = 0;
+    sregs[0].fhold = 0;
+    sregs[0].ftime = 0;
     sregs[0].pc = 0x1000;
     sregs[0].npc = 0x1004;
     sregs[0].trap = 0;
@@ -1969,14 +1975,26 @@ TEST_CASE_FIXTURE (sparc_fixture,
 TEST_CASE_FIXTURE (sparc_fixture,
 		   "SPARC a floating point branch waits for the unit")
 {
-  /* A branch on the condition field has to wait for an operation still in
-     the pipe, which the core charges as a hold.  */
+  /* A branch on the condition field cannot read the codes until an
+     operation still in the pipe has landed, so the core pulls the unit's
+     completion time in to the point this instruction reaches, plus whatever
+     this instruction is already held for.  It reads hold rather than
+     charging one, so the case sets hold as an input.  */
   sregs[0].psr |= PSR_EF;
   sregs[0].simtime = 0;
   sregs[0].ftime = 50;
+  sregs[0].hold = 7;
 
   CHECK (exec ((FPBCC << 22) | (FBA << 25) | 4) == 0);
-  CHECK (sregs[0].hold > 0);
+  CHECK (sregs[0].ftime == 7);
+
+  /* With the unit already idle the completion time is left alone.  */
+  sregs[0].simtime = 100;
+  sregs[0].ftime = 50;
+  sregs[0].hold = 7;
+
+  CHECK (exec ((FPBCC << 22) | (FBA << 25) | 4) == 0);
+  CHECK (sregs[0].ftime == 50);
 }
 
 TEST_CASE_FIXTURE (sparc_fixture, "SPARC results reach the window registers")
@@ -2299,12 +2317,26 @@ TEST_CASE_FIXTURE (sparc_fixture,
      wait for it.  */
   sregs[0].simtime = 0;
   sregs[0].ftime = 50;
-  sregs[0].frd = 2;
-  sregs[0].frs1 = 2;
-  sregs[0].frs2 = 2;
+  /* The core swaps the index of a single register before comparing it
+     against the ones the unit is using, so the case has to name the
+     register the way the core recorded it.  */
+  sregs[0].frd = REG_SWAP (2);
+  sregs[0].frs1 = REG_SWAP (2);
+  sregs[0].frs2 = REG_SWAP (2);
 
   CHECK (exec (f3i (OP_MEM, 2, LDF, 1, 0)) == 0);
-  CHECK (sregs[0].fhold > 0);
+  CHECK (sregs[0].fhold == 50);
+
+  /* A load into a register the unit is not using does not wait.  */
+  sregs[0].fhold = 0;
+  sregs[0].simtime = 0;
+  sregs[0].ftime = 50;
+  sregs[0].frd = REG_SWAP (8);
+  sregs[0].frs1 = REG_SWAP (8);
+  sregs[0].frs2 = REG_SWAP (8);
+
+  CHECK (exec (f3i (OP_MEM, 2, LDF, 1, 0)) == 0);
+  CHECK (sregs[0].fhold == 0);
 
   sregs[0].simtime = 0;
   sregs[0].ftime = 50;

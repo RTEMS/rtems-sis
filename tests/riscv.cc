@@ -25,6 +25,7 @@
 
 #include "cpumem.h"
 
+#include <fenv.h>
 #include <limits>
 #include <string>
 
@@ -180,6 +181,13 @@ struct riscv_fixture
     sregs[0].npc = 0x1004;
     sregs[0].trap = 0;
     sregs[0].fpstate = 0;
+
+    /* The core maps the rounding mode onto the host with fesetround, which
+       is process wide.  A case which left a mode set would otherwise round
+       every later case's arithmetic its way, so start each one from the
+       mode a reset leaves.  */
+    sregs[0].fsr = 0;
+    fesetround (FE_TONEAREST);
   }
 
   ~riscv_fixture ()

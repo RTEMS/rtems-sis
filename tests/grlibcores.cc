@@ -243,12 +243,18 @@ TEST_CASE_FIXTURE (apbmst_fixture,
   CHECK (read (0xff000 - 4) == 0);
 
   /* grlib_apbpp_add is the primitive grlib_apb_add's core->add callback
-     reaches; calling it directly here, before any core is mounted,
-     gives this case the exact index of its own entry instead of having
-     to find it.  */
+     reaches.  Its index is shared by every case in the binary and only
+     ever grows, so this case cannot assume where its own entry lands.
+     The index wraps to zero after 32 entries, so drive it round until the
+     entry sits at the start of the area, which is what makes the offsets
+     below exact whatever ran before.  */
   uint32 id = GRLIB_PP_ID (VENDOR_GAISLER, 0x101, 0, 0);
   uint32 addr_word = GRLIB_PP_APBADDR (0x80000200, 0xfff);
-  int idx = grlib_apbpp_add (id, addr_word);
+  int idx;
+
+  do
+    idx = grlib_apbpp_add (id, addr_word);
+  while (idx != 2);
 
   REQUIRE (idx == 2);
   CHECK (read (0xff000) == id);

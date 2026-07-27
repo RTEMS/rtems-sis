@@ -176,12 +176,19 @@ struct greth_fixture : sis_tests::grlib_core_fixture
 {
   int saved_irq;
 
+  /* greth_write sets sync_rt on the first receive enable of the process and
+     nothing clears it.  It is a real side effect of the core, but leaving it
+     set would make every later wait for interrupt anywhere in the binary
+     take the synchronising path.  */
+  int saved_sync_rt;
+
   greth_fixture () : sis_tests::grlib_core_fixture (&greth), saved_irq (0)
   {
     /* greth_irq is not reset by anything the base fixture does; give it a
        known, non-reserved level so a case can check whether grlib_set_irq
        was called by reading IRQMP back.  */
     saved_irq = greth_irq;
+    saved_sync_rt = sync_rt;
     greth_irq = GRETH_TEST_IRQ;
 
     /* IRQMP is a second core with its own process-wide statics.  Neither
@@ -200,6 +207,7 @@ struct greth_fixture : sis_tests::grlib_core_fixture
     irqmp.reset ();
     ext_irl[0] = 0;
     greth_irq = saved_irq;
+    sync_rt = saved_sync_rt;
   }
 };
 
