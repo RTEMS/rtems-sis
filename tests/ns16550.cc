@@ -21,19 +21,20 @@
    UART, so the byte stays out of the test binary's own terminal and a
    case can assert on exactly what was written.
 
-   The core's own statics, uart_lcr/uart_ie/uart_mcr/uart_txctrl and
+   The core's own statics, uart_lcr/uart_ie/uart_mcr/uart_fcr and
    ns16550_irq, persist across cases because they are file-local to
    grlib.cc.  ns16550_reset, reached by the fixture on every construction,
-   clears the first three but not uart_txctrl or ns16550_irq; see the case
-   below that tests reset directly, and the register 2 case, which writes
-   before it reads rather than trusting what an earlier case left.
+   clears the four registers table I lists as cleared by a master reset but
+   not ns16550_irq; see the case below that tests reset directly.
 
    The interrupt path calls plic_irq, which reaches the shared PLIC core.
-   A case that exercises it enables only its own IRQ line in the PLIC
-   before triggering the UART, so the claim it reads back cannot be
-   confused with a bit some other core's case left pending; this keeps the
-   PLIC side of the test to the minimum needed to observe the UART's own
-   behaviour.  */
+   A case that exercises it enables only its own IRQ line in the PLIC and
+   raises that line's priority off the reserved 0 (FU540-C000 10.3) before
+   triggering the UART, so the claim it reads back cannot be confused with
+   a bit some other core's case left pending; this keeps the PLIC side of
+   the test to the minimum needed to observe the UART's own behaviour, and
+   the fixture drains the PLIC before and after every case because the PLIC
+   core has no reset.  */
 
 #include "doctest.h"
 
@@ -58,9 +59,56 @@ const uint32 LCR = 0x0c; /* register 3: Line Control Register, 8.1 */
 const uint32 MCR = 0x10; /* register 4: Modem Control Register, 8.8 */
 const uint32 LSR = 0x14; /* register 5: Line Status Register, 8.4 */
 
+/* IIR values from Table IV: no interrupt pending, and the transmitter
+   holding register empty interrupt.  */
+const uint32 IIR_NONE = 0x01;
+const uint32 IIR_THRE = 0x02;
+
 struct ns16550_fixture : sis_tests::grlib_core_fixture
 {
-  ns16550_fixture () : sis_tests::grlib_core_fixture (&ns16550) {}
+  ns16550_fixture () : sis_tests::grlib_core_fixture (&ns16550) { drain (); }
+
+  ~ns16550_fixture () { drain (); }
+
+  /* The UART's interrupt line reaches the shared PLIC core, which has no
+     reset, so a case that raised one would leave a pending bit behind for
+     whatever runs next.  Claiming until a claim reads zero (FU540-C000
+     10.7, 10.8) is the only way back through the register interface, and
+     it needs every source lifted off the reserved priority 0 (10.3) and
+     enabled first.  Both are put back afterwards.  */
+  void
+  drain ()
+  {
+    uint32 value;
+
+    for (int i = 1; i < 32; i++)
+      {
+	value = 1;
+	plic.write (4 * i, &value, 2);
+      }
+    value = 0xffffffff;
+    plic.write (0x2000, &value, 2);
+
+    value = 0;
+    plic.write (0x200004, &value, 2); /* completion, forces a recompute */
+    for (int tries = 0; tries < 40; tries++)
+      {
+	uint32 id = 0;
+
+	plic.read (0x200004, &id);
+	if (id == 0)
+	  break;
+	plic.write (0x200004, &id, 2);
+      }
+
+    value = 0;
+    plic.write (0x2000, &value, 2);
+    for (int i = 0; i < 64; i++)
+      {
+	value = 0;
+	plic.write (4 * i, &value, 2);
+      }
+  }
 };
 
 }
@@ -115,9 +163,9 @@ TEST_CASE_FIXTURE (ns16550_fixture,
 TEST_CASE_FIXTURE (ns16550_fixture,
 		   "NS16550 all but bit 7 of an LCR write leave DLAB clear")
 {
-  /* grlib.cc computes DLAB as `*data & 0x80`; a write with every other bit
-     set and bit 7 clear must still leave THR reachable, which pins the
-     mask to exactly bit 7 rather than "any bit".  */
+  /* 8.1: bits 6-0 are line characteristics and bit 7 alone is DLAB, so a
+     write with every other bit set must still leave THR reachable.  This
+     pins the DLAB test to exactly bit 7 rather than "any bit".  */
   write (LCR, 0x7f);
 
   stdout_capture cap;
@@ -137,20 +185,40 @@ TEST_CASE_FIXTURE (ns16550_fixture,
 
 TEST_CASE_FIXTURE (
     ns16550_fixture,
-    "NS16550 register 2 read echoes the last FCR write, not an IIR")
+    "NS16550 register 2 reads the IIR, not the FCR just written")
 {
-  /* Datasheet defect: 8.5 makes offset 2 write-only (the FIFO Control
-     Register) and 8.6 makes a read of the same offset the Interrupt
-     Identification Register, a different register computed from pending
-     interrupt state (Table IV), whose "no interrupt pending" value has
-     bit 0 set.  grlib.cc keeps a single variable, uart_txctrl (SiFive UART
-     naming, not this datasheet's), that a write simply stores into and a
-     read simply returns, so this offset behaves as an 8-bit scratch
-     register rather than as either FCR or IIR.  This case documents that
-     actual behaviour rather than the datasheet's; it is not corrected
-     here, see the report.  */
-  write (FCR, 0x1c7);
-  CHECK (read (IIR) == 0xc7);
+  /* 8.5 makes offset 2 the write-only FIFO Control Register and 8.6 makes a
+     read of the same offset the Interrupt Identification Register, computed
+     from the pending interrupt state (Table IV) rather than echoing what was
+     written.  Table I gives the IIR a master reset value of 0000 0001, and
+     8.6 bit 0: "When bit 0 is a logic 1, no interrupt is pending".  */
+  CHECK (read (IIR) == IIR_NONE);
+
+  /* 8.6 bits 6 and 7: "These two bits are set when FCR0 = 1", and 8.5 bit 0
+     is the FIFO enable.  Writing the FCR must not change bits 3-0.  */
+  write (FCR, 0x1c1);
+  CHECK (read (IIR) == (0xc0 | IIR_NONE));
+
+  write (FCR, 0);
+  CHECK (read (IIR) == IIR_NONE);
+}
+
+TEST_CASE_FIXTURE (ns16550_fixture,
+		   "NS16550 the IIR reports a pending THRE interrupt (8.6, "
+		   "Table IV)")
+{
+  /* The LSR below is fixed at its reset value, so THRE is always set and the
+     transmitter interrupt is pending as soon as ETBEI (8.7, IER bit 1) is
+     enabled.  Table IV encodes "Transmitter Holding Register Empty" as IIR
+     bits 3-0 = 0010, which also clears bit 0 to say an interrupt is
+     pending.  */
+  REQUIRE (read (LSR) == 0x60);
+
+  write (IER, 0x02);
+  CHECK (read (IIR) == IIR_THRE);
+
+  write (IER, 0x00);
+  CHECK (read (IIR) == IIR_NONE);
 }
 
 TEST_CASE_FIXTURE (ns16550_fixture,
@@ -171,25 +239,31 @@ TEST_CASE_FIXTURE (ns16550_fixture, "NS16550 LSR always reads the power up "
   CHECK (read (LSR) == 0x60);
 }
 
-TEST_CASE_FIXTURE (
-    ns16550_fixture,
-    "NS16550 reading an unmapped register such as the LCR is zero")
+TEST_CASE_FIXTURE (ns16550_fixture, "NS16550 the LCR reads back (8.1)")
 {
-  /* Datasheet defect: 8.1 says "the programmer can also read the contents
-     of the Line Control Register", but ns16550_read has no case for
-     offset 0x0c, so a read there falls through the switch to the
-     zero-initialised default.  This documents that fallthrough rather
-     than a real LCR readback; not corrected here, see the report.  */
+  /* 8.1: "The programmer can also read the contents of the Line Control
+     Register.  The read capability simplifies system programming and
+     eliminates the need for separate storage in system memory of the line
+     characteristics."  Table I gives it a master reset value of 0000 0000,
+     which the fixture's reset leaves in place.  All eight bits are line
+     characteristics (Table II), so the whole byte reads back, DLAB
+     included.  */
   CHECK (read (LCR) == 0);
+
+  write (LCR, 0x13b); /* 8 bits, 2 stop bits, even parity, DLAB clear */
+  CHECK (read (LCR) == 0x3b);
+
+  write (LCR, 0x83);
+  CHECK (read (LCR) == 0x83);
 }
 
 TEST_CASE_FIXTURE (ns16550_fixture, "NS16550 writing an unmapped offset "
 				    "does nothing")
 {
   /* No register lives at offset 0x18; the write switch falls through with
-     no effect, which is the same default path ns16550_read takes for the
-     LCR above.  */
+     no effect, and so does the read switch.  */
   write (0x18, 0xff);
+  CHECK (read (0x18) == 0);
   CHECK (read (IER) == 0);
   CHECK (read (MCR) == 0);
 }
@@ -207,6 +281,8 @@ TEST_CASE_FIXTURE (
 
   uint32 mask = 1u << irq;
   plic.write (0x2000 /* PLIC_IENA, hart 0 */, &mask, 2);
+  uint32 prio = 1;
+  plic.write (4 * irq /* PLIC_PRIO */, &prio, 2);
 
   write (IER, 0x02); /* ETBEI, OUT 2 still clear: no interrupt yet */
   write (MCR, 0x08); /* OUT 2 now set too: both conditions true */
@@ -248,29 +324,26 @@ TEST_CASE_FIXTURE (ns16550_fixture,
 }
 
 TEST_CASE_FIXTURE (ns16550_fixture,
-		   "NS16550 reset clears LCR, IER and MCR but not register 2")
+		   "NS16550 reset restores the values of Table I")
 {
-  /* ns16550_reset zeroes uart_lcr, uart_ie and uart_mcr but does not touch
-     uart_txctrl, the storage register 2 write/read echoes.  IER is written
-     before LCR sets DLAB, so the write actually takes effect and reset is
-     what has to clear it.  */
+  /* Table I, UART Reset Configuration: a master reset clears the interrupt
+     enable, FIFO control, line control and MODEM control registers to
+     0000 0000 and leaves the IIR at 0000 0001.  IER is written before LCR
+     sets DLAB, so the write actually takes effect and reset is what has to
+     clear it.  */
   write (IER, 0x0f);
   write (LCR, 0x80);
   write (MCR, 0x08);
-  write (FCR, 0x42);
+  write (FCR, 0x01);
 
   core->reset ();
 
-  CHECK (read (MCR) == 0);
-  CHECK (read (IIR) == 0x42);
-
-  /* ns16550_read never checks DLAB, so this proves IER itself was
-     cleared, independent of whether DLAB was too.  */
   CHECK (read (IER) == 0);
+  CHECK (read (LCR) == 0);
+  CHECK (read (MCR) == 0);
+  CHECK (read (IIR) == IIR_NONE);
 
-  /* DLAB is not readable (see the LCR case above), so prove reset cleared
-     it the same way that case proves DLAB clear: THR becomes reachable
-     again.  */
+  /* The cleared DLAB makes THR reachable again.  */
   stdout_capture cap;
   write (THR, 'R');
   CHECK (cap.str () == "R");

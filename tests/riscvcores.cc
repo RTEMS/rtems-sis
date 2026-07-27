@@ -29,12 +29,10 @@
    10.8 "Interrupt Completion").  A case cites whichever said it most
    plainly, and both where both apply.
 
-   grlib.cc's plic comment says its functionality is "simplified... for
-   now": priority and threshold registers are stored but never consulted by
-   plic_check_irq.  Against the generic PLIC chapter that reads like an
-   acknowledged simplification, but the SiFive manual is concrete enough to
-   turn part of it into an outright conformance gap; see the "priority 0"
-   case below and the final report.
+   grlib.cc's plic is still simplified: the threshold register is stored but
+   never consulted, so nothing here asserts the masking rule of section
+   10.6.  The priority register is consulted, both for the reserved value 0
+   of 10.3 and for the selection rule of 10.7.
 
    plic has no init or reset, so its pending, enable, threshold and priority
    state are static file-local arrays in grlib.cc that outlive any one test
@@ -287,22 +285,26 @@ TEST_CASE_FIXTURE (clint_fixture,
   ncpu = saved_ncpu;
 }
 
-TEST_CASE_FIXTURE (
-    clint_fixture,
-    "CLINT (suspected defect) reading msip does not reflect the pending bit")
+TEST_CASE_FIXTURE (clint_fixture,
+		   "CLINT reading msip reflects the pending bit (9.2)")
 {
   /* Both documents agree on the encoding: norm:msip_enc and the SiFive
      manual's 9.2 both say the memory-mapped msip register is 32 bits wide
-     with the upper 31 bits tied to 0 and "the least significant bit ...
-     reflected in the MSIP bit of the mip CSR" (9.2).  clint_write sets
-     MIP_MSIP (0x008, CSR bit 3) correctly on a write, but clint_read's
-     msip branch shifts the mip word right by 4 instead of 3
-     (grlib.cc:1546), so it always reports 0 regardless of the pending
-     state.  This case pins that reading, not the spec.  See the final
-     report for the exact line.  */
+     with the upper 31 bits tied to 0 and "the least significant bit is
+     reflected in the MSIP bit of the mip CSR" (9.2).  MSIP is CSR bit 3
+     (v1.9 draft 3.1.13), so a set MSIP has to read back as exactly 1.  */
+  CHECK (read (CLINT_MSIP0) == 0u);
+
   write (CLINT_MSIP0, 1);
   REQUIRE ((sregs[0].mip & MIP_MSIP) != 0);
+  CHECK (read (CLINT_MSIP0) == 1u);
 
+  /* "Other bits in the msip registers are hardwired to zero" (9.2), so the
+     read must not carry any other mip bit out with it.  */
+  sregs[0].mip |= MIP_MTIP | MIP_MEIP;
+  CHECK (read (CLINT_MSIP0) == 1u);
+
+  write (CLINT_MSIP0, 0);
   CHECK (read (CLINT_MSIP0) == 0u);
 }
 
@@ -318,40 +320,77 @@ TEST_CASE_FIXTURE (clint_fixture,
 
 TEST_CASE_FIXTURE (
     clint_fixture,
-    "CLINT (suspected defect) writing mtime's low word corrupts a "
-    "hart's mtimecmp instead")
+    "CLINT writing mtime leaves every mtimecmp alone (table 36)")
 {
   /* Table 36 gives mtime its own 8-byte register at 0xbff8, distinct from
-     any hart's mtimecmp, with attribute RW (9.3 confirms mtime is
-     read-write).  clint_write's range check for mtimecmp is
-     "(addr >= CLINT_TIMECMP) && (addr <= CLINT_TIMEBASE)" (grlib.cc:1568),
-     an inclusive upper bound that wrongly folds address 0xbff8 itself into
-     the mtimecmp range.  A write meant for mtime's low word instead lands
-     on cpuid = (0xbff8 >> 3) % NCPU, hart 3 here, and mtime is left
-     unmodified (it is not backed by any writable state).  This case pins
-     that reading; see the final report.  */
-  sregs[3].mtimecmp = 0;
+     any hart's mtimecmp block at 0x4000-0x4fff.  A write there must not
+     land on a hart, in particular not on the (0xbff8 >> 3) % NCPU that the
+     mtimecmp decode would pick.  */
+  for (int i = 0; i < NCPU; i++)
+    sregs[i].mtimecmp = 0x42;
 
   write (CLINT_MTIME_LO, 0x12345678);
+  write (CLINT_MTIME_HI, 0x9abcdef0);
 
-  CHECK ((sregs[3].mtimecmp & 0xffffffffu) == 0x12345678u);
+  for (int i = 0; i < NCPU; i++)
+    CHECK (sregs[i].mtimecmp == 0x42u);
+}
+
+TEST_CASE_FIXTURE (clint_fixture,
+		   "CLINT mtime is read-write in both halves (9.3, table 36)")
+{
+  /* Table 36 gives mtime the attribute RW and 9.3 calls it "a 64-bit
+     read-write register", so both halves take a write and read back.  The
+     engine clock underneath is unaffected, which is what lets a written
+     mtime keep counting from the value it was given.  */
+  ebase.simtime = 1000;
+
+  write (CLINT_MTIME_LO, 0x12345678);
+  CHECK (read (CLINT_MTIME_LO) == 0x12345678u);
+  CHECK (read (CLINT_MTIME_HI) == 0u);
+
+  write (CLINT_MTIME_HI, 0x9abcdef0);
+  CHECK (read (CLINT_MTIME_HI) == 0x9abcdef0u);
+  CHECK (read (CLINT_MTIME_LO) == 0x12345678u);
+
+  CHECK (ebase.simtime == 1000u);
+
+  run (7);
+  CHECK (read (CLINT_MTIME_LO) == 0x1234567fu);
 }
 
 TEST_CASE_FIXTURE (
     clint_fixture,
-    "CLINT (suspected defect) mtime's high word cannot be written at all")
+    "CLINT writing mtime past mtimecmp posts the timer interrupt (9.3)")
 {
-  /* Table 36 / 9.3 describe mtime as one 8-byte RW register, so its high
-     word at 0xbffc should be as writable as its low word.  0xbffc is past
-     CLINT_TIMEBASE, so it fails clint_write's mtimecmp range the same way
-     0xc000 does, and falls through every branch untouched: there is no
-     path in grlib.cc that stores a write to mtime.  */
-  sregs[3].mtimecmp = 0x42;
+  /* 9.3: "A timer interrupt is pending whenever mtime is greater than or
+     equal to the value in the mtimecmp register."  The rule holds however
+     mtime got there, so a write to mtime has to re-evaluate it the same way
+     a write to mtimecmp does.  */
+  int saved_ncpu = ncpu;
+  ncpu = 2;
 
-  write (CLINT_MTIME_HI, 0xffffffff);
+  sregs[0].simtime = 0;
+  sregs[1].simtime = 0;
+  ebase.simtime = 0;
+  write (CLINT_MTIMECMP0_LO, 500);
+  write (CLINT_MTIMECMP1_LO, 500);
+  REQUIRE ((sregs[0].mip & MIP_MTIP) == 0);
 
-  CHECK (sregs[3].mtimecmp == 0x42u);
-  CHECK (read (CLINT_MTIME_HI) == 0u);
+  write (CLINT_MTIME_LO, 500);
+
+  CHECK ((sregs[0].mip & MIP_MTIP) != 0);
+  CHECK ((sregs[1].mip & MIP_MTIP) != 0);
+
+  /* And winding mtime back below mtimecmp withdraws it again: "The
+     interrupt remains posted until mtimecmp becomes greater than mtime"
+     (norm:mtime_intr_pending).  */
+  write (CLINT_MTIME_LO, 0);
+
+  CHECK ((sregs[0].mip & MIP_MTIP) == 0);
+  CHECK ((sregs[1].mip & MIP_MTIP) == 0);
+
+  ncpu = saved_ncpu;
 }
 
 TEST_CASE_FIXTURE (clint_fixture, "CLINT reading an unmapped offset is zero")
@@ -426,6 +465,13 @@ struct plic_fixture : sis_tests::grlib_core_fixture
   void
   drain ()
   {
+    /* 10.3 reserves priority 0 to mean "never interrupt", so a source left
+       there can never be claimed.  Open every priority for the drain and
+       close them all again below, which is also the state a case starts
+       from.  */
+    for (int i = 1; i < 32; i++)
+      write (PLIC_PRIO + 4 * i, 1);
+
     for (int h = 0; h < NCPU; h++)
       {
 	uint32 thres = PLIC_THRES0 + h * PLIC_THRES_STRIDE;
@@ -479,6 +525,14 @@ struct plic_fixture : sis_tests::grlib_core_fixture
     ns16550.write (0x04, &ie, 2);
     ns16550.write (0x10, &mcr, 2);
   }
+
+  /* Lifts a source off the reserved priority 0 of section 10.3, which is
+     where the drain leaves every one of them.  */
+  void
+  set_prio (int irq, uint32 prio)
+  {
+    write (PLIC_PRIO + 4 * irq, prio);
+  }
 };
 
 }
@@ -512,6 +566,7 @@ TEST_CASE_FIXTURE (
     "(7.10, 10.7)")
 {
   write (PLIC_IENA0, 1u << 7);
+  set_prio (7, 1);
 
   raise (7);
 
@@ -531,6 +586,7 @@ TEST_CASE_FIXTURE (
   /* 7.7: "The target will not receive interrupts from sources that are
      disabled."  IE was opened for drain and is closed again there, so this
      case starts with everything disabled.  */
+  set_prio (9, 1);
   raise (9);
 
   CHECK ((read (PLIC_IPEND0) & (1u << 9)) != 0u);
@@ -554,6 +610,7 @@ TEST_CASE_FIXTURE (plic_fixture,
      platform-level interrupt controller."  10.7 cross-references the same
      bit as "the MEIP bit in its mip register".  */
   write (PLIC_IENA0, 1u << 4);
+  set_prio (4, 1);
 
   raise (4);
 
@@ -575,48 +632,75 @@ TEST_CASE_FIXTURE (plic_fixture,
 
 TEST_CASE_FIXTURE (
     plic_fixture,
-    "PLIC (suspected defect) a source at priority 0 still raises a "
-    "notification")
+    "PLIC a source at priority 0 never interrupts (10.3, table 39)")
 {
   /* Section 10.3: "A priority value of 0 is reserved to mean 'never
      interrupt' and effectively disables the interrupt."  (The generic v1.9
      draft says the same in 7.6, without giving a concrete value to test
      against, since it leaves the priority width platform specific;
      table 39 nails it down to a real 0.)  The fixture's drain leaves every
-     source's priority register at that reserved 0, and this case never
-     changes it.  plic_check_irq (grlib.cc:1625-1637) only consults
-     plic_ie and plic_ip; it never reads plic_prio at all, so a source at
-     priority 0 is delivered exactly like any other enabled source.  This
-     case pins that reading; see the final report.  */
+     source's priority register at that reserved 0, so an enabled and
+     pending source must still produce neither a claim nor a
+     notification.  */
   write (PLIC_IENA0, 1u << 4);
   REQUIRE (read (PLIC_PRIO + 4 * 4) == 0u);
 
   raise (4);
 
+  CHECK (read (PLIC_IPEND0) == (1u << 4));
+  CHECK (read (PLIC_CLAIM0) == 0u);
+  CHECK ((sregs[0].mip & MIP_MEIP) == 0);
+
+  /* Lifting the source to priority 1, the lowest active priority (10.3),
+     and completing to force the re-evaluation delivers it.  */
+  set_prio (4, 1);
+  write (PLIC_CLAIM0, 0);
+
   CHECK (read (PLIC_CLAIM0) == 4u);
 }
 
-TEST_CASE_FIXTURE (
-    plic_fixture,
-    "PLIC (suspected defect) a claim picks the highest ID, not the smallest")
+TEST_CASE_FIXTURE (plic_fixture,
+		   "PLIC equal priorities are broken by the lowest ID (10.3)")
 {
-  /* Section 10.3 states the tie-break rule outright: "Ties between global
-     interrupts of the same priority are broken by the Interrupt ID;
-     interrupts with the lowest ID have the highest effective priority."
-     (v1.9 draft 7.5 gives the same rule in more general terms: "Smaller
-     values of interrupt ID take precedence over larger values of interrupt
-     ID.")  grlib.cc never assigns a priority other than the reserved 0
-     (see the previous case), so every enabled, pending source ties, and
-     the lowest ID should win.  plic_check_irq's claim loop
-     (grlib.cc:1630-1634) instead scans IDs from 1 upward and keeps
-     overwriting plic_claim without breaking, so it lands on the highest
-     set bit.  This case pins that reading; see the final report.  */
+  /* Section 10.3: "Ties between global interrupts of the same priority are
+     broken by the Interrupt ID; interrupts with the lowest ID have the
+     highest effective priority."  (v1.9 draft 7.5 gives the same rule in
+     more general terms: "Smaller values of interrupt ID take precedence
+     over larger values of interrupt ID.")  */
   write (PLIC_IENA0, (1u << 2) | (1u << 5));
+  set_prio (2, 3);
+  set_prio (5, 3);
+
+  raise (2);
+  raise (5);
+
+  CHECK (read (PLIC_CLAIM0) == 2u);
+
+  /* The claim cleared source 2's pending bit (10.7), so completing hands
+     out the other one.  */
+  write (PLIC_CLAIM0, 2);
+  CHECK (read (PLIC_CLAIM0) == 5u);
+}
+
+TEST_CASE_FIXTURE (plic_fixture,
+		   "PLIC a claim returns the highest-priority source (10.7)")
+{
+  /* Section 10.7: a claim "returns the ID of the highest-priority pending
+     interrupt".  10.3: "Priority 1 is the lowest active priority, and
+     priority 7 is the highest."  So the higher priority wins even though
+     its ID is the larger of the two, which is the case the tie-break rule
+     above cannot show.  */
+  write (PLIC_IENA0, (1u << 2) | (1u << 5));
+  set_prio (2, 1);
+  set_prio (5, 7);
 
   raise (2);
   raise (5);
 
   CHECK (read (PLIC_CLAIM0) == 5u);
+
+  write (PLIC_CLAIM0, 5);
+  CHECK (read (PLIC_CLAIM0) == 2u);
 }
 
 TEST_CASE_FIXTURE (plic_fixture,
@@ -626,6 +710,7 @@ TEST_CASE_FIXTURE (plic_fixture,
   ncpu = 2;
 
   write (PLIC_IENA0 + 1 * PLIC_IENA_STRIDE, 1u << 6);
+  set_prio (6, 1);
 
   raise (6);
 

@@ -1442,7 +1442,15 @@ grlib_boot_init (void)
 
 /* ------------------- ns16550 -----------------------*/
 static void plic_irq (int irq);
-static int32 uart_lcr, uart_ie, uart_mcr, ns16550_irq, uart_txctrl;
+static int32 uart_lcr, uart_ie, uart_mcr, ns16550_irq, uart_fcr;
+
+/* PC16550D register bits, table II.  */
+#define LCR_DLAB  0x80 /* line control bit 7, divisor latch access */
+#define IER_ETBEI 0x02 /* interrupt enable bit 1, transmitter empty */
+#define FCR_FIFOE 0x01 /* FIFO control bit 0, FIFO enable */
+#define IIR_NONE  0x01 /* table IV: no interrupt pending */
+#define IIR_THRE  0x02 /* table IV: transmitter holding register empty */
+#define IIR_FIFOE 0xc0 /* 8.6: bits 6 and 7 are set when FCR0 is set */
 
 static void
 ns16550_add (int irq, uint32 addr, uint32 mask)
@@ -1460,20 +1468,23 @@ ns16550_write (uint32 addr, uint32 *data, uint32 sz)
   switch (addr & 0xff)
     {
     case 0:
-      if (!uart_lcr)
+      if (!(uart_lcr & LCR_DLAB))
 	{
 	  putchar (*data & 0xff);
 	}
       break;
     case 4:
-      if (!uart_lcr)
+      if (!(uart_lcr & LCR_DLAB))
 	uart_ie = *data & 0xff;
       break;
     case 0x08:
-      uart_txctrl = *data & 0xff;
+      /* PC16550D 8.5: register 2 is the write-only FIFO control register.  */
+      uart_fcr = *data & 0xff;
       break;
     case 0x0c:
-      uart_lcr = *data & 0x80;
+      /* PC16550D 8.1: the whole line control register is readable, so keep
+	 all eight bits rather than DLAB alone.  */
+      uart_lcr = *data & 0xff;
       break;
     case 0x10:
       uart_mcr = *data & 0xff;
@@ -1495,7 +1506,22 @@ ns16550_read (uint32 addr, uint32 *data)
       *data = uart_ie;
       break;
     case 0x08:
-      *data = uart_txctrl;
+      /* PC16550D 8.6: a read of register 2 returns the interrupt
+	 identification register, not the value written to the FIFO control
+	 register.  The transmitter holding register is always empty here
+	 (the line status register below is fixed at its reset value), so
+	 the only interrupt this core can report is THRE, pending whenever
+	 ETBEI is enabled (table IV).  */
+      if (uart_ie & IER_ETBEI)
+	*data = IIR_THRE;
+      else
+	*data = IIR_NONE;
+      if (uart_fcr & FCR_FIFOE)
+	*data |= IIR_FIFOE;
+      break;
+    case 0x0c:
+      /* PC16550D 8.1: the line control register is readable.  */
+      *data = uart_lcr;
       break;
     case 0x10:
       *data = uart_mcr; // 0x03;
@@ -1510,9 +1536,11 @@ ns16550_read (uint32 addr, uint32 *data)
 static void
 ns16550_reset (void)
 {
+  /* PC16550D table I, master reset: every register below clears to zero.  */
   uart_lcr = 0;
   uart_ie = 0;
   uart_mcr = 0;
+  uart_fcr = 0;
 }
 
 const struct grlib_ipcore ns16550 = { NULL, ns16550_reset, ns16550_read,
@@ -1533,6 +1561,25 @@ clint_add (int irq, uint32 addr, uint32 mask)
 #define CLINTEND       0x10000
 #define CLINT_TIMECMP  0x04000
 #define CLINT_TIMEBASE 0x0BFF8
+
+/* FU540-C000 9.3 makes mtime a read-write register, but SIS counts it off
+   the engine clock, which a write must not disturb.  A write is recorded as
+   an offset added to that clock instead.  On reset mtime follows the clock
+   again (9.3: "On reset, mtime is cleared to zero").  */
+static int64 clint_mtime_offset;
+
+static uint64
+clint_mtime (void)
+{
+  return ebase.simtime + clint_mtime_offset;
+}
+
+static void
+clint_reset (void)
+{
+  clint_mtime_offset = 0;
+}
+
 static int
 clint_read (uint32 addr, uint32 *data)
 {
@@ -1543,11 +1590,11 @@ clint_read (uint32 addr, uint32 *data)
   cpuid = ((addr >> 3) % NCPU);
   if ((addr >= CLINT_TIMEBASE) && (addr < CLINTEND))
     {
-      tmp = ebase.simtime >> 32;
+      tmp = clint_mtime ();
       if (reg)
-	*data = tmp & 0xffffffff;
+	*data = (tmp >> 32) & 0xffffffff;
       else
-	*data = ebase.simtime & 0xffffffff;
+	*data = tmp & 0xffffffff;
     }
   else if ((addr >= CLINT_TIMECMP) && (addr < CLINT_TIMEBASE))
     {
@@ -1557,10 +1604,13 @@ clint_read (uint32 addr, uint32 *data)
       else
 	*data = sregs[cpuid].mtimecmp & 0xffffffff;
     }
-  else if ((addr >= 0) && (addr < CLINT_TIMECMP))
+  else if (addr < CLINT_TIMECMP)
     {
+      /* FU540-C000 9.2: the msip register is 32 bits wide with the upper 31
+	 tied to 0, and its least significant bit is the MSIP bit of mip,
+	 which is CSR bit 3.  */
       cpuid = ((addr >> 2) % NCPU);
-      *data = ((sregs[cpuid].mip & MIP_MSIP) >> 4) & 1;
+      *data = (sregs[cpuid].mip & MIP_MSIP) >> 3;
     }
 
   return 4;
@@ -1573,6 +1623,23 @@ set_mtip (int32 arg)
   rv32_check_lirq (arg);
 }
 
+/* Posts or schedules the machine timer interrupt of one hart from its
+   current mtime and mtimecmp (9.3: "A timer interrupt is pending whenever
+   mtime is greater than or equal to the value in the mtimecmp register").  */
+static void
+clint_arm_timer (int cpuid)
+{
+  int64 mtime = (int64) sregs[cpuid].simtime + clint_mtime_offset;
+  int64 mtimecmp = (int64) sregs[cpuid].mtimecmp;
+
+  remove_event (set_mtip, cpuid);
+  sregs[cpuid].mip &= ~MIP_MTIP;
+  if (mtimecmp <= mtime)
+    sregs[cpuid].mip |= MIP_MTIP;
+  else
+    event (set_mtip, cpuid, mtimecmp - mtime);
+}
+
 static int
 clint_write (uint32 addr, uint32 *data, uint32 sz)
 {
@@ -1582,7 +1649,20 @@ clint_write (uint32 addr, uint32 *data, uint32 sz)
   if ((addr >= CLINTSTART) && (addr < CLINTEND))
     {
       reg = (addr >> 2) & 1;
-      if ((addr >= CLINT_TIMECMP) && (addr <= CLINT_TIMEBASE))
+      if (addr >= CLINT_TIMEBASE)
+	{
+	  /* Table 36 gives mtime its own register at 0xbff8, outside every
+	     hart's mtimecmp block.  */
+	  tmp = clint_mtime ();
+	  if (reg)
+	    tmp = (tmp & 0xffffffff) | ((uint64) *data << 32);
+	  else
+	    tmp = (tmp & 0xffffffff00000000ULL) | *data;
+	  clint_mtime_offset = tmp - ebase.simtime;
+	  for (cpuid = 0; cpuid < ncpu; cpuid++)
+	    clint_arm_timer (cpuid);
+	}
+      else if (addr >= CLINT_TIMECMP)
 	{
 	  cpuid = ((addr >> 3) % NCPU);
 	  if (reg)
@@ -1597,15 +1677,9 @@ clint_write (uint32 addr, uint32 *data, uint32 sz)
 	      tmp = sregs[cpuid].mtimecmp >> 32;
 	      sregs[cpuid].mtimecmp = (tmp << 32) | *data;
 	    }
-	  remove_event (set_mtip, cpuid);
-	  sregs[cpuid].mip &= ~MIP_MTIP;
-	  if (sregs[cpuid].mtimecmp <= sregs[cpuid].simtime)
-	    sregs[cpuid].mip |= MIP_MTIP;
-	  else
-	    event (set_mtip, cpuid,
-		   sregs[cpuid].mtimecmp - sregs[cpuid].simtime);
+	  clint_arm_timer (cpuid);
 	}
-      else if ((addr >= CLINTSTART) && (addr <= CLINT_TIMECMP))
+      else
 	{
 	  cpuid = ((addr >> 2) % NCPU);
 	  if ((*data & 1) == 1)
@@ -1619,7 +1693,7 @@ clint_write (uint32 addr, uint32 *data, uint32 sz)
   return 1;
 }
 
-const struct grlib_ipcore clint = { NULL, NULL, clint_read, clint_write,
+const struct grlib_ipcore clint = { NULL, clint_reset, clint_read, clint_write,
 				    clint_add };
 
 /* ------------------- plic --------------------------*/
@@ -1641,14 +1715,29 @@ static uint32 plic_claim[NCPU];
 static void
 plic_check_irq (uint32 hart)
 {
-  int i, irq;
-  if (irq = (plic_ie[hart][0] & plic_ip[0]))
+  int i, best = 0;
+  unsigned char best_prio = 0;
+  uint32 irq = plic_ie[hart][0] & plic_ip[0];
+
+  /* FU540-C000 10.7: a claim returns the ID of the highest-priority pending
+     interrupt.  10.3: "A priority value of 0 is reserved to mean 'never
+     interrupt' and effectively disables the interrupt", and "Ties between
+     global interrupts of the same priority are broken by the Interrupt ID;
+     interrupts with the lowest ID have the highest effective priority".
+     Both fall out of a strictly-greater test scanning IDs upwards from the
+     reserved priority 0.  */
+  for (i = 1; i < 32; i++)
     {
-      for (i = 1; i < 32; i++)
+      if (((irq >> i) & 1) && (plic_prio[i] > best_prio))
 	{
-	  if ((irq >> i) & 1)
-	    plic_claim[hart] = i;
+	  best_prio = plic_prio[i];
+	  best = i;
 	}
+    }
+
+  if (best)
+    {
+      plic_claim[hart] = best;
       sregs[hart].mip |= MIP_MEIP;
     }
 }
