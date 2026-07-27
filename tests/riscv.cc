@@ -2090,3 +2090,220 @@ TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the disassembler names its operands")
   CHECK (disas (0x4588 | 0xffff0000).find ("a0,8(a1)") != std::string::npos);
   CHECK (disas (0x87ba | 0xffff0000).find ("a5,a4") != std::string::npos);
 }
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V a double value is classified")
+{
+  /* The classification table is the same for both formats, but the bit which
+     separates a quiet value from a signalling one is the most significant
+     bit of the significand, which for a double is bit 19 of its high
+     word.  */
+  struct
+  {
+    float64 value;
+    uint32 bit;
+  } cases[] = {
+    { -1.0, 1 },
+    { 1.0, 6 },
+    { -0.0, 3 },
+    { 0.0, 4 },
+  };
+
+  for (auto c : cases)
+    {
+      INFO ("bit " << c.bit);
+      fd (2) = c.value;
+      CHECK (exec (fpu (F_MV_X, FMT_D, 3, 1, 2, 0)) == 0);
+      CHECK (get (3) == (1u << c.bit));
+    }
+
+  fd (2) = std::numeric_limits<double>::infinity ();
+  CHECK (exec (fpu (F_MV_X, FMT_D, 3, 1, 2, 0)) == 0);
+  CHECK (get (3) == (1u << 7));
+
+  fd (2) = -std::numeric_limits<double>::infinity ();
+  CHECK (exec (fpu (F_MV_X, FMT_D, 3, 1, 2, 0)) == 0);
+  CHECK (get (3) == (1u << 0));
+
+  fd (2) = std::numeric_limits<double>::quiet_NaN ();
+  CHECK (exec (fpu (F_MV_X, FMT_D, 3, 1, 2, 0)) == 0);
+  CHECK (get (3) == (1u << 9));
+
+  /* A signalling one: the exponent all ones and the top significand bit
+     clear.  */
+  fsi (2) = 1;
+  fbox (2) = 0x7ff00000;
+  CHECK (exec (fpu (F_MV_X, FMT_D, 3, 1, 2, 0)) == 0);
+  CHECK (get (3) == (1u << 8));
+
+  /* And a subnormal, which a zero exponent and a non-zero significand
+     make.  */
+  fsi (2) = 1;
+  fbox (2) = 0;
+  CHECK (exec (fpu (F_MV_X, FMT_D, 3, 1, 2, 0)) == 0);
+  CHECK (get (3) == (1u << 5));
+
+  fbox (2) = 0x80000000;
+  CHECK (exec (fpu (F_MV_X, FMT_D, 3, 1, 2, 0)) == 0);
+  CHECK (get (3) == (1u << 2));
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V double precision arithmetic")
+{
+  fd (2) = 3.5;
+  fd (4) = 1.25;
+
+  CHECK (exec (fpu (F_ADD, FMT_D, 6, 0, 2, 4)) == 0);
+  CHECK (fd (6) == 4.75);
+
+  CHECK (exec (fpu (F_SUB, FMT_D, 6, 0, 2, 4)) == 0);
+  CHECK (fd (6) == 2.25);
+
+  CHECK (exec (fpu (F_MUL, FMT_D, 6, 0, 2, 4)) == 0);
+  CHECK (fd (6) == 4.375);
+
+  CHECK (exec (fpu (F_DIV, FMT_D, 6, 0, 2, 4)) == 0);
+  CHECK (fd (6) == 2.8);
+
+  fd (2) = 4.0;
+  CHECK (exec (fpu (F_SQRT, FMT_D, 6, 0, 2, 0)) == 0);
+  CHECK (fd (6) == 2.0);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V double precision sign injection")
+{
+  /* The sign lives in the high word of a double, so these move that word
+     and copy the low one across untouched.  */
+  fd (2) = -2.5;
+  fd (4) = 1.0;
+
+  CHECK (exec (fpu (F_SGNJ, FMT_D, 6, 0, 2, 4)) == 0);
+  CHECK (fd (6) == 2.5);
+
+  CHECK (exec (fpu (F_SGNJ, FMT_D, 6, 1, 2, 4)) == 0);
+  CHECK (fd (6) == -2.5);
+
+  CHECK (exec (fpu (F_SGNJ, FMT_D, 6, 2, 2, 4)) == 0);
+  CHECK (fd (6) == -2.5);
+
+  fd (4) = -1.0;
+  CHECK (exec (fpu (F_SGNJ, FMT_D, 6, 2, 2, 4)) == 0);
+  CHECK (fd (6) == 2.5);
+
+  CHECK (exec (fpu (F_SGNJ, FMT_D, 6, 3, 2, 4)) == TRAP_ILLEG);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture,
+		   "RISC-V double precision minimum and maximum")
+{
+  fd (2) = 3.5;
+  fd (4) = 1.25;
+
+  CHECK (exec (fpu (F_MINMAX, FMT_D, 6, 0, 2, 4)) == 0);
+  CHECK (fd (6) == 1.25);
+
+  CHECK (exec (fpu (F_MINMAX, FMT_D, 6, 1, 2, 4)) == 0);
+  CHECK (fd (6) == 3.5);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V double precision comparisons")
+{
+  fd (2) = 1.0;
+  fd (4) = 2.0;
+
+  CHECK (exec (fpu (F_CMP, FMT_D, 3, 0, 2, 4)) == 0);
+  CHECK (get (3) == 1);
+  CHECK (exec (fpu (F_CMP, FMT_D, 3, 1, 2, 4)) == 0);
+  CHECK (get (3) == 1);
+  CHECK (exec (fpu (F_CMP, FMT_D, 3, 2, 2, 4)) == 0);
+  CHECK (get (3) == 0);
+
+  fd (4) = 1.0;
+  CHECK (exec (fpu (F_CMP, FMT_D, 3, 0, 2, 4)) == 0);
+  CHECK (get (3) == 1);
+  CHECK (exec (fpu (F_CMP, FMT_D, 3, 1, 2, 4)) == 0);
+  CHECK (get (3) == 0);
+  CHECK (exec (fpu (F_CMP, FMT_D, 3, 2, 2, 4)) == 0);
+  CHECK (get (3) == 1);
+
+  CHECK (exec (fpu (F_CMP, FMT_D, 3, 3, 2, 4)) == TRAP_ILLEG);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the conversions between the formats")
+{
+  /* A double narrows to a single and a single widens to a double, each
+     selected by the format of the instruction and the source field.  */
+  fd (2) = 2.5;
+  CHECK (exec (fpu (0x08, FMT_S, 6, 0, 2, 1)) == 0); /* fcvt.s.d */
+  CHECK (fs (6) == 2.5f);
+  CHECK (fbox (6) == -1);
+
+  setfs (2, 3.5f);
+  CHECK (exec (fpu (0x08, FMT_D, 6, 0, 2, 0)) == 0); /* fcvt.d.s */
+  CHECK (fd (6) == 3.5);
+
+  /* The format of the instruction alone says which way the conversion
+     goes, so the source field is not consulted.  */
+  fd (2) = 4.5;
+  CHECK (exec (fpu (0x08, FMT_S, 6, 0, 2, 0)) == 0);
+  CHECK (fs (6) == 4.5f);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture,
+		   "RISC-V double precision integer conversions")
+{
+  fd (2) = -3.75;
+  CHECK (exec (fpu (F_CVT_W, FMT_D, 3, 0, 2, 0)) == 0);
+  CHECK (get (3) == (uint32) -3);
+
+  fd (2) = 3.75;
+  CHECK (exec (fpu (F_CVT_W, FMT_D, 3, 0, 2, 1)) == 0);
+  CHECK (get (3) == 3);
+
+  set (1, (uint32) -5);
+  CHECK (exec (fpu (F_CVT_F, FMT_D, 6, 0, 1, 0)) == 0);
+  CHECK (fd (6) == -5.0);
+
+  CHECK (exec (fpu (F_CVT_F, FMT_D, 6, 0, 1, 1)) == 0);
+  CHECK (fd (6) == 4294967296.0 - 5.0);
+
+  CHECK (exec (fpu (F_CVT_W, FMT_D, 3, 0, 2, 2)) == TRAP_ILLEG);
+  CHECK (exec (fpu (F_CVT_F, FMT_D, 6, 0, 1, 2)) == TRAP_ILLEG);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the fused multiply and add")
+{
+  /* The four fused forms take a third source from the top of the
+     instruction and differ only in which signs they apply.  */
+  setfs (1, 2.0f);
+  setfs (2, 3.0f);
+  setfs (4, 1.0f);
+
+  struct
+  {
+    uint32 op;
+    float32 result;
+  } cases[] = {
+    { OP_FMADD, 7.0f },	  /* a * b + c */
+    { OP_FMSUB, 5.0f },	  /* a * b - c */
+    { OP_FNMSUB, -5.0f }, /* -(a * b) + c is the specification's naming */
+    { OP_FNMADD, -7.0f },
+  };
+
+  for (auto c : cases)
+    {
+      INFO ("opcode " << c.op);
+      CHECK (exec (rtype (c.op, 3, 0, 1, 2, (4 << 2) | FMT_S)) == 0);
+      CHECK (fs (3) == c.result);
+      CHECK (fbox (3) == -1);
+    }
+
+  /* And the double forms.  */
+  fd (2) = 2.0;
+  fd (4) = 3.0;
+  fd (8) = 1.0;
+  CHECK (exec (rtype (OP_FMADD, 6, 0, 2, 4, (8 << 2) | FMT_D)) == 0);
+  CHECK (fd (6) == 7.0);
+
+  /* The remaining format codes are unassigned.  */
+  CHECK (exec (rtype (OP_FMADD, 6, 0, 2, 4, (8 << 2) | 2)) == TRAP_ILLEG);
+}
