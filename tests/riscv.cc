@@ -3104,3 +3104,91 @@ TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the local interrupts raise a line")
 
   ext_irl[0] = 0;
 }
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the accrued exception flags")
+{
+  /* Chapter 20 gives fflags one bit per exception, from inexact at the
+     bottom to invalid at the top.  The core accrues them from the host, so
+     each is raised by an operation whose result the format cannot hold.  */
+  struct
+  {
+    float32 a;
+    float32 b;
+    uint32 op;
+    uint32 flag;
+    const char *what;
+  } cases[] = {
+    { 1.0f, 3.0f, F_DIV, 0x01, "inexact" },
+    { 1e-38f, 1e-10f, F_MUL, 0x02, "underflow" },
+    { 1e38f, 1e10f, F_MUL, 0x04, "overflow" },
+    { 1.0f, 0.0f, F_DIV, 0x08, "divide by zero" },
+    { 0.0f, 0.0f, F_DIV, 0x10, "invalid" },
+  };
+
+  for (auto c : cases)
+    {
+      INFO (c.what);
+      sregs[0].fsr = 0;
+      setfs (1, c.a);
+      setfs (2, c.b);
+
+      CHECK (exec (fpu (c.op, FMT_S, 3, 0, 1, 2)) == 0);
+      CHECK ((sregs[0].fsr & c.flag) == c.flag);
+    }
+
+  /* The flags accrue rather than replace, so a clean operation after a dirty
+     one leaves what the dirty one set.  */
+  sregs[0].fsr = 0;
+  setfs (1, 1.0f);
+  setfs (2, 0.0f);
+  CHECK (exec (fpu (F_DIV, FMT_S, 3, 0, 1, 2)) == 0);
+  setfs (2, 2.0f);
+  CHECK (exec (fpu (F_ADD, FMT_S, 3, 0, 1, 2)) == 0);
+  CHECK ((sregs[0].fsr & 0x08) == 0x08);
+
+  sregs[0].fsr = 0;
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the rounding modes reach the host")
+{
+  /* The rounding mode lives in the three bits of frm above the flags, and
+     the core maps the four the host has.  One third is not representable, so
+     which way its last bit falls names the mode, and the sign decides it for
+     the two directed modes.  */
+  const int32 near = 0x3eaaaaab; /* one third rounded up in the last bit */
+  const int32 trunc = 0x3eaaaaaa;
+  struct
+  {
+    uint32 frm;
+    int32 pos;
+    int32 neg;
+    const char *what;
+  } cases[] = {
+    { 0, near, near | (int32) 0x80000000, "to nearest even" },
+    { 1, trunc, trunc | (int32) 0x80000000, "toward zero" },
+    { 2, trunc, near | (int32) 0x80000000, "down" },
+    { 3, near, trunc | (int32) 0x80000000, "up" },
+  };
+
+  for (auto c : cases)
+    {
+      INFO (c.what);
+
+      /* Set frm through the CSR, which is how a program sets it.  */
+      set (1, c.frm);
+      CHECK (exec (itype (OP_SYS, 0, CSRRW, 1, CSR_FRM)) == 0);
+
+      setfs (2, 3.0f);
+
+      setfs (1, 1.0f);
+      CHECK (exec (fpu (F_DIV, FMT_S, 3, 0, 1, 2)) == 0);
+      CHECK (fsi (3) == c.pos);
+
+      setfs (1, -1.0f);
+      CHECK (exec (fpu (F_DIV, FMT_S, 3, 0, 1, 2)) == 0);
+      CHECK (fsi (3) == c.neg);
+    }
+
+  set (1, 0);
+  CHECK (exec (itype (OP_SYS, 0, CSRRW, 1, CSR_FRM)) == 0);
+}
