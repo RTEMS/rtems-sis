@@ -43,14 +43,21 @@
 #include "support.h"
 
 #include "config.h"
+#include "getdelim.h"
 #include "sis.h"
 
 #include "cpumem.h"
 
+#include <errno.h>
+#include <fcntl.h>
+#include <netinet/in.h>
 #include <signal.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <string>
+#include <sys/socket.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 namespace
@@ -72,6 +79,9 @@ using sis_tests::stdout_capture;
 /* The coverage bitmap of func.cc.  No declaration in sis.h; nothing outside
    func.cc reads it.  */
 extern unsigned char covram[];
+
+/* Not in sis.h either; tests/event.cc declares it the same way.  */
+extern void advance_time (uint64 endtime);
 
 namespace
 {
@@ -141,6 +151,72 @@ private:
   FILE *file;
   int saved;
 };
+
+/* A byte read that answers zero at any address, including addresses the
+   flat memory of tests/cpumem.cc has no window for.  */
+int
+zero_sis_read (uint32 addr, char *data, uint32 length)
+{
+  (void) addr;
+  memset (data, 0, length);
+  return (int) length;
+}
+
+/* A word read that answers zero at any address, for the same reason.  */
+int
+zero_read (uint32 addr, uint32 *data, int32 *ws)
+{
+  (void) addr;
+  *data = 0;
+  *ws = 0;
+  return 0;
+}
+
+/* The flat memory with those reads in place of its own, for a case that
+   works at the very top of the address space.  The window of
+   tests/cpumem.cc has no answer there and its range test overflows
+   rather than refusing the access.  */
+const struct memsys *
+top_memsys ()
+{
+  static struct memsys mem = sis_tests::flatmem;
+
+  mem.sis_memory_read = zero_sis_read;
+  mem.memory_iread = zero_read;
+  mem.memory_read = zero_read;
+  return &mem;
+}
+
+/* The interrupt acknowledge a board installs.  There is no board here, so
+   the fixture points every core at this one: sparc.cc calls it on the way
+   into an interrupt trap, and pstate carries whatever the last board to
+   run left in the field.  */
+void
+noop_intack (int32 level, int32 cpu)
+{
+  (void) level;
+  (void) cpu;
+}
+
+/* Counts the board initialisations the run loop entry points ask for.
+   The flat memory of tests/cpumem.cc has nothing to initialise, so a case
+   that cares swaps in this copy of it.  */
+int boot_init_calls;
+
+void
+counting_boot_init ()
+{
+  boot_init_calls++;
+}
+
+const struct memsys *
+counting_memsys ()
+{
+  static struct memsys mem = sis_tests::flatmem;
+
+  mem.boot_init = counting_boot_init;
+  return &mem;
+}
 
 /* Fill every word from ADDR for COUNT words with NOP.  */
 void
@@ -225,7 +301,10 @@ struct func_fixture
     /* Traps enabled, supervisor mode, window zero: a store or a trap the
        cases below drive does not itself fault for lack of a trap table.  */
     for (int i = 0; i < NCPU; i++)
-      sregs[i].psr = 0xF3000080 | 0x20;
+      {
+	sregs[i].psr = 0xF3000080 | 0x20;
+	sregs[i].intack = noop_intack;
+      }
   }
 
   ~func_fixture ()
@@ -1046,6 +1125,27 @@ TEST_CASE_FIXTURE (func_fixture,
   CHECK (capture.str ().find ("0001") != std::string::npos);
 }
 
+TEST_CASE_FIXTURE (func_fixture,
+		   "dis_mem stops at the top of the address space instead "
+		   "of wrapping to zero")
+{
+  /* doc/commands.md gives "dis [addr] [count]" no upper address, so the
+     last word of the space is a legal request; the address it reports
+     back is what the next "dis" continues from, and it must not have
+     wrapped.  The flat memory of tests/cpumem.cc answers no read this
+     high, so the case swaps in a memory that reads zero everywhere
+     rather than indexing its window out of bounds.  */
+  ms = top_memsys ();
+
+  stdout_capture capture;
+  uint32 next = dis_mem (0xfffffffc, 4);
+
+  CHECK (next == 0xfffffffc);
+  /* One instruction printed, not four: without the break the address
+     wraps and the run continues at zero.  */
+  CHECK (capture.str ().find (" 00000000:") == std::string::npos);
+}
+
 TEST_CASE_FIXTURE (
     func_fixture,
     "dis_mem decodes a RISC-V full width instruction as a word, the "
@@ -1204,6 +1304,181 @@ TEST_CASE_FIXTURE (func_fixture,
   CHECK (text.find (std::string (200, 'a')) != std::string::npos);
 }
 
+TEST_CASE_FIXTURE (func_fixture,
+		   "'batch' skips a line whose command text is cut short "
+		   "by an embedded NUL rather than executing the fragment")
+{
+  /* doc/commands.md describes a batch file as a file of SIS commands and
+     says nothing about NUL bytes.  batch() reads a line as bytes but
+     hands it on as a C string, so a NUL inside the line makes the string
+     shorter than the line read: batch() checks that the string it is
+     about to run still ends in the newline it read, and skips the line
+     when it does not.  Both shapes are here: a line that is empty as a
+     string, and one that is a non-empty fragment.  */
+  std::string path = scratch_path ("sis-funcq-batch-nul");
+  FILE *fp = fopen (path.c_str (), "wb");
+  REQUIRE (fp != NULL);
+  fputs ("debug 5\n", fp);
+  /* Empty as a string: strlen() is 0, so there is no last character to
+     test at all.  */
+  fputc ('\0', fp);
+  fputs ("debug 6\n", fp);
+  /* A non-empty fragment: strlen() is 5 and the last character is 'g',
+     not the newline the line really ended with.  */
+  fputs ("debug", fp);
+  fputc ('\0', fp);
+  fputs (" 7\n", fp);
+  fputs ("debug 8\n", fp);
+  fclose (fp);
+
+  stdout_capture capture;
+  exec_cmd (("batch " + path).c_str ());
+  std::string text = capture.str ();
+
+  remove (path.c_str ());
+
+  /* Only the two intact lines ran, and the last of them set the level.
+     The echo of each command batch() runs is what counts them: a
+     fragment that reached exec_cmd would echo a truncated command of
+     its own.  */
+  CHECK (sis_verbose == 8);
+  CHECK (text.find ("sis> debug 5") != std::string::npos);
+  CHECK (text.find ("sis> debug 8") != std::string::npos);
+
+  size_t echoes = 0;
+  for (size_t at = text.find ("sis> "); at != std::string::npos;
+       at = text.find ("sis> ", at + 1))
+    echoes++;
+  CHECK (echoes == 2);
+}
+
+/* ---- exec_cmd: the gdb command, doc/commands.md ---- */
+
+namespace
+{
+
+/* A listening socket the case keeps for itself, so the port it holds is
+   taken when the simulator tries to bind it.  gdb_remote() then fails to
+   create its server socket and returns at once, which is what lets a case
+   drive the "gdb" command without a debugger to talk to and without
+   blocking the suite in accept().  */
+class port_holder
+{
+public:
+  /* Takes PORT, or any free port when PORT is zero.  */
+  explicit port_holder (int wanted) : fd (-1), held (0)
+  {
+    struct sockaddr_in address;
+
+    for (int tries = 0; tries < 500; tries++)
+      {
+	fd = socket (AF_INET, SOCK_STREAM, 0);
+	if (fd < 0)
+	  return;
+	memset (&address, 0, sizeof (address));
+	address.sin_family = AF_INET;
+	address.sin_addr.s_addr = INADDR_ANY;
+	address.sin_port = htons ((uint16_t) wanted);
+	if (bind (fd, (struct sockaddr *) &address, sizeof (address)) == 0 &&
+	    listen (fd, 1) == 0)
+	  break;
+	close (fd);
+	fd = -1;
+	/* Another build of the suite holds it; it lets go in
+	   milliseconds.  */
+	usleep (20000);
+      }
+    if (fd < 0)
+      return;
+
+    socklen_t len = sizeof (address);
+    if (getsockname (fd, (struct sockaddr *) &address, &len) == 0)
+      held = ntohs (address.sin_port);
+  }
+
+  ~port_holder ()
+  {
+    if (fd >= 0)
+      close (fd);
+  }
+
+  port_holder (const port_holder &) = delete;
+  port_holder &operator= (const port_holder &) = delete;
+
+  int
+  number () const
+  {
+    return held;
+  }
+
+private:
+  int fd;
+  int held;
+};
+
+}
+
+TEST_CASE_FIXTURE (func_fixture,
+		   "'gdb' with no argument serves the current port, "
+		   "doc/commands.md")
+{
+  port_holder holder (0);
+  REQUIRE (holder.number () > 1024);
+
+  port = holder.number ();
+  new_socket = 0;
+
+  stdout_capture capture;
+  exec_cmd ("gdb");
+  std::string text = capture.str ();
+
+  /* The port the command served is the one gdb_remote() announces.  */
+  CHECK (text.find ("gdb: listening on port " +
+		    std::to_string (holder.number ())) != std::string::npos);
+  CHECK (port == holder.number ());
+  CHECK (sis_gdb_break == 0);
+  CHECK (new_socket == 0);
+}
+
+TEST_CASE_FIXTURE (func_fixture,
+		   "'gdb port' overrides the port, doc/commands.md")
+{
+  port_holder holder (0);
+  REQUIRE (holder.number () > 1024);
+
+  port = 1234;
+  new_socket = 0;
+
+  stdout_capture capture;
+  exec_cmd (("gdb " + std::to_string (holder.number ())).c_str ());
+  std::string text = capture.str ();
+
+  CHECK (port == holder.number ());
+  CHECK (text.find ("gdb: listening on port " +
+		    std::to_string (holder.number ())) != std::string::npos);
+}
+
+TEST_CASE_FIXTURE (func_fixture,
+		   "'gdb port' raises a privileged port number to 1024 "
+		   "(current behaviour, doc/commands.md gives no lower "
+		   "bound on the port argument)")
+{
+  /* Ports below 1024 need privileges the simulator is not expected to
+     have, so the command clamps rather than failing to bind.  */
+  port_holder holder (1024);
+  REQUIRE (holder.number () == 1024);
+
+  port = 1234;
+  new_socket = 0;
+
+  stdout_capture capture;
+  exec_cmd ("gdb 80");
+  std::string text = capture.str ();
+
+  CHECK (port == 1024);
+  CHECK (text.find ("gdb: listening on port 1024") != std::string::npos);
+}
+
 /* ---- exec_cmd: run loop entry points, doc/commands.md ---- */
 
 TEST_CASE_FIXTURE (func_fixture, "'go address' sets pc for every online "
@@ -1302,6 +1577,65 @@ TEST_CASE_FIXTURE (func_fixture, "'run' resets, then runs from pc 0 when "
 
   CHECK (ebase.simstart == 0);
   CHECK (sregs[0].pc == 8);
+}
+
+TEST_CASE_FIXTURE (func_fixture,
+		   "'run' boots the board before it starts, doc/commands.md")
+{
+  /* doc/commands.md: "run" resets the simulator and starts execution
+     from the entry point, so the board is brought up from cold each
+     time.  "run" clears the simulated time itself, so the boot always
+     happens.  */
+  ms = counting_memsys ();
+  fill_nops (0, 4);
+  boot_init_calls = 0;
+
+  exec_cmd ("run 2");
+  CHECK (boot_init_calls == 1);
+
+  exec_cmd ("run 2");
+  CHECK (boot_init_calls == 2);
+}
+
+TEST_CASE_FIXTURE (func_fixture,
+		   "'go' boots the board only when no time has been "
+		   "simulated yet, doc/commands.md")
+{
+  /* doc/commands.md: "go" sets pc and resumes, it does not reset.  A
+     board already running keeps its state; one that has not run yet is
+     brought up first.  */
+  ms = counting_memsys ();
+  fill_nops (0, 8);
+  ebase.simtime = 0;
+  boot_init_calls = 0;
+
+  exec_cmd ("go 0 2");
+  CHECK (boot_init_calls == 1);
+  REQUIRE (ebase.simtime > 0);
+
+  exec_cmd ("go 0 2");
+  CHECK (boot_init_calls == 1);
+}
+
+TEST_CASE_FIXTURE (func_fixture,
+		   "'trun' does not boot the board when there is no entry "
+		   "point to run from")
+{
+  /* "trun" is "run" under a time limit.  With no file loaded the pc
+     resets to zero, which is no entry point, so there is nothing to
+     boot for.  */
+  ms = counting_memsys ();
+  fill_nops (0, 4);
+  last_load_addr = 0;
+  boot_init_calls = 0;
+
+  exec_cmd ("trun 1 us");
+  CHECK (boot_init_calls == 0);
+
+  last_load_addr = 0x800;
+  fill_nops (0x800, 4);
+  exec_cmd ("trun 1 us");
+  CHECK (boot_init_calls == 1);
 }
 
 TEST_CASE_FIXTURE (func_fixture, "'run' sets pc from the last loaded address")
@@ -1421,6 +1755,57 @@ TEST_CASE_FIXTURE (
   sregs[0].pwd_mode = 0;
   ebase.tlimit = 0;
   ext_irl[0] = 0;
+}
+
+TEST_CASE_FIXTURE (
+    func_fixture,
+    "an unmasked interrupt request takes its trap instead of the "
+    "instruction at the pc, on a single cpu")
+{
+  /* SPARC V8, chapter 7: an external interrupt request at level n that
+     is above the processor interrupt level and arrives with traps
+     enabled takes trap type 0x10 + n, and the trap sets pc from the trap
+     base register with the trap type as its offset.  The fixture leaves
+     PSR_PIL at zero and PSR_ET set, so level 5 is unmasked.  */
+  const uint32 handler = 0x150; /* tbr 0 plus (0x15 << 4) */
+  fill_nops (0, 1);
+  fill_nops (handler, 2);
+  sregs[0].pc = 0;
+  sregs[0].npc = 4;
+  sregs[0].tbr = 0;
+  ext_irl[0] = 5;
+
+  exec_cmd ("step");
+
+  ext_irl[0] = 0;
+
+  /* The interrupted pc and npc are saved in l1 and l2, and the handler
+     runs in the next window down.  */
+  CHECK (sregs[0].pc == handler + 4);
+  CHECK ((sregs[0].psr & 0x20) == 0); /* PSR_ET cleared by the trap */
+}
+
+TEST_CASE_FIXTURE (
+    func_fixture,
+    "an unmasked interrupt request takes its trap instead of the "
+    "instruction at the pc, with more than one cpu online")
+{
+  /* The same SPARC V8 rule, through run_sim_core rather than
+     run_sim_un: with more than one cpu and an instruction count above
+     one, the run loop slices the cores by time.  */
+  const uint32 handler = 0x150;
+  ncpu = 2;
+  fill_nops (0, 4);
+  fill_nops (handler, 4);
+  sregs[0].tbr = 0;
+  ext_irl[0] = 5;
+
+  exec_cmd ("cont 2");
+
+  ext_irl[0] = 0;
+
+  CHECK (sregs[0].pc >= handler);
+  CHECK ((sregs[0].psr & 0x20) == 0);
 }
 
 TEST_CASE_FIXTURE (
@@ -2066,19 +2451,29 @@ TEST_CASE_FIXTURE (func_fixture, "sys_halt forces the fake halt trap")
 TEST_CASE_FIXTURE (
     func_fixture,
     "int_handler flags a SIGINT for the run loop to pick up, while a run "
-    "is in progress (its other branch, taken when nothing is running, "
-    "closes the gdb socket or exits the process outright, so it is not "
-    "safe to drive from a unit test)")
+    "is in progress, doc/commands.md")
 {
   int saved_sim_run = sim_run;
   int saved_ctrl_c = ctrl_c;
+  int saved_socket = new_socket;
+
+  /* A real descriptor in the gdb socket, to show the run in progress is
+     what decides: a signal taken while running only raises the flag and
+     leaves an attached debugger's connection alone.  */
+  int fd = socket (AF_INET, SOCK_STREAM, 0);
+  REQUIRE (fd > 0);
+
   sim_run = 1;
   ctrl_c = 0;
+  new_socket = fd;
 
   int_handler (SIGINT);
 
   CHECK (ctrl_c == 1);
+  CHECK (fcntl (fd, F_GETFD) != -1);
 
+  close (fd);
+  new_socket = saved_socket;
   ctrl_c = saved_ctrl_c;
   sim_run = saved_sim_run;
 }
@@ -2091,6 +2486,137 @@ TEST_CASE_FIXTURE (func_fixture,
   int_handler (SIGTERM);
 
   CHECK (capture.str ().find ("Signal handler error") != std::string::npos);
+}
+
+TEST_CASE_FIXTURE (func_fixture,
+		   "int_handler with no run in progress drops the gdb "
+		   "connection rather than the process, doc/commands.md "
+		   "and doc/interfacing-to-gdb.md")
+{
+  /* doc/commands.md gives Ctrl-C as the way to interrupt a running
+     simulator; with nothing running, an attached debugger owns the
+     session, so the connection is what the signal ends.  The socket is a
+     real descriptor, the way tests/sisio.cc drives host I/O, so the case
+     can see it closed.  */
+  int saved_sim_run = sim_run;
+  int saved_ctrl_c = ctrl_c;
+  int saved_socket = new_socket;
+
+  int fd = socket (AF_INET, SOCK_STREAM, 0);
+  REQUIRE (fd > 0);
+
+  sim_run = 0;
+  ctrl_c = 0;
+  new_socket = fd;
+
+  int_handler (SIGINT);
+
+  CHECK (ctrl_c == 1);
+  /* The descriptor is gone: the handler closed it and did not exit.  */
+  errno = 0;
+  CHECK (fcntl (fd, F_GETFD) == -1);
+  CHECK (errno == EBADF);
+
+  new_socket = saved_socket;
+  ctrl_c = saved_ctrl_c;
+  sim_run = saved_sim_run;
+}
+
+TEST_CASE_FIXTURE (func_fixture,
+		   "int_handler with no run in progress and no gdb "
+		   "connection exits the simulator with a success status")
+{
+  /* The handler calls exit(0), which no case can survive in the shared
+     test process, so the call is made in a forked child and the case
+     asserts on its exit status.  A child that comes back from the
+     handler instead exits 70, which fails the check.  */
+  int saved_sim_run = sim_run;
+  int saved_ctrl_c = ctrl_c;
+  int saved_socket = new_socket;
+
+  fflush (NULL);
+  pid_t pid = fork ();
+  REQUIRE (pid >= 0);
+  if (pid == 0)
+    {
+      sim_run = 0;
+      new_socket = 0;
+      int_handler (SIGINT);
+      _exit (70);
+    }
+
+  int status = 0;
+  REQUIRE (waitpid (pid, &status, 0) == pid);
+  CHECK (WIFEXITED (status));
+  CHECK (WEXITSTATUS (status) == 0);
+
+  new_socket = saved_socket;
+  ctrl_c = saved_ctrl_c;
+  sim_run = saved_sim_run;
+}
+
+TEST_CASE_FIXTURE (func_fixture,
+		   "init_signals installs the handler for both signals it "
+		   "catches")
+{
+  typedef void (*handler) (int);
+
+  handler saved_int = signal (SIGINT, SIG_DFL);
+  handler saved_term = signal (SIGTERM, SIG_DFL);
+
+  init_signals ();
+
+  /* signal() answers with the disposition it replaces, so setting the
+     default back reports what init_signals had put there.  */
+  CHECK (signal (SIGINT, saved_int) == int_handler);
+  CHECK (signal (SIGTERM, saved_term) == int_handler);
+}
+
+TEST_CASE_FIXTURE (func_fixture,
+		   "the event queue's end of time warns and exits the "
+		   "simulator")
+{
+  /* init_event() queues one event at the largest possible time, so a
+     simulation that ever reaches it has run out of time to measure.
+     The callback exits the process, so it runs in a forked child and
+     the case asserts on the child's output and exit status.
+
+     The extra event at the same time is what keeps the queue non-empty
+     once the end of time is taken off it: advance_time() reads the head
+     of the queue after unlinking the entry it is about to run, so with
+     the end of time as the only entry left it dereferences a null head
+     before reaching the callback.  Nothing can queue an event later
+     than the end of time, so this is a latent defect in advance_time
+     rather than a property a caller can rely on.  */
+  int fds[2];
+  REQUIRE (pipe (fds) == 0);
+
+  fflush (NULL);
+  pid_t pid = fork ();
+  REQUIRE (pid >= 0);
+  if (pid == 0)
+    {
+      close (fds[0]);
+      dup2 (fds[1], SIS_FILENO (stdout));
+      reset_all ();
+      event (noop_event, 0, UINT64_MAX);
+      advance_time (UINT64_MAX);
+      _exit (70);
+    }
+
+  close (fds[1]);
+  std::string text;
+  char buffer[256];
+  ssize_t got;
+  while ((got = read (fds[0], buffer, sizeof (buffer))) > 0)
+    text.append (buffer, (size_t) got);
+  close (fds[0]);
+
+  int status = 0;
+  REQUIRE (waitpid (pid, &status, 0) == pid);
+  CHECK (WIFEXITED (status));
+  CHECK (WEXITSTATUS (status) == 0);
+  CHECK (text.find ("end of time") != std::string::npos);
 }
 
 /* ---- get_time()/rt_sync() ---- */
@@ -2286,6 +2812,58 @@ TEST_CASE_FIXTURE (
   covram[w3 >> 2] = 0;
 }
 
+TEST_CASE_FIXTURE (
+    func_fixture,
+    "cov_save writes out a block with no marks of its own while a "
+    "straight run through it is still in progress")
+{
+  /* cov_save walks the bitmap 32 words at a time and writes a block out
+     when the block has marks of its own or when execution is still
+     flowing into it from an earlier block start.  A block that is empty
+     but reached by a run in progress is the second case, and every word
+     of it is marked executed.
+
+     The addresses are above the 64 K window of tests/cpumem.cc, so no
+     other case marks them: the core test files record target coverage at
+     the addresses they execute at, which are all inside that window.  */
+  const uint32 first = 0x200000;
+  const uint32 start = first + 31 * 4; /* last word of a 32 word block */
+  const uint32 empty = first + 0x80;   /* the whole of the next block */
+  const uint32 stop = first + 0x100;   /* the block after that */
+
+  for (uint32 a = first; a < first + 0x180; a += 4)
+    covram[a >> 2] = 0;
+
+  cov_start (start);
+  /* A branch in the block after the empty one ends the run, so the
+     propagation stops there rather than running to the end of the
+     bitmap.  */
+  cov_bnt (stop);
+  ebase.ramstart = 0;
+  sregs[0].pc = 0;
+
+  std::string base = scratch_path ("sis-funcq-cov-test3");
+  std::string path = base + ".cov";
+  remove (path.c_str ());
+
+  stdout_capture capture;
+  cov_save (const_cast<char *> (base.c_str ()));
+
+  /* The empty block was written out, marked executed end to end.  */
+  CHECK ((covram[empty >> 2] & 0x01) != 0);
+  CHECK ((covram[(empty + 31 * 4) >> 2] & 0x01) != 0);
+  /* The branch ended the run, so the words after it are untouched.  */
+  CHECK ((covram[(stop + 4) >> 2] & 0x01) == 0);
+
+  FILE *fp = fopen (path.c_str (), "r");
+  REQUIRE (fp != NULL);
+  fclose (fp);
+  remove (path.c_str ());
+
+  for (uint32 a = first; a < first + 0x180; a += 4)
+    covram[a >> 2] = 0;
+}
+
 TEST_CASE_FIXTURE (func_fixture, "run_sim starts coverage collection when "
 				 "coverage is enabled")
 {
@@ -2300,4 +2878,190 @@ TEST_CASE_FIXTURE (func_fixture, "run_sim starts coverage collection when "
 
   covram[0 >> 2] = 0;
   ebase.coven = 0;
+}
+
+/* ---- getdelim.h: the local getline() the batch command reads with ---- */
+
+namespace
+{
+
+/* An allocator that hands out real memory until the case tells it to
+   fail, so the two allocation failure returns of sis::GetDelim are
+   reachable without waiting for the host to run out of memory.  */
+struct failing_alloc
+{
+  static int malloc_fails;
+  static int realloc_fails;
+
+  static void *
+  Malloc (size_t size)
+  {
+    if (malloc_fails)
+      return NULL;
+    return malloc (size);
+  }
+
+  static void *
+  Realloc (void *ptr, size_t size)
+  {
+    if (realloc_fails)
+      return NULL;
+    return realloc (ptr, size);
+  }
+};
+
+int failing_alloc::malloc_fails;
+int failing_alloc::realloc_fails;
+
+/* A stream over TEXT, so a case does not need a file on disk.  */
+FILE *
+text_stream (const std::string &text)
+{
+  FILE *fp = tmpfile ();
+
+  if (fp == NULL)
+    return NULL;
+  fwrite (text.data (), 1, text.size (), fp);
+  rewind (fp);
+  return fp;
+}
+
+}
+
+TEST_CASE ("GetLine returns one delimited line at a time, keeping the "
+	   "delimiter, and reports end of file")
+{
+  /* POSIX getdelim(): the line is stored in *lineptr with the delimiter
+     kept, *n holds the buffer size, and the buffer is allocated on the
+     first call.  */
+  FILE *fp = text_stream ("one\ntwo\n");
+  REQUIRE (fp != NULL);
+
+  char *line = NULL;
+  size_t n = 0;
+
+  CHECK (sis::GetLine<sis::HostAlloc> (&line, &n, fp) == 4);
+  CHECK (std::string (line) == "one\n");
+  CHECK (n == sis::line_size);
+
+  CHECK (sis::GetLine<sis::HostAlloc> (&line, &n, fp) == 4);
+  CHECK (std::string (line) == "two\n");
+
+  CHECK (sis::GetLine<sis::HostAlloc> (&line, &n, fp) == -1);
+
+  free (line);
+  fclose (fp);
+}
+
+TEST_CASE ("GetLine grows the buffer past its initial size for a long line")
+{
+  std::string text (sis::line_size * 3 + 7, 'x');
+  text += '\n';
+  FILE *fp = text_stream (text);
+  REQUIRE (fp != NULL);
+
+  char *line = NULL;
+  size_t n = 0;
+
+  CHECK (sis::GetLine<sis::HostAlloc> (&line, &n, fp) ==
+	 (ssize_t) text.size ());
+  CHECK (std::string (line) == text);
+  CHECK (n >= text.size ());
+
+  free (line);
+  fclose (fp);
+}
+
+TEST_CASE ("GetLine reports end of file for a final line with no delimiter, "
+	   "which is where it departs from POSIX getdelim")
+{
+  FILE *fp = text_stream ("no newline here");
+  REQUIRE (fp != NULL);
+
+  char *line = NULL;
+  size_t n = 0;
+
+  CHECK (sis::GetLine<sis::HostAlloc> (&line, &n, fp) == -1);
+
+  free (line);
+  fclose (fp);
+}
+
+TEST_CASE ("GetDelim reads to the delimiter it is given")
+{
+  FILE *fp = text_stream ("a:b:");
+  REQUIRE (fp != NULL);
+
+  char *line = NULL;
+  size_t n = 0;
+
+  CHECK (sis::GetDelim<sis::HostAlloc> (&line, &n, ':', fp) == 2);
+  CHECK (std::string (line) == "a:");
+
+  free (line);
+  fclose (fp);
+}
+
+TEST_CASE ("GetDelim rejects a missing line pointer, size or stream")
+{
+  FILE *fp = text_stream ("one\n");
+  REQUIRE (fp != NULL);
+
+  char *line = NULL;
+  size_t n = 0;
+
+  CHECK (sis::GetDelim<sis::HostAlloc> (NULL, &n, '\n', fp) == -1);
+  CHECK (sis::GetDelim<sis::HostAlloc> (&line, NULL, '\n', fp) == -1);
+  CHECK (sis::GetDelim<sis::HostAlloc> (&line, &n, '\n', NULL) == -1);
+  /* Nothing was read and nothing was allocated.  */
+  CHECK (line == NULL);
+  CHECK (n == 0);
+
+  fclose (fp);
+}
+
+TEST_CASE ("GetDelim reports a failure to allocate the first buffer")
+{
+  FILE *fp = text_stream ("one\n");
+  REQUIRE (fp != NULL);
+
+  char *line = NULL;
+  size_t n = 0;
+
+  failing_alloc::malloc_fails = 1;
+  CHECK (sis::GetDelim<failing_alloc> (&line, &n, '\n', fp) == -1);
+  failing_alloc::malloc_fails = 0;
+
+  CHECK (line == NULL);
+  CHECK (n == 0);
+
+  fclose (fp);
+}
+
+TEST_CASE ("GetDelim reports a failure to grow the buffer and keeps the "
+	   "line it has")
+{
+  std::string text (sis::line_size * 2, 'x');
+  text += '\n';
+  FILE *fp = text_stream (text);
+  REQUIRE (fp != NULL);
+
+  char *line = NULL;
+  size_t n = 0;
+
+  failing_alloc::realloc_fails = 1;
+  CHECK (sis::GetDelim<failing_alloc> (&line, &n, '\n', fp) == -1);
+  failing_alloc::realloc_fails = 0;
+
+  /* The buffer that could not be grown is still the caller's to free,
+     and still holds what fitted.  It is full to the last byte and so
+     carries no terminator, which is why the failure is reported as a
+     return of -1 rather than as a short line.  */
+  REQUIRE (line != NULL);
+  CHECK (n == sis::line_size);
+  CHECK (memcmp (line, std::string (sis::line_size, 'x').data (),
+		 sis::line_size) == 0);
+
+  free (line);
+  fclose (fp);
 }

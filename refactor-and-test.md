@@ -93,14 +93,14 @@ tree.
 |---|---|---|
 | `riscv.cc` | 1106 | 1106 |
 | `sparc.cc` | 1133 | 1133 |
-| `func.cc` | 603 | 581 |
+| `func.cc` | 579 | 579 |
 | `grlib.cc` | 387 | 385 |
 | `leon3.cc` | 42 | 41 |
 | `gr740.cc` | 42 | 41 |
 | `remote.cc` | 226 | 14 |
 | `memscrub.cc` | 94 | 1 |
 | `tap.cc` | 65 | 0 |
-| graduated: `elf.cc`, `erc32_cfg.h`, `erc32_error.h`, `erc32_mec.h`, `erc32_timer.h`, `erc32_uart.h`, `erc32.cc`, `exec.cc`, `gr1553.cc`, `greth.cc`, `grspw.cc`, `help.cc`, `interf.cc`, `leon2.cc`, `riscv.cc`, `rv32.cc`, `sis.cc`, `sisio.cc`, `sparc.cc`, `uartport.cc` | | 100% |
+| graduated: `elf.cc`, `erc32.cc`, `erc32_cfg.h`, `erc32_error.h`, `erc32_mec.h`, `erc32_timer.h`, `erc32_uart.h`, `exec.cc`, `func.cc`, `getdelim.h`, `gr1553.cc`, `greth.cc`, `grspw.cc`, `help.cc`, `interf.cc`, `leon2.cc`, `riscv.cc`, `rv32.cc`, `sis.cc`, `sisio.cc`, `sparc.cc`, `uartport.cc` | | 100% |
 
 Done, graduated in `tests/covered.txt`:
 
@@ -528,6 +528,48 @@ all of the concepts; each test file holds a small `TestEnv` per subsystem.
    valid one**, and the allocation failure beside it went the same way:
    `e_phnum` at 65535 asks for two megabytes, which `address_space_cap`
    refuses, so that arc is covered rather than left as a gap.
+
+   **`func.cc` is done**, 100% line and branch, graduated in
+   `tests/covered.txt` along with the new `getdelim.h`. Four things are
+   worth carrying forward:
+
+   - **The local `getline()` moved into `getdelim.h` behind an allocator
+     policy.** Its two allocation failure returns are real error handling
+     that must not be deleted and that no test can reach through
+     `malloc()`, so the function became `sis::GetDelim<Alloc>` with
+     `sis::HostAlloc` for the simulator and a fail-on-demand allocator in
+     the test. The move also fixed a leak: the old code assigned the
+     result of `realloc` straight back over the pointer it passed in, so
+     a failure lost the buffer.
+   - **Two `ebase.simtime == 0` guards were dead.** The `run` and `trun`
+     commands both set `ebase.simtime = 0` a few lines above the guard
+     that tests it, and nothing between the two can move the clock. Both
+     were removed; `trun` keeps its separate `sregs->pc != 0` test.
+   - **`dis_mem`'s top of memory guard compared the wrong variable.**
+     `if (i >= 0xfffffffc)` tested the loop counter, which is bounded by
+     the requested instruction count, where the address is what the loop
+     wraps. Fixed to test `addr`.
+   - **`advance_time` dereferences a null queue head if the end of time
+     is the last entry left.** It unlinks the entry it is about to run
+     and reads the new head before calling the callback, and nothing can
+     be queued later than `last_event` at `UINT64_MAX`. So the "end of
+     time ... exiting" warning is only reachable with a second event at
+     the same time, which is what its test queues. Latent, since it
+     needs 2^64 simulated cycles, and left for the maintainer rather
+     than guarded in the run loop.
+
+   Two things a case in `tests/funcq.cc` has to know. The fixture now
+   points every core's `intack` at a local no-op, because `sparc.cc`
+   calls it through the `pstate` on the way into an interrupt trap and
+   the field carries whatever board ran last. And a case that marks the
+   target coverage bitmap must work above the 64 K window of
+   `tests/cpumem.cc`: the core test files record coverage at the
+   addresses they execute at, which are all inside it.
+
+   The `gdb` command is driven without a debugger by holding its port in
+   the case itself, so `create_socket` fails to bind and `gdb_remote`
+   returns instead of blocking in `accept`. Do not drive it any other
+   way without a plan for the hang.
 5. `greth.cc`, `tap.cc`, `grspw.cc`, `gr1553.cc`. Last. They need host tap
    devices and privileges, they model only what the GRLIB example applications
    exercise, and they are where 100% is most likely to force a restructure
