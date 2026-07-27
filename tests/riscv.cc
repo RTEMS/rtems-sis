@@ -1304,3 +1304,214 @@ TEST_CASE_FIXTURE (riscv_fixture,
   CHECK (exec (itype (OP_FLOAD, 2, LB, 1, 0)) == TRAP_ILLEG);
   CHECK (exec (stype (OP_FSW, SB, 1, 2, 0)) == TRAP_ILLEG);
 }
+
+/* Compressed instructions.  The encodings below were produced by the RISC-V
+   assembler from the mnemonic in the comment, so a case states the
+   instruction it means rather than the bit fields it happens to have.  The
+   register numbers are a0 to a5 and sp, which the three register widths of
+   the format can all name.  */
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the compressed stack arithmetic")
+{
+  /* c.addi4spn adds a scaled unsigned immediate to the stack pointer, and
+     c.addi16sp adjusts the stack pointer itself.  */
+  set (2, 0x1000);
+
+  CHECK (exec (0x0808) == 0); /* c.addi4spn a0, sp, 16 */
+  CHECK (get (10) == 0x1010);
+
+  CHECK (exec (0x6105) == 0); /* c.addi16sp sp, 32 */
+  CHECK (get (2) == 0x1020);
+
+  /* An all zero word is not an instruction, which is what makes an empty
+     page trap rather than run.  */
+  CHECK (exec (0) == TRAP_ILLEG);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the compressed loads and stores")
+{
+  /* The three register form reaches the eight registers a program uses
+     most, with a scaled unsigned offset.  */
+  sis_tests::flatmem_poke (0x48, 0x12345678);
+  set (11, 0x40); /* a1 */
+
+  CHECK (exec (0x4588) == 0); /* c.lw a0, 8(a1) */
+  CHECK (get (10) == 0x12345678);
+
+  set (10, 0x11);
+  CHECK (exec (0xc588) == 0); /* c.sw a0, 8(a1) */
+  CHECK (sis_tests::flatmem_peek (0x48) == 0x11);
+
+  /* The stack pointer form has its own wider offset.  */
+  set (2, 0x40);
+  sis_tests::flatmem_poke (0x48, 0x2222);
+  CHECK (exec (0x47a2) == 0); /* c.lwsp a5, 8(sp) */
+  CHECK (get (15) == 0x2222);
+
+  set (15, 0x3333);
+  CHECK (exec (0xc43e) == 0); /* c.swsp a5, 8(sp) */
+  CHECK (sis_tests::flatmem_peek (0x48) == 0x3333);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture,
+		   "RISC-V a compressed access reports its faults")
+{
+  /* The compressed loads and stores check alignment and report a refused
+     word the way the full width ones do.  */
+  set (11, 0x41);
+  set (2, 0x41);
+
+  CHECK (exec (0x4588) == TRAP_LMALI); /* c.lw a0, 8(a1) */
+  CHECK (sregs[0].wpaddress == 0x49);
+  CHECK (exec (0xc588) == TRAP_SMALI); /* c.sw a0, 8(a1) */
+  CHECK (exec (0x47a2) == TRAP_LMALI); /* c.lwsp a5, 8(sp) */
+  CHECK (exec (0xc43e) == TRAP_SMALI); /* c.swsp a5, 8(sp) */
+
+  set (11, sis_tests::FLATMEM_SIZE);
+  set (2, sis_tests::FLATMEM_SIZE);
+  CHECK (exec (0x4588) == TRAP_LEXC);
+  CHECK (exec (0xc588) == TRAP_SEXC);
+  CHECK (exec (0x47a2) == TRAP_LEXC);
+  CHECK (exec (0xc43e) == TRAP_SEXC);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the compressed immediate operations")
+{
+  set (15, 10);
+
+  CHECK (exec (0x0795) == 0); /* c.addi a5, 5 */
+  CHECK (get (15) == 15);
+
+  CHECK (exec (0x57f5) == 0); /* c.li a5, -3 */
+  CHECK (get (15) == (uint32) -3);
+
+  CHECK (exec (0x6789) == 0); /* c.lui a5, 2 */
+  CHECK (get (15) == 0x2000);
+
+  CHECK (exec (0x0792) == 0); /* c.slli a5, 4 */
+  CHECK (get (15) == 0x20000);
+
+  /* c.nop is an add of zero to x0, which must leave the file alone.  */
+  CHECK (exec (0x0001) == 0);
+  CHECK (get (0) == 0);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the compressed register operations")
+{
+  /* The two register forms of the third quadrant, on the eight register
+     window and on the whole file.  */
+  set (10, 0xf0f0);
+  set (11, 0x0ff0);
+
+  CHECK (exec (0x8d0d) == 0); /* c.sub a0, a1 */
+  CHECK (get (10) == 0xf0f0 - 0x0ff0);
+
+  set (10, 0xf0f0);
+  CHECK (exec (0x8d2d) == 0); /* c.xor a0, a1 */
+  CHECK (get (10) == (0xf0f0u ^ 0x0ff0u));
+
+  set (10, 0xf0f0);
+  CHECK (exec (0x8d4d) == 0); /* c.or a0, a1 */
+  CHECK (get (10) == (0xf0f0u | 0x0ff0u));
+
+  set (10, 0xf0f0);
+  CHECK (exec (0x8d6d) == 0); /* c.and a0, a1 */
+  CHECK (get (10) == (0xf0f0u & 0x0ff0u));
+
+  set (10, 0xf0f0);
+  CHECK (exec (0x891d) == 0); /* c.andi a0, 7 */
+  CHECK (get (10) == (0xf0f0u & 7u));
+
+  set (14, 0x1234);
+  CHECK (exec (0x87ba) == 0); /* c.mv a5, a4 */
+  CHECK (get (15) == 0x1234);
+
+  set (15, 1);
+  CHECK (exec (0x97ba) == 0); /* c.add a5, a4 */
+  CHECK (get (15) == 0x1235);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the compressed shifts")
+{
+  set (10, 0x80000010);
+
+  CHECK (exec (0x8111) == 0); /* c.srli a0, 4 */
+  CHECK (get (10) == 0x08000001);
+
+  set (10, 0x80000010);
+  CHECK (exec (0x8511) == 0); /* c.srai a0, 4 */
+  CHECK (get (10) == 0xf8000001);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the compressed branches and jumps")
+{
+  /* Every compressed transfer is relative to the instruction itself, and the
+     one which links writes the address two bytes on rather than four.  */
+  sregs[0].pc = 0x2000;
+  sregs[0].npc = 0x2002;
+  CHECK (exec (0xa001) == 0); /* c.j . */
+  CHECK (sregs[0].pc == 0x2000);
+
+  sregs[0].pc = 0x2000;
+  sregs[0].npc = 0x2002;
+  CHECK (exec (0x2001) == 0); /* c.jal . */
+  CHECK (sregs[0].pc == 0x2000);
+  CHECK (get (1) == 0x2002);
+
+  /* The two conditional branches, each way.  */
+  sregs[0].pc = 0x2000;
+  sregs[0].npc = 0x2002;
+  set (10, 0);
+  CHECK (exec (0xc101) == 0); /* c.beqz a0, . */
+  CHECK (sregs[0].pc == 0x2000);
+
+  sregs[0].pc = 0x2000;
+  sregs[0].npc = 0x2002;
+  set (10, 1);
+  CHECK (exec (0xc101) == 0);
+  CHECK (sregs[0].pc == 0x2002);
+
+  sregs[0].pc = 0x2000;
+  sregs[0].npc = 0x2002;
+  CHECK (exec (0xe101) == 0); /* c.bnez a0, . */
+  CHECK (sregs[0].pc == 0x2000);
+
+  sregs[0].pc = 0x2000;
+  sregs[0].npc = 0x2002;
+  set (10, 0);
+  CHECK (exec (0xe101) == 0);
+  CHECK (sregs[0].pc == 0x2002);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the compressed register jumps")
+{
+  /* c.jr goes to the register and c.jalr also links, which is how a
+     compressed call and return are written.  */
+  sregs[0].pc = 0x2000;
+  sregs[0].npc = 0x2002;
+  set (15, 0x3000);
+
+  CHECK (exec (0x8782) == 0); /* c.jr a5 */
+  CHECK (sregs[0].pc == 0x3000);
+
+  sregs[0].pc = 0x2000;
+  sregs[0].npc = 0x2002;
+  CHECK (exec (0x9782) == 0); /* c.jalr a5 */
+  CHECK (sregs[0].pc == 0x3000);
+  CHECK (get (1) == 0x2002);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the compressed breakpoint")
+{
+  int saved = sis_gdb_break;
+
+  sis_gdb_break = 0;
+  CHECK (exec (0x9002) == TRAP_EBREAK); /* c.ebreak */
+
+  sis_gdb_break = 1;
+  CHECK (exec (0x9002) == WPT_TRAP);
+  CHECK (sregs[0].bphit == 1);
+
+  sregs[0].bphit = 0;
+  sis_gdb_break = saved;
+}
