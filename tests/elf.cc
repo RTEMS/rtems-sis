@@ -6,8 +6,9 @@
    The loader is fed synthetic ELF files rather than a committed binary, so
    that a case can state exactly which field it is varying and can build the
    malformed files that the error paths need. Layout and field meanings
-   follow the System V ABI, and the ELF header is 32-bit big-endian SPARC,
-   which is what the loader was written for.
+   follow the System V ABI. The files are 32-bit SPARC and big-endian by
+   default, which is what the loader was written for; a case that needs the
+   loader's unswapped path asks build_elf for ELFDATA2LSB instead.
 
    The entry point and the load address are ERC32 addresses so that the
    section data lands in emulated RAM at 0x2000000.  */
@@ -22,6 +23,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <string>
+#include <dirent.h>
+#include <sys/resource.h>
+#include <unistd.h>
 #include <vector>
 
 using sis_tests::stdout_capture;
@@ -33,20 +37,22 @@ const uint32 ERC32_RAM = 0x2000000;
 
 typedef std::vector<unsigned char> bytes;
 
+/* ELFDATA2MSB and ELFDATA2LSB order the fields of every ELF structure,
+   System V ABI figure 4-3 "ELF Data Encoding".  */
 void
-put16 (bytes &b, size_t off, uint16 value)
+put16 (bytes &b, size_t off, uint16 value, bool msb = true)
 {
-  b[off] = (unsigned char) (value >> 8);
-  b[off + 1] = (unsigned char) value;
+  b[off + (msb ? 0 : 1)] = (unsigned char) (value >> 8);
+  b[off + (msb ? 1 : 0)] = (unsigned char) value;
 }
 
 void
-put32 (bytes &b, size_t off, uint32 value)
+put32 (bytes &b, size_t off, uint32 value, bool msb = true)
 {
-  b[off] = (unsigned char) (value >> 24);
-  b[off + 1] = (unsigned char) (value >> 16);
-  b[off + 2] = (unsigned char) (value >> 8);
-  b[off + 3] = (unsigned char) value;
+  b[off + (msb ? 0 : 3)] = (unsigned char) (value >> 24);
+  b[off + (msb ? 1 : 2)] = (unsigned char) (value >> 16);
+  b[off + (msb ? 2 : 1)] = (unsigned char) (value >> 8);
+  b[off + (msb ? 3 : 0)] = (unsigned char) value;
 }
 
 /* Offsets of the pieces a case may want to patch.  */
@@ -66,14 +72,16 @@ const size_t EHDR_SIZE = sizeof (Elf32_Ehdr);
 const size_t PHDR_SIZE = sizeof (Elf32_Phdr);
 const size_t SHDR_SIZE = sizeof (Elf32_Shdr);
 
-/* A minimal but well formed big-endian SPARC executable: one PT_LOAD
-   segment, an allocated .text of eight bytes inside it, and the section
-   name table.  */
+/* A minimal but well formed SPARC executable: one PT_LOAD segment, an
+   allocated .text of eight bytes inside it, and the section name table.
+   Big-endian unless DATA says otherwise; every multi-byte field follows
+   DATA, which is what the loader keys its byte swapping off.  */
 bytes
 build_elf (elf_layout *layout, uint16 machine = EM_SPARC,
 	   uint32 entry = ERC32_RAM, unsigned char data = ELFDATA2MSB,
 	   unsigned char cls = ELFCLASS32)
 {
+  const bool msb = (data == ELFDATA2MSB);
   static const char names[] = "\0.text\0.shstrtab";
   const size_t names_size = sizeof (names);
   const uint32 text_size = 8;
@@ -98,47 +106,49 @@ build_elf (elf_layout *layout, uint16 machine = EM_SPARC,
   b[EI_DATA] = data;
   b[EI_VERSION] = EV_CURRENT;
 
-  put16 (b, offsetof (Elf32_Ehdr, e_type), ET_EXEC);
-  put16 (b, offsetof (Elf32_Ehdr, e_machine), machine);
-  put32 (b, offsetof (Elf32_Ehdr, e_version), EV_CURRENT);
-  put32 (b, offsetof (Elf32_Ehdr, e_entry), entry);
-  put32 (b, offsetof (Elf32_Ehdr, e_phoff), (uint32) l.phdr);
-  put32 (b, offsetof (Elf32_Ehdr, e_shoff), (uint32) l.shdr);
-  put16 (b, offsetof (Elf32_Ehdr, e_ehsize), (uint16) EHDR_SIZE);
-  put16 (b, offsetof (Elf32_Ehdr, e_phentsize), (uint16) PHDR_SIZE);
-  put16 (b, offsetof (Elf32_Ehdr, e_phnum), 1);
-  put16 (b, offsetof (Elf32_Ehdr, e_shentsize), (uint16) SHDR_SIZE);
-  put16 (b, offsetof (Elf32_Ehdr, e_shnum), 3);
-  put16 (b, offsetof (Elf32_Ehdr, e_shstrndx), 2);
+  put16 (b, offsetof (Elf32_Ehdr, e_type), ET_EXEC, msb);
+  put16 (b, offsetof (Elf32_Ehdr, e_machine), machine, msb);
+  put32 (b, offsetof (Elf32_Ehdr, e_version), EV_CURRENT, msb);
+  put32 (b, offsetof (Elf32_Ehdr, e_entry), entry, msb);
+  put32 (b, offsetof (Elf32_Ehdr, e_phoff), (uint32) l.phdr, msb);
+  put32 (b, offsetof (Elf32_Ehdr, e_shoff), (uint32) l.shdr, msb);
+  put16 (b, offsetof (Elf32_Ehdr, e_ehsize), (uint16) EHDR_SIZE, msb);
+  put16 (b, offsetof (Elf32_Ehdr, e_phentsize), (uint16) PHDR_SIZE, msb);
+  put16 (b, offsetof (Elf32_Ehdr, e_phnum), 1, msb);
+  put16 (b, offsetof (Elf32_Ehdr, e_shentsize), (uint16) SHDR_SIZE, msb);
+  put16 (b, offsetof (Elf32_Ehdr, e_shnum), 3, msb);
+  put16 (b, offsetof (Elf32_Ehdr, e_shstrndx), 2, msb);
 
-  put32 (b, l.phdr + offsetof (Elf32_Phdr, p_type), PT_LOAD);
-  put32 (b, l.phdr + offsetof (Elf32_Phdr, p_offset), (uint32) l.text_data);
-  put32 (b, l.phdr + offsetof (Elf32_Phdr, p_vaddr), ERC32_RAM);
-  put32 (b, l.phdr + offsetof (Elf32_Phdr, p_paddr), ERC32_RAM);
-  put32 (b, l.phdr + offsetof (Elf32_Phdr, p_filesz), text_size);
-  put32 (b, l.phdr + offsetof (Elf32_Phdr, p_memsz), text_size);
+  put32 (b, l.phdr + offsetof (Elf32_Phdr, p_type), PT_LOAD, msb);
+  put32 (b, l.phdr + offsetof (Elf32_Phdr, p_offset), (uint32) l.text_data,
+	 msb);
+  put32 (b, l.phdr + offsetof (Elf32_Phdr, p_vaddr), ERC32_RAM, msb);
+  put32 (b, l.phdr + offsetof (Elf32_Phdr, p_paddr), ERC32_RAM, msb);
+  put32 (b, l.phdr + offsetof (Elf32_Phdr, p_filesz), text_size, msb);
+  put32 (b, l.phdr + offsetof (Elf32_Phdr, p_memsz), text_size, msb);
 
   /* Recognisable words, byte swapped by the loader on a little-endian
      host, so the values below are what memory should end up holding.  */
-  put32 (b, l.text_data, 0x01020304);
-  put32 (b, l.text_data + 4, 0x05060708);
+  put32 (b, l.text_data, 0x01020304, msb);
+  put32 (b, l.text_data + 4, 0x05060708, msb);
 
   memcpy (&b[l.shstrtab_data], names, names_size);
 
-  put32 (b, l.sh_text + offsetof (Elf32_Shdr, sh_name), 1);
-  put32 (b, l.sh_text + offsetof (Elf32_Shdr, sh_type), SHT_PROGBITS);
+  put32 (b, l.sh_text + offsetof (Elf32_Shdr, sh_name), 1, msb);
+  put32 (b, l.sh_text + offsetof (Elf32_Shdr, sh_type), SHT_PROGBITS, msb);
   put32 (b, l.sh_text + offsetof (Elf32_Shdr, sh_flags),
-	 SHF_ALLOC | SHF_EXECINSTR);
-  put32 (b, l.sh_text + offsetof (Elf32_Shdr, sh_addr), ERC32_RAM);
-  put32 (b, l.sh_text + offsetof (Elf32_Shdr, sh_offset),
-	 (uint32) l.text_data);
-  put32 (b, l.sh_text + offsetof (Elf32_Shdr, sh_size), text_size);
+	 SHF_ALLOC | SHF_EXECINSTR, msb);
+  put32 (b, l.sh_text + offsetof (Elf32_Shdr, sh_addr), ERC32_RAM, msb);
+  put32 (b, l.sh_text + offsetof (Elf32_Shdr, sh_offset), (uint32) l.text_data,
+	 msb);
+  put32 (b, l.sh_text + offsetof (Elf32_Shdr, sh_size), text_size, msb);
 
-  put32 (b, l.sh_str + offsetof (Elf32_Shdr, sh_name), 7);
-  put32 (b, l.sh_str + offsetof (Elf32_Shdr, sh_type), SHT_STRTAB);
+  put32 (b, l.sh_str + offsetof (Elf32_Shdr, sh_name), 7, msb);
+  put32 (b, l.sh_str + offsetof (Elf32_Shdr, sh_type), SHT_STRTAB, msb);
   put32 (b, l.sh_str + offsetof (Elf32_Shdr, sh_offset),
-	 (uint32) l.shstrtab_data);
-  put32 (b, l.sh_str + offsetof (Elf32_Shdr, sh_size), (uint32) names_size);
+	 (uint32) l.shstrtab_data, msb);
+  put32 (b, l.sh_str + offsetof (Elf32_Shdr, sh_size), (uint32) names_size,
+	 msb);
 
   if (layout != NULL)
     *layout = l;
@@ -171,6 +181,48 @@ public:
 
 private:
   std::string path;
+};
+
+/* How many descriptors the process holds, for the cases that assert a
+   stream was closed.  */
+int
+count_open_files ()
+{
+  DIR *d = opendir ("/proc/self/fd");
+  REQUIRE (d != NULL);
+  int n = 0;
+  while (readdir (d) != NULL)
+    n++;
+  closedir (d);
+  return n;
+}
+
+/* Caps the process address space just above what it already uses, so that
+   the one huge allocation of the case below fails while every ordinary
+   allocation around it still succeeds.  The limit is restored on the way
+   out, so nothing outside the case sees it.  */
+class address_space_cap
+{
+public:
+  explicit address_space_cap (size_t headroom)
+  {
+    REQUIRE (getrlimit (RLIMIT_AS, &saved) == 0);
+
+    FILE *fp = fopen ("/proc/self/statm", "r");
+    REQUIRE (fp != NULL);
+    unsigned long pages = 0;
+    REQUIRE (fscanf (fp, "%lu", &pages) == 1);
+    fclose (fp);
+
+    struct rlimit rl = saved;
+    rl.rlim_cur = (rlim_t) pages * (rlim_t) sysconf (_SC_PAGESIZE) + headroom;
+    REQUIRE (setrlimit (RLIMIT_AS, &rl) == 0);
+  }
+
+  ~address_space_cap () { setrlimit (RLIMIT_AS, &saved); }
+
+private:
+  struct rlimit saved;
 };
 
 /* The simulator state elf_load reaches through: a board for the memory
@@ -524,6 +576,111 @@ TEST_CASE_FIXTURE (elf_fixture,
   std::string text;
   REQUIRE (load (file.name (), 0, &text) == (int) 0x80000000);
   CHECK (text.find ("RISCV executable") != std::string::npos);
+}
+
+/* Every load closes the file, whichever way it ends. The shell's load
+   command and sis.cc's board detection both call elf_load more than once
+   per session, so a stream kept open is a descriptor lost for good.  */
+TEST_CASE_FIXTURE (elf_fixture, "elf_load closes the file it opened")
+{
+  elf_layout l;
+  elf_on_disk good (build_elf (&l));
+
+  bytes b = build_elf (&l);
+  b[EI_MAG0] = 0;
+  elf_on_disk bad (b);
+
+  int before = count_open_files ();
+
+  for (int i = 0; i < 8; i++)
+    {
+      REQUIRE (load (good.name (), 0) == (int) ERC32_RAM);
+      REQUIRE (load (good.name (), 1) == (int) ERC32_RAM);
+      REQUIRE (load (bad.name (), 1) == -1);
+    }
+
+  CHECK (count_open_files () == before);
+}
+
+/* The loader byte swaps a file whose ELFDATA encoding differs from the
+   host's, System V ABI figure 4-3, and leaves it alone when they agree.
+   Every field the body reads goes through that decision: the section name
+   table header, the program headers, the section headers and the section
+   contents.  The file below matches the little-endian host, so nothing may
+   be swapped, and it carries a load address separate from its virtual
+   address so that the program header fields are load bearing.  */
+TEST_CASE_FIXTURE (elf_fixture,
+		   "elf_load loads a little-endian file unswapped")
+{
+  elf_layout l;
+  bytes b = build_elf (&l, EM_SPARC, ERC32_RAM, ELFDATA2LSB);
+
+  put32 (b, l.phdr + offsetof (Elf32_Phdr, p_vaddr), 0x40000000, false);
+  put32 (b, l.phdr + offsetof (Elf32_Phdr, p_paddr), ERC32_RAM, false);
+  put32 (b, l.sh_text + offsetof (Elf32_Shdr, sh_addr), 0x40000000, false);
+
+  elf_on_disk file (b);
+
+  std::string text;
+  sis_verbose = 1;
+  REQUIRE (load (file.name (), 1, &text) == (int) ERC32_RAM);
+
+  /* The name table header was read straight, so the section name resolves.  */
+  CHECK (text.find ("section: .text at 0x2000000") != std::string::npos);
+
+  /* The contents reach memory exactly as the file holds them.  */
+  unsigned char raw[8] = { 0 };
+  REQUIRE (ms->sis_memory_read (ERC32_RAM, (char *) raw, 8) == 8);
+  CHECK (raw[0] == 0x04);
+  CHECK (raw[1] == 0x03);
+  CHECK (raw[2] == 0x02);
+  CHECK (raw[3] == 0x01);
+  CHECK (raw[4] == 0x08);
+  CHECK (raw[7] == 0x05);
+}
+
+/* The section name table header is read from the file too, so its size is
+   as malformable as any other.  A size no allocation can satisfy must end
+   the load rather than reach the read with a null buffer.  */
+TEST_CASE_FIXTURE (elf_fixture,
+		   "elf_load reports a name table it cannot buffer")
+{
+  elf_layout l;
+  bytes b = build_elf (&l);
+  put32 (b, l.sh_str + offsetof (Elf32_Shdr, sh_size), 0xfffffff0);
+  elf_on_disk file (b);
+
+  std::string text;
+  int res;
+  {
+    address_space_cap cap (128 * 1024 * 1024);
+    res = load (file.name (), 1, &text);
+  }
+
+  CHECK (res == -1);
+  CHECK (text.find ("File read error") != std::string::npos);
+}
+
+/* A section header may name a size no allocation can satisfy, and the
+   loader answers with a read error rather than dereferencing null.  The
+   size below asks calloc for four gigabytes, which the capped address
+   space refuses.  */
+TEST_CASE_FIXTURE (elf_fixture, "elf_load reports a section it cannot buffer")
+{
+  elf_layout l;
+  bytes b = build_elf (&l);
+  put32 (b, l.sh_text + offsetof (Elf32_Shdr, sh_size), 0xfffffffc);
+  elf_on_disk file (b);
+
+  std::string text;
+  int res;
+  {
+    address_space_cap cap (128 * 1024 * 1024);
+    res = load (file.name (), 1, &text);
+  }
+
+  CHECK (res == -1);
+  CHECK (text.find ("File read error") != std::string::npos);
 }
 
 /* read_elf_header assigns efile.bswap on every load rather than only setting
