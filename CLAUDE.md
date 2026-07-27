@@ -231,6 +231,15 @@ tree is C++20 for this.
   implementation in a global function reached by a static template call, not by a
   pointer and not inlined.
 
+- **A host-speed claim needs interleaved runs.** Build the two binaries to fixed
+  paths first, then alternate them run by run. Timing one build in a block and
+  the other in a block afterwards lets host drift exceed the effect, and the
+  reading survives repetition, so it looks solid rather than noisy: that method
+  produced a phantom 5% regression in `riscv.cc` which a proper A/B showed to be
+  nothing. Simulated timing is exact and needs no such care, so a fingerprint
+  from `./waf test-run --perf` is trustworthy as it stands; only host wall clock
+  is not.
+
 ## Reference documentation
 
 `ref/` holds offline reference manuals for the ISAs and peripherals SIS

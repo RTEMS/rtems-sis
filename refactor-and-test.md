@@ -253,14 +253,11 @@ all of the concepts; each test file holds a small `TestEnv` per subsystem.
    selected that format. Rule 6 closes them, with the commonest case chosen
    from the case counts six RTEMS binaries produce rather than guessed.
 
-   **Measure a change to this file by interleaving the two binaries, never by
-   timing one build and then the other.** Timing the restructured tree in one
-   block and the base in another made it look 5% slower on `crypt01`, and the
-   reading survived three runs each, so it looked solid. Building both to
-   fixed paths and alternating `base, new, base, new` showed no difference at
-   all (65.0 s against 64.8 s median). The host drifts by more than the effect
-   over the minutes a rebuild takes, and a sequential A/B attributes that
-   drift to the change.
+   Restructuring them first looked 5% slower on `crypt01` and was reverted on
+   that reading. The measurement was the fault: sequential blocks rather than
+   the interleaved A/B the method section requires. Alternating two prebuilt
+   binaries showed no difference at all, 65.0 s against 64.8 s median, so the
+   restructuring went back in.
 
    Eight bugs so far, each confirmed against `ref/` before the test:
 
@@ -433,8 +430,14 @@ Two different properties, each held where it has signal.
   `tests/exe/perf-baseline.txt`.
 - **Host throughput is measured where it is at risk.** That is the memory
   access dispatch step and, later, the decoders. `-O2` build, full
-  `./waf test-run` wall clock (crypt01 dominates), best of three, A/B against
-  the parent commit, and investigate anything worse than 2%.
+  `./waf test-run` wall clock (crypt01 dominates), A/B against the parent
+  commit, and investigate anything worse than 2%. **Build both binaries to
+  fixed paths first, then alternate them run by run.** Timing one build in a
+  block and the other in a block afterwards does not work here: the host
+  drifts by more than 2% over the minutes a rebuild takes, and a sequential
+  A/B hands that drift to whichever build was timed during the slow stretch.
+  It survives repetition, so it looks like a solid reading rather than
+  noise.
 
 The dispatch-style question itself is settled and must not be re-benchmarked. A
 micro-benchmark and an end-to-end crypt01 run compared three styles for the hot
