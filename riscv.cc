@@ -2222,7 +2222,7 @@ riscv_gdb_get_reg (char *buf)
    out.  */
 static const struct
 {
-  char name[9];
+  const char *name;
   uint32 csr;
 } wtbl[] = { { "mstatus", CSR_MSTATUS },   { "mtvec", CSR_MTVEC },
 	     { "mepc", CSR_MEPC },	   { "mcause", CSR_MCAUSE },

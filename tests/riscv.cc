@@ -2942,8 +2942,11 @@ TEST_CASE_FIXTURE (riscv_fixture, "RISC-V a trap return is recorded too")
 
 TEST_CASE_FIXTURE (riscv_fixture, "RISC-V a wait for interrupt syncs the host")
 {
-  /* With the run tied to real time the core catches up with the host clock
-     before it goes to sleep, rather than after the interrupt wakes it.  */
+  /* With the run tied to real time a wait for interrupt takes the host
+     clock sync on its way into power-down.  The sync itself only sleeps
+     when the simulation has run ahead of the wall clock, which it has not
+     here, so what this pins is that wfi still parks the core with the tie
+     to real time in place.  */
   int saved = sync_rt;
 
   sync_rt = 1;
