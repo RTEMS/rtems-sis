@@ -66,15 +66,18 @@ against real descriptors the way `tests/sisio.cc` does.
 ## Where the tree stands
 
 Measured with `./waf configure --enable-coverage && ./waf`, branch metric,
-1917 of 5891 arcs (32%). The totals move as headers join the filter and as
+3291 of 5208 arcs (63%). The totals move as headers join the filter and as
 duplicated and dead code is removed, so compare per file rather than against
-an older total.
+an older total. Read the per file rows of the gcovr report, not its `TOTAL`
+line: that row counts the standard library headers the build pulls in, whose
+arc counts move between runs for reasons that have nothing to do with this
+tree.
 
 | Area | Arcs | Taken |
 |---|---|---|
 | `riscv.cc` | 1106 | 1106 |
-| `func.cc` | 603 | 30 |
-| `grlib.cc` | 384 | 301 |
+| `func.cc` | 603 | 38 |
+| `grlib.cc` | 378 | 376 |
 | `grspw.cc`, `gr1553.cc`, `memscrub.cc`, `tap.cc` | 507 | 0 |
 | `sis.cc`, `remote.cc`, `interf.cc` | 547 | 0 |
 | `leon2.cc`, `leon3.cc`, `gr740.cc`, `rv32.cc` | 284 | 0 |
@@ -301,7 +304,7 @@ all of the concepts; each test file holds a small `TestEnv` per subsystem.
    from switches whose scrutinee range the compiler could not see. Expect
    the restructure to pay only where the range is not already obvious.
 
-2. `grlib.cc` and the GRLIB cores. **In progress, 301 of 384.** One file
+2. `grlib.cc` and the GRLIB cores. **376 of 378, two arcs left.** One file
    behind four boards. `tests/grlibcore.h` is the harness: it drives one
    `struct grlib_ipcore` through its own `read`, `write`, `init` and `reset`
    with no bus, because `grlib.cc` cannot unregister a core and does not
@@ -380,7 +383,31 @@ all of the concepts; each test file holds a small `TestEnv` per subsystem.
    `ev1 = ev1->nxt` unconditionally, skipping the node it just spliced in,
    so two consecutive matching entries leave the second queued. Fixing it
    changes the event queue, so it wants its own change with the fingerprint
-   run attached rather than folding into a coverage commit.
+   run attached rather than folding into a coverage commit. **Fixed**, with
+   `tests/event.cc` written first and shown to fail without it. The end to
+   end runs report the same 234 passes and an unchanged fingerprint, so the
+   stale entries were latent in those binaries rather than firing.
+
+   **Two arcs are left in `grlib.cc` and both are honest gaps, not
+   oversights.** `grlib_apb_bus`'s test for a bridge that no board has
+   configured yet is only reachable before any case in the whole binary has
+   added one, and `tests/grlibcores.cc` adds both. `apbuart_flush`'s test
+   for a port that closed with bytes still queued needs `porta` closed,
+   which is process global and whose `fout` other files still write through;
+   covering it would trade one arc for exactly the cross-file fragility this
+   round spent its time removing. Leave them.
+
+   **Three unreachable branches were removed rather than documented.** An
+   agent reported the first as "dead by construction, not a defect", which
+   is true and is also a permanent hole in a 100% target, so the branch went
+   instead: `grlib_read` tested a result variable every assigning path had
+   already returned on. The other two became asserts the way the exhaustive
+   switches did, the PLIC read ladder's last arm and the timer callback's
+   test of its own enable bit. Note the second only became unreachable when
+   `remove_event` was fixed: before that, `gpt_reset` removed every other
+   queued callback, so one could survive a reset and arrive at a timer whose
+   enable bit was clear. The asserts are live in the shipping build, which
+   carries no `NDEBUG`, and stay quiet across all 234 end to end runs.
 3. `leon2.cc`, `leon3.cc`, `gr740.cc`, `rv32.cc`. Thin once `grlib.cc` and the
    shared port module are done.
 4. `func.cc`, `elf.cc`, `interf.cc`, `remote.cc`, `sis.cc`. Simulator
