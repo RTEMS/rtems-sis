@@ -2835,3 +2835,119 @@ TEST_CASE_FIXTURE (riscv_fixture, "RISC-V an all zero word is not a load")
      catches it as the illegal instruction the specification reserves.  */
   CHECK (exec (0) == TRAP_ILLEG);
 }
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the unsigned compare of a register")
+{
+  /* sltu compares without a sign, so the value with the top bit set is the
+     larger one.  slt reads the same pair as signed and answers the other
+     way, which is the whole difference between them.  */
+  set (1, 1);
+  set (2, 0xffffffff);
+
+  CHECK (exec (rtype (OP_REG, 3, SLTU, 1, 2, 0)) == 0);
+  CHECK (get (3) == 1);
+  CHECK (exec (rtype (OP_REG, 3, SLTU, 2, 1, 0)) == 0);
+  CHECK (get (3) == 0);
+
+  CHECK (exec (rtype (OP_REG, 3, SLT, 1, 2, 0)) == 0);
+  CHECK (get (3) == 0);
+  CHECK (exec (rtype (OP_REG, 3, SLT, 2, 1, 0)) == 0);
+  CHECK (get (3) == 1);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the M extension divides and remains")
+{
+  /* Chapter 13 fixes what division by zero and what the one overflowing
+     case answer, so neither raises an exception.  The dividend of the
+     overflow is the most negative number and the divisor is minus one.  */
+  const uint32 minint = 0x80000000;
+
+  set (1, minint);
+  set (2, 0xffffffff);
+
+  CHECK (exec (rtype (OP_REG, 3, 4, 1, 2, 1)) == 0); /* div */
+  CHECK (get (3) == minint);
+  CHECK (exec (rtype (OP_REG, 3, 6, 1, 2, 1)) == 0); /* rem */
+  CHECK (get (3) == 0);
+
+  /* The most negative dividend by anything else is an ordinary division,
+     which is the other side of that test.  */
+  set (2, 2);
+  CHECK (exec (rtype (OP_REG, 3, 4, 1, 2, 1)) == 0);
+  CHECK (get (3) == 0xc0000000);
+  CHECK (exec (rtype (OP_REG, 3, 6, 1, 2, 1)) == 0);
+  CHECK (get (3) == 0);
+
+  /* Division by zero answers all ones for the signed and the unsigned
+     quotient, and the dividend for either remainder.  */
+  set (1, 17);
+  set (2, 0);
+  CHECK (exec (rtype (OP_REG, 3, 4, 1, 2, 1)) == 0);
+  CHECK (get (3) == 0xffffffff);
+  CHECK (exec (rtype (OP_REG, 3, 5, 1, 2, 1)) == 0); /* divu */
+  CHECK (get (3) == 0xffffffff);
+  CHECK (exec (rtype (OP_REG, 3, 6, 1, 2, 1)) == 0);
+  CHECK (get (3) == 17);
+  CHECK (exec (rtype (OP_REG, 3, 7, 1, 2, 1)) == 0); /* remu */
+  CHECK (get (3) == 17);
+
+  /* And the ordinary unsigned pair, where the operands are read without a
+     sign.  */
+  set (1, 0xfffffffe);
+  set (2, 2);
+  CHECK (exec (rtype (OP_REG, 3, 5, 1, 2, 1)) == 0);
+  CHECK (get (3) == 0x7fffffff);
+  CHECK (exec (rtype (OP_REG, 3, 7, 1, 2, 1)) == 0);
+  CHECK (get (3) == 0);
+
+  /* A funct7 belonging to no group of the register format is illegal.  */
+  CHECK (exec (rtype (OP_REG, 3, 0, 1, 2, 2)) == TRAP_ILLEG);
+  CHECK (exec (rtype (OP_REG, 3, 0, 1, 2, 3)) == TRAP_ILLEG);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V a trap return is recorded too")
+{
+  coverage_on cov;
+
+  sregs[0].pc = 0x200;
+  sregs[0].npc = 0x204;
+  sregs[0].epc = 0x300;
+  sregs[0].mpp = 3;
+
+  CHECK (exec (itype (OP_SYS, 0, 0, 0, 0x302)) == 0); /* mret */
+  CHECK (sregs[0].pc == 0x300);
+  CHECK ((cov.at (0x200) & COV_JMP) == COV_JMP);
+  CHECK ((cov.at (0x300) & COV_START) == COV_START);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V a wait for interrupt syncs the host")
+{
+  /* With the run tied to real time the core catches up with the host clock
+     before it goes to sleep, rather than after the interrupt wakes it.  */
+  int saved = sync_rt;
+
+  sync_rt = 1;
+  CHECK (exec (itype (OP_SYS, 0, 0, 0, 0x105)) == 0); /* wfi */
+  CHECK (sregs[0].pwd_mode == 1);
+
+  sync_rt = saved;
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V a watchpoint stops a float load")
+{
+  uint32 saved = ebase.wprnum;
+
+  ebase.wprnum = 1;
+  ebase.wprs[0] = 0x2000;
+  ebase.wprm[0] = 3;
+  ebase.wphit = 0;
+
+  sis_tests::flatmem_poke (0x2000, 0x3f800000);
+  set (1, 0x2000);
+  CHECK (exec (itype (OP_FLOAD, 3, 2, 1, 0)) == WPT_TRAP);
+  CHECK (ebase.wphit != 0);
+  CHECK (fsi (3) == 0);
+
+  ebase.wprnum = saved;
+  ebase.wphit = 0;
+}
