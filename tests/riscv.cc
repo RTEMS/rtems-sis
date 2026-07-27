@@ -3192,3 +3192,35 @@ TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the rounding modes reach the host")
   set (1, 0);
   CHECK (exec (itype (OP_SYS, 0, CSRRW, 1, CSR_FRM)) == 0);
 }
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V a jump to zero stops the run")
+{
+  /* A call through a null function pointer would otherwise run whatever
+     sits at address zero.  The simulator stops instead, which is what the
+     shell reports as a null pointer hit.  */
+  sregs[0].pc = 0x200;
+  sregs[0].npc = 0x204;
+  CHECK (exec (jtype (1, -0x200)) == NULL_TRAP);
+
+  sregs[0].pc = 0x200;
+  sregs[0].npc = 0x204;
+  set (5, 0);
+  CHECK (exec (itype (OP_JALR, 1, 0, 5, 0)) == NULL_TRAP);
+
+  /* The compressed jumps carry the same guard, the direct ones and the two
+     register forms alike.  A program built for the compressed set reaches a
+     null function pointer through c.jalr and through nothing else.  */
+  sregs[0].pc = 0x200;
+  sregs[0].npc = 0x202;
+  set (15, 0);
+  CHECK (exec (0x8782) == NULL_TRAP); /* c.jr a5 */
+
+  sregs[0].pc = 0x200;
+  sregs[0].npc = 0x202;
+  CHECK (exec (0x9782) == NULL_TRAP); /* c.jalr a5 */
+  CHECK (get (1) == 0x202);
+
+  sregs[0].pc = 0x200;
+  sregs[0].npc = 0x202;
+  CHECK (exec (0xb501) == NULL_TRAP); /* c.j -0x200 */
+}
