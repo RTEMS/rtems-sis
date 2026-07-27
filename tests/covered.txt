@@ -21,6 +21,7 @@ grspw.cc
 help.cc
 interf.cc
 riscv.cc
+sis.cc
 sisio.cc
 sparc.cc
 uartport.cc
