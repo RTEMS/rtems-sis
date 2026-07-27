@@ -237,7 +237,33 @@ all of the concepts; each test file holds a small `TestEnv` per subsystem.
    before its swap, so a store charges its hold for the sibling register.
    It is timing only, not a wrong result.
 
-   Then `riscv.cc`, which has the same shape and can reuse the flat memory.
+   Then `riscv.cc`. **In progress**, at 841 of 1140 arcs. Same shape as the
+   SPARC core and it reuses the flat memory, which now swaps a sub-word
+   address by `arch->bswap` rather than by the host so one window serves
+   both.
+
+   Five bugs so far, each confirmed against `ref/` before the test:
+
+   - **A divide by zero reached the host divide instruction**, so a guest
+     program doing something the M extension explicitly defines killed the
+     simulator with SIGFPE. The signed overflow was undefined in C for the
+     same reason.
+   - **`mulh` and `mulhsu` widened the unsigned register through `int64`**,
+     which zero extends, so both returned the unsigned product.
+   - **`fclass` reported every value which is not a number as signalling**,
+     which the code marked as unfinished.
+   - **A debugger write of a floating point register indexed the file flat**
+     while the read side indexes the low half of the double register, so a
+     write of `f1` landed in the boxing half of `f0`.
+   - Two dead switch defaults in the arithmetic groups.
+
+   One gap found and left alone, because closing it is protocol visible:
+   `remote.cc` handles `g` and `P` but not `p`, so a debugger can **write** a
+   control register through `P` and never read one back. That also makes the
+   control register branch of `riscv_get_regi` unreachable, which is the one
+   thing standing between the register access path and full coverage. Decide
+   whether the `g` packet should carry the control registers before finishing
+   that file.
    Its decoder has been through the exhaustive switch restructure already,
    and it is worth knowing that **it bought no speed there**: the RISC-V
    fields are masked to their width at extraction, so the compiler already

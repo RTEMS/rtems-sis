@@ -116,9 +116,15 @@ struct sparc_fixture
   const struct memsys *saved_ms;
   const struct cpu_arch *saved_arch;
 
+  /* The flat memory installs no interrupt acknowledge, so a case which sets
+     one would otherwise leave it pointing into this file for every case
+     after it.  */
+  void (*saved_intack) (int32, int32);
+
   sparc_fixture ()
       : saved_cputype (cputype), saved_archtype (archtype),
-	saved_verbose (sis_verbose), saved_ms (ms), saved_arch (arch)
+	saved_verbose (sis_verbose), saved_ms (ms), saved_arch (arch),
+	saved_intack (sregs[0].intack)
   {
     cputype = CPU_ERC32;
     archtype = CPU_SPARC;
@@ -164,6 +170,7 @@ struct sparc_fixture
     archtype = saved_archtype;
     ms = saved_ms;
     arch = saved_arch;
+    sregs[0].intack = saved_intack;
   }
 
   /* Execute one instruction word.  Returns the trap it raised, or zero.  */

@@ -140,9 +140,15 @@ struct riscv_fixture
   const struct memsys *saved_ms;
   const struct cpu_arch *saved_arch;
 
+  /* The flat memory installs no interrupt acknowledge, so a case which sets
+     one would otherwise leave it pointing into this file for every case
+     after it.  */
+  void (*saved_intack) (int32, int32);
+
   riscv_fixture ()
       : saved_cputype (cputype), saved_archtype (archtype),
-	saved_verbose (sis_verbose), saved_ms (ms), saved_arch (arch)
+	saved_verbose (sis_verbose), saved_ms (ms), saved_arch (arch),
+	saved_intack (sregs[0].intack)
   {
     cputype = CPU_RISCV;
     archtype = CPU_RISCV;
@@ -183,6 +189,7 @@ struct riscv_fixture
     archtype = saved_archtype;
     ms = saved_ms;
     arch = saved_arch;
+    sregs[0].intack = saved_intack;
   }
 
   /* Execute one instruction word.  Returns the trap it raised, or zero.  */
@@ -2011,4 +2018,75 @@ TEST_CASE_FIXTURE (riscv_fixture,
     }
 
   CHECK (!cap.str ().empty ());
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the disassembler names its operands")
+{
+  /* The sweep above only proves the decode tables were reached.  These check
+     what came out: the register a field selects, under the ABI names of the
+     unprivileged specification, and the value of each immediate form.  The
+     mnemonic is left out because its spelling is the disassembler's own,
+     while the operands are the instruction's.  */
+  uint32 addr = 0x200;
+
+  auto disas = [&] (uint32 inst)
+    {
+      stdout_capture cap;
+
+      sis_tests::flatmem_poke (addr, inst);
+      arch->disas (addr);
+      return cap.str ();
+    };
+
+  /* x10 and x11 are a0 and a1, x2 is sp, x1 is ra.  */
+  CHECK (disas (rtype (OP_REG, 10, ADD, 11, 12, 0)).find ("a0,a1,a2") !=
+	 std::string::npos);
+
+  /* A signed immediate is printed as a signed decimal.  */
+  CHECK (disas (itype (OP_IMM, 10, ADD, 11, -5)).find ("a0,a1,-5") !=
+	 std::string::npos);
+  CHECK (disas (itype (OP_IMM, 10, ADD, 11, 5)).find ("a0,a1,5") !=
+	 std::string::npos);
+
+  /* A load and a store name the base register in parentheses, and the store
+     takes its offset from the two halves of the format.  */
+  CHECK (disas (itype (OP_LOAD, 10, LW, 11, 8)).find ("a0,8(a1)") !=
+	 std::string::npos);
+  CHECK (disas (stype (OP_STORE, SW, 11, 10, 8)).find ("a0,8(a1)") !=
+	 std::string::npos);
+  CHECK (disas (stype (OP_STORE, SW, 11, 10, -8)).find ("a0,-8(a1)") !=
+	 std::string::npos);
+
+  /* A branch and a jump print the address they reach, not the
+     displacement.  The two are padded differently, so a case looks for the
+     value rather than for one spelling of it.  */
+  auto reaches = [] (const std::string &text, const std::string &hex)
+    {
+      std::string padded = "0x" + std::string (8 - hex.size (), '0') + hex;
+      std::string bare = "0x" + hex;
+
+      return text.find (padded) != std::string::npos ||
+	     text.find (bare) != std::string::npos;
+    };
+
+  CHECK (reaches (disas (btype (B_BNE, 10, 11, 0x40)), "240"));
+  CHECK (reaches (disas (jtype (1, 0x40)), "240"));
+  CHECK (reaches (disas (jtype (0, 0x40)), "240"));
+  CHECK (reaches (disas (btype (B_BNE, 10, 11, -0x40)), "1c0"));
+
+  /* The upper immediate is printed as the value it loads.  */
+  CHECK (disas (utype (OP_LUI, 10, 0xabcde000)).find ("a0") !=
+	 std::string::npos);
+
+  /* A floating point register uses its own name table.  */
+  CHECK (disas (fpu (F_ADD, FMT_S, 10, 0, 11, 12)).find ("fa0,fa1,fa2") !=
+	 std::string::npos);
+
+  /* A control register instruction names the register, not its number.  */
+  CHECK (disas (itype (OP_SYS, 10, CSRRS, 11, CSR_MSTATUS)).find ("mstatus") !=
+	 std::string::npos);
+
+  /* A compressed instruction names the same registers as its wide form.  */
+  CHECK (disas (0x4588 | 0xffff0000).find ("a0,8(a1)") != std::string::npos);
+  CHECK (disas (0x87ba | 0xffff0000).find ("a5,a4") != std::string::npos);
 }
