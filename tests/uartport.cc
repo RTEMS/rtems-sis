@@ -405,4 +405,49 @@ TEST_CASE ("uart_port_close does nothing for a port never attached")
   CHECK (port.open == 0);
 }
 
+TEST_CASE ("uart_port_open forgets the attachment before it")
+{
+  saved_options opts;
+  temp_device dev;
+  REQUIRE (dev.fd >= 0);
+
+  struct uart_port port = UART_PORT_INIT;
+
+  dumbio = 1;
+  uart_port_open (&port, "A", dev.path, 0);
+  REQUIRE (port.open == 1);
+
+  /* Attaching the same port to a device that cannot be opened leaves it
+     unattached.  Keeping the flag of the attachment before it would pair an
+     open port with the null stream the failed attempt leaves behind, and
+     the close below would hand that null to fclose.  */
+  uart_port_open (&port, "A", "/nonexistent/sis-uartport-device", 0);
+
+  CHECK (port.open == 0);
+  CHECK (port.fin == NULL);
+
+  uart_port_close (&port);
+}
+
+TEST_CASE ("uart_port_close releases a device only once")
+{
+  saved_options opts;
+  temp_device dev;
+  REQUIRE (dev.fd >= 0);
+
+  struct uart_port port = UART_PORT_INIT;
+
+  dumbio = 1;
+  uart_port_open (&port, "A", dev.path, 0);
+  REQUIRE (port.open == 1);
+
+  /* The second close has to be a no-op.  A board closes its ports when the
+     simulation ends, and the same port can be closed again after that.  */
+  uart_port_close (&port);
+  CHECK (port.open == 0);
+
+  uart_port_close (&port);
+  CHECK (port.open == 0);
+}
+
 #endif /* !_WIN32 */

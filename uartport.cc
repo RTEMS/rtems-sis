@@ -133,7 +133,7 @@ uart_port_close (struct uart_port *port)
      The boards read this flag to decide whether the port can still carry a
      character, so a closed port has to report itself shut.  */
   port->open = 0;
-  if (port->fin != NULL && port->fin != stdin)
+  if (port->fin != stdin)
     fclose (port->fin);
 }
 
