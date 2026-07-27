@@ -11,6 +11,8 @@
 
 #include "doctest.h"
 
+#include <stddef.h>
+
 #include "sis.h"
 
 #include "cpumem.h"
@@ -37,6 +39,42 @@ other_event (int32 arg)
 {
   (void) arg;
   nfired++;
+}
+
+/* Walks both lists and reports whether every cell of evbuf appears at most
+   once across the two of them.  A cell on the queue and the free list at the
+   same time is the corruption which makes a removal link a cell to itself and
+   the next insertion walk forever, so the cases check the invariant rather
+   than hanging when it breaks.  The walks are bounded by MAX_EVENT, so a
+   cycle is reported instead of spun on.  */
+bool
+queue_is_well_formed ()
+{
+  int seen[MAX_EVENT];
+  int steps;
+
+  for (int i = 0; i < MAX_EVENT; i++)
+    seen[i] = 0;
+
+  const struct evcell *ev = ebase.eq.nxt;
+  for (steps = 0; ev != NULL && steps <= MAX_EVENT; steps++)
+    {
+      if (++seen[ev - evbuf] > 1)
+	return false;
+      ev = ev->nxt;
+    }
+  if (steps > MAX_EVENT)
+    return false;
+
+  ev = ebase.freeq;
+  for (steps = 0; ev != NULL && steps <= MAX_EVENT; steps++)
+    {
+      if (++seen[ev - evbuf] > 1)
+	return false;
+      ev = ev->nxt;
+    }
+
+  return steps <= MAX_EVENT;
 }
 
 struct event_fixture
@@ -100,30 +138,41 @@ TEST_CASE_FIXTURE (event_fixture, "removing an event takes it off the queue")
 }
 
 TEST_CASE_FIXTURE (event_fixture,
-		   "(known defect) removing leaves the entry behind the one "
-		   "it took out")
+		   "removing takes out the entry behind the one it took out")
 {
   /* Two entries for the same callback and argument, queued next to each
-     other.  A device which arms the same work twice and then turns off
-     should be left with neither, and is left with one: the walk steps on
-     after unlinking, past the entry which has just moved up.
-
-     The obvious repair hangs, because advance_time frees the firing cell
-     before running its callback, so a cell can be on the event queue and
-     the free list at once and reaching it twice links it to itself.  The
-     ordering has to be fixed first.  */
+     other.  A device which arms the same work twice and then turns off has
+     to be left with neither.  The entry behind the one removed moves up into
+     its place, so a walk which steps on after unlinking passes over it.  */
   event (count_event, 7, 10);
   event (count_event, 7, 20);
 
   remove_event (count_event, 7);
+  CHECK (queue_is_well_formed ());
   advance_time (30);
 
-  CHECK (nfired == 1);
+  CHECK (nfired == 0);
+  CHECK (queue_is_well_formed ());
 }
 
-TEST_CASE_FIXTURE (
-    event_fixture,
-    "(known defect) a negative argument removes every other entry")
+TEST_CASE_FIXTURE (event_fixture,
+		   "a run of entries is removed to the last one")
+{
+  /* Every entry names the same callback, so the queue has to come back
+     holding none of them however long the run is.  */
+  for (int i = 0; i < 8; i++)
+    event (count_event, 7, 10 + i);
+
+  remove_event (count_event, 7);
+  CHECK (queue_is_well_formed ());
+  advance_time (100);
+
+  CHECK (nfired == 0);
+  CHECK (queue_is_well_formed ());
+}
+
+TEST_CASE_FIXTURE (event_fixture,
+		   "a negative argument removes every entry for the callback")
 {
   /* A negative argument names no single entry, so it takes all of them for
      that callback and leaves the others standing.  */
@@ -133,11 +182,12 @@ TEST_CASE_FIXTURE (
   event (count_event, 4, 40);
 
   remove_event (count_event, -1);
+  CHECK (queue_is_well_formed ());
   advance_time (50);
 
-  /* Two of the three named entries survive for the same reason as above:
-     only every other match is taken out.  */
-  CHECK (nfired == 2);
+  /* Only the entry naming the other callback is left.  */
+  CHECK (nfired == 1);
+  CHECK (queue_is_well_formed ());
 }
 
 TEST_CASE_FIXTURE (event_fixture,

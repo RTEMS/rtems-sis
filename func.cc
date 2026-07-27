@@ -24,6 +24,7 @@
 #ifndef _WIN32
 #include <unistd.h>
 #endif
+#include <assert.h>
 #include <signal.h>
 #include <string.h>
 #include <stdio.h>
@@ -949,16 +950,19 @@ remove_event (void (*cfunc) (int32), int32 arg)
 	  evdel->nxt = ebase.freeq;
 	  ebase.freeq = evdel;
 	}
-      /* Stepping on unconditionally carries the walk past the entry which
-	 has just taken the removed one's place, so a second entry naming the
-	 same callback stays queued.  That is wrong, and the obvious repair,
-	 stepping on only when nothing was taken out, hangs: advance_time
-	 puts the firing cell on the free list before it runs the callback
-	 (see the loop there), so a cell can sit on both lists at once, and
-	 reaching it a second time links it to itself.  Fixing the removal
-	 needs that ordering fixed first.  */
-      ev1 = ev1->nxt;
+      else
+	{
+	  /* Step on only when nothing was taken out.  The entry behind the
+	     one just removed has moved up into its place, so advancing here
+	     as well would walk past it and leave a second entry naming the
+	     same callback queued.  */
+	  ev1 = ev1->nxt;
+	}
     }
+
+  /* The end of time is queued by init_event and matches no caller's
+     callback, so the queue still holds it and this is the head.  */
+  assert (ebase.eq.nxt != NULL);
   ebase.evtime = ebase.eq.nxt->time;
 }
 
