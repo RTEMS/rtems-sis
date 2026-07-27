@@ -39,6 +39,7 @@
 #include <netdb.h>
 #endif
 #include <fcntl.h>
+#include "getdelim.h"
 #include "sis.h"
 #include "sisio.h"
 #include <inttypes.h>
@@ -96,7 +97,6 @@ static int symcount = 0;
 static int batch (struct pstate *sregs, char *fname);
 static void init_event (void);
 static void disp_mem (uint32 addr, uint32 len);
-static ssize_t mygetline (char **lineptr, size_t *n, FILE *stream);
 static void symprint ();
 static uint32 symtoaddr (char *s);
 
@@ -113,7 +113,7 @@ batch (struct pstate *sregs, char *fname)
       fprintf (stderr, "couldn't open batch file %s\n", fname);
       return 0;
     }
-  while (mygetline (&lbuf, &len, fp) > -1)
+  while (sis::GetLine<sis::HostAlloc> (&lbuf, &len, fp) > -1)
     {
       slen = strlen (lbuf);
       if (slen && (lbuf[slen - 1] == '\n'))
@@ -1455,65 +1455,6 @@ get_time (void)
   auto now = std::chrono::system_clock::now ().time_since_epoch ();
 
   return std::chrono::duration<double> (now).count ();
-}
-
-/* Local version of getline() since not all systems supports it */
-
-static const int line_size = 128;
-
-static ssize_t
-mygetdelim (char **lineptr, size_t *n, int delim, FILE *stream)
-{
-  int indx = 0;
-  int c;
-
-  /* Sanity checks.  */
-  if (lineptr == NULL || n == NULL || stream == NULL)
-    return -1;
-
-  /* Allocate the line the first time.  */
-  if (*lineptr == NULL)
-    {
-      *lineptr = (char *) malloc (line_size);
-      if (*lineptr == NULL)
-	return -1;
-      *n = line_size;
-    }
-
-  /* Clear the line.  */
-  memset (*lineptr, '\0', *n);
-
-  while ((c = getc (stream)) != EOF)
-    {
-      /* Check if more memory is needed.  */
-      if (indx >= *n)
-	{
-	  *lineptr = (char *) realloc (*lineptr, *n + line_size);
-	  if (*lineptr == NULL)
-	    {
-	      return -1;
-	    }
-	  /* Clear the rest of the line.  */
-	  memset (*lineptr + *n, '\0', line_size);
-	  *n += line_size;
-	}
-
-      /* Push the result in the line.  */
-      (*lineptr)[indx++] = c;
-
-      /* Bail out.  */
-      if (c == delim)
-	{
-	  break;
-	}
-    }
-  return (c == EOF) ? -1 : indx;
-}
-
-static ssize_t
-mygetline (char **lineptr, size_t *n, FILE *stream)
-{
-  return mygetdelim (lineptr, n, '\n', stream);
 }
 
 /* Coverage support */
