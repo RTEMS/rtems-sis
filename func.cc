@@ -886,7 +886,8 @@ dis_mem (uint32 addr, uint32 len)
       else
 	printf (" %08x:  %08x  ", addr, data);
       print_insn_sis (addr);
-      if (i >= 0xfffffffc)
+      /* Stop rather than wrap past the top of the address space.  */
+      if (addr >= 0xfffffffc)
 	break;
       printf ("\n");
       if ((cputype == CPU_RISCV) && ((data & 3) != 3))
