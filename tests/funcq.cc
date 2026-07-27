@@ -51,6 +51,21 @@
 #include <stdio.h>
 #include <string.h>
 #include <string>
+#include <unistd.h>
+
+namespace
+{
+
+/* A scratch path of its own for each process.  Several builds of the suite
+   run at once during development, and a fixed name let one of them remove
+   the file another had just written and was about to open.  */
+std::string
+scratch_path (const char *stem)
+{
+  return std::string ("/tmp/") + stem + "-" + std::to_string (getpid ());
+}
+
+}
 
 using sis_tests::stdout_capture;
 
@@ -1165,7 +1180,7 @@ TEST_CASE_FIXTURE (func_fixture,
 		   "(current behaviour, doc/commands.md does not say a "
 		   "batch file needs one)")
 {
-  std::string path = "/tmp/sis-funcq-batch-test";
+  std::string path = scratch_path ("sis-funcq-batch-test");
   FILE *fp = fopen (path.c_str (), "w");
   REQUIRE (fp != NULL);
   fputs ("debug 5\n", fp);
@@ -2212,7 +2227,7 @@ TEST_CASE_FIXTURE (func_fixture, "cov_save writes a .cov file for a "
   ebase.ramstart = 0;
   sregs[0].pc = 0;
 
-  std::string base = "/tmp/sis-funcq-cov-test";
+  std::string base = scratch_path ("sis-funcq-cov-test");
   std::string path = base + ".cov";
   remove (path.c_str ());
 
@@ -2255,7 +2270,7 @@ TEST_CASE_FIXTURE (
   ebase.ramstart = 0;
   sregs[0].pc = w3;
 
-  std::string base = "/tmp/sis-funcq-cov-test2";
+  std::string base = scratch_path ("sis-funcq-cov-test2");
   std::string path = base + ".cov";
   remove (path.c_str ());
 
