@@ -44,19 +44,10 @@
    rt_transfer, rt_mode_code and rt_event_log are file-static and reached
    only through peer_bc_step, which calls rt_transfer with exactly three
    (rx, bcast) pairs: (0,0), (1,0), (1,1) -- never (0,1) -- and rt_mode_code
-   with exactly two (mc, bcast) pairs: (17,0), (1,0). Several branches these
-   functions guard are therefore unreachable from any test that does not
-   call the static functions directly, which no header exposes:
-
-     - rt_transfer's "bcast && !rx" guard (gr1553.cc:429, "a broadcast
-       transmit is not a valid command").
-     - rt_mode_code_shift's case labels other than 1 and 17, and its
-       default (gr1553.cc:476-488).
-     - rt_mode_code's "shift < 0" guard (gr1553.cc:508) and its entire
-       "bcast" block (gr1553.cc:511-518), since bcast is always 0.
-
-   This is why gr1553.cc does not reach 100% branch coverage and is not
-   listed in tests/covered.txt; see the commit message for the numbers.  */
+   with exactly two mode codes, 17 and 1, neither broadcast. The guards for
+   the combinations that cannot occur (a broadcast transmit, a mode code
+   with no control field, the broadcast fields of table 326) were dead code
+   and are now asserts, so what is left is reachable from these cases.  */
 
 #include "doctest.h"
 #include "support.h"
@@ -243,35 +234,24 @@ TEST_CASE_FIXTURE (gr1553_fixture,
      (SB, 3:2), Synchronize with data word (SD, 5:4) and its broadcast (SDB,
      7:6), and Transmitter shutdown (TS, 9:8) and its broadcast (TSB, 11:10)
      reset to '01' (legal, not logged); every other mode code resets to '00'
-     (illegal).  gr1553_reset (gr1553.cc:596-600) sets this to 0x00000555,
+     (illegal).  gr1553_reset (gr1553.cc:578-582) sets this to 0x00000555,
      which is exactly that pattern.  */
   CHECK (read (RTMCCTL) == 0x00000555);
 
   /* Table 321 (p266): SYS (bit 15), SYDS (bit 14) and BRS (bit 13) reset to
-     '1'.  gr1553_reset (gr1553.cc:602-603) sets RTCFG to 0x0000E000, which
-     is exactly those three bits -- but table 321 also gives RTADDR (bits
-     5:1) a reset value of 0b11111 (address 31), which gr1553_reset never
-     applies, so RTADDR reads back 0 instead of 31 after reset.  This is a
-     defect against table 321: gr1553.cc's own comment cites the table but
-     only implements two of its three reset fields.  Pinning the current
-     (incomplete) value here, not the documented one.  */
-  CHECK (read (RTCFG) == 0x0000E000);
-  CHECK (((read (RTCFG) >> RTCFG_RTADDR_SHIFT) & 0x1F) == 0);
+     '1', RTADDR (bits 5:1) resets to 0b11111 (address 31), and RTEIS (bit
+     6) and RTEN (bit 0) reset to '0'.  */
+  CHECK (read (RTCFG) == 0x0000E03E);
+  CHECK (((read (RTCFG) >> RTCFG_RTADDR_SHIFT) & 0x1F) == 31);
 
   /* BMSTAT (table 331, p269): bus monitor mode is not implemented (see file
      header); the register is a plain zeroed word like any other unhandled
      offset, not the documented BMSUP/KEYEN pattern.  */
   CHECK (read (BMSTAT) == 0);
 
-  /* Table 328 (p268): RTEVSZ (RT Event log size mask) is documented to
-     reset to 0xFFFFFFFC, a one-entry ring.  gr1553_reset's memset
-     (gr1553.cc:591) zeroes every register uniformly instead, so this
-     reads back 0 -- a mask of all zero bits, which rt_event_log's wrap
-     formula (gr1553.cc:401, "pos & mask | (pos+4) & ~mask") turns into a
-     ring that never wraps at all.  A second reset-default gap alongside
-     RTCFG's above, against the same table category (a fixed field the
-     comment near gr1553.cc:600 does get right for RTMCCTL).  */
-  CHECK (read (RTEVSZ) == 0);
+  /* Table 328 (p268): RTELM (RT Event log size mask) resets to 0xFFFFFFFC,
+     a one-entry ring.  */
+  CHECK (read (RTEVSZ) == 0xFFFFFFFC);
 }
 
 TEST_CASE_FIXTURE (
@@ -287,13 +267,13 @@ TEST_CASE_FIXTURE (
      0x1553.  */
   write (RTCFG, ((RTKEY ^ 1) << 16) | RTCFG_RTEN);
   CHECK ((read (RTSTAT) & 1) == 0);
-  CHECK (read (RTCFG) == 0x0000E000);
+  CHECK (read (RTCFG) == 0x0000E03E);
 }
 
 TEST_CASE_FIXTURE (gr1553_fixture,
 		   "GR1553 BCSTAT and RTSTAT reject a direct write")
 {
-  /* gr1553_write's BCSTAT/RTSTAT case (gr1553.cc:629-632) is a documented
+  /* gr1553_write's BCSTAT/RTSTAT case (gr1553.cc:615-618) is a documented
      no-op: table 311 and table 320 mark both registers read-only.  */
   write (BCSTAT, 0xffffffff);
   CHECK (read (BCSTAT) == BCSUP);
@@ -307,7 +287,7 @@ TEST_CASE_FIXTURE (gr1553_fixture,
 		   "plain register file")
 {
   /* Every offset gr1553_write's switch does not name falls into the
-     default case (gr1553.cc:676-678), a plain read/write register with no
+     default case (gr1553.cc:662-664), a plain read/write register with no
      masking.  HWCFG (table 310, p263) and BCTIMER (table 315, p265) are
      both nominally special (read-only on real hardware) but gr1553.cc does
      not special-case them, so a write round-trips exactly like any other
@@ -327,7 +307,7 @@ TEST_CASE_FIXTURE (gr1553_fixture,
 		   "GR1553 the IRQ register is write-one-to-clear and gated "
 		   "by IMASK")
 {
-  /* gr1553_irq_set (gr1553.cc:208-214) always sets the IRQ bit but only
+  /* gr1553_irq_set (gr1553.cc:209-215) always sets the IRQ bit but only
      raises grlib_set_irq when the same bit is set in IMASK; reach it
      through a completed BC transfer descriptor with IRQN set (table 290,
      bit 27, "always interrupts after transfer").  */
@@ -387,7 +367,7 @@ TEST_CASE_FIXTURE (
 
   /* Descriptor 0: BC-to-RT (TR=0), RT address 4 (the emulated peer),
      subaddress 3, word count 2, no interrupt, slot time 0 (so
-     GR1553_BD_TIME*4 == 0 and bc_step falls back to us=1, gr1553.cc:334-335).
+     GR1553_BD_TIME*4 == 0 and bc_step falls back to us=1, gr1553.cc:335-336).
      */
   sis_tests::flatmem_poke (bd0, 0);
   sis_tests::flatmem_poke (bd0 + 4,
@@ -397,7 +377,7 @@ TEST_CASE_FIXTURE (
   poke16 (buf0 + 2, 41);
 
   /* Descriptor 1: RT-to-BC (TR=1) from subaddress 2, which the emulated
-     peer serves from subaddress 3 incremented by one (gr1553.cc:260-271,
+     peer serves from subaddress 3 incremented by one (gr1553.cc:261-272,
      the file header's documented peer behaviour).  Slot time 10 units of
      4 us (table 290 bits 15:0), so us = 40.  */
   sis_tests::flatmem_poke (bd1, 10);
@@ -420,7 +400,7 @@ TEST_CASE_FIXTURE (
   CHECK (peek16 (buf1 + 2) == 42);
   CHECK (sis_tests::flatmem_peek (bd1 + 12) == 0);
 
-  /* The end-of-list descriptor stops the schedule (gr1553.cc:296-299).  */
+  /* The end-of-list descriptor stops the schedule (gr1553.cc:297-300).  */
   CHECK ((read (BCSTAT) & 0x7) == 0);
   CHECK (read (BCSLOT) == bd_end);
 }
@@ -430,7 +410,7 @@ TEST_CASE_FIXTURE (
     "GR1553 a BC transfer to an unaddressed RT reports no response")
 {
   /* No terminal answers any address but the emulated peer's (4), so the
-     bus controller sees table 292's TFRST 001 (gr1553.cc:249-250, only the
+     bus controller sees table 292's TFRST 001 (gr1553.cc:250-251, only the
      "0 success / 1 no response" pair the emulated peer can produce).  */
   const uint32 bd = 0x100;
 
@@ -452,7 +432,7 @@ TEST_CASE_FIXTURE (
     "transfer generates no bus traffic")
 {
   /* Table 291 WCMC field, table 293: "Word count (0 for 32)"
-     (gr1553.cc:244-245).  */
+     (gr1553.cc:245-246).  */
   const uint32 bd0 = 0x100;
   const uint32 buf0 = 0x1000; /* 32 words, 64 bytes. */
   const uint32 bd1 = 0x110;
@@ -470,16 +450,16 @@ TEST_CASE_FIXTURE (
 
   /* Descriptor 1: a dummy transfer (table 291 bit 31, DUM).  "No bus
      traffic is generated and the transfer succeeds immediately"
-     (gr1553.cc:317-324): bc_transfer is not called at all, so the result
+     (gr1553.cc:318-325): bc_transfer is not called at all, so the result
      word this test pre-seeds with a sentinel is left untouched, and IRQN
-     still logs (comment gr1553.cc:326-328, "in effect for dummy transfers
+     still logs (comment gr1553.cc:327-329, "in effect for dummy transfers
      too").  */
   sis_tests::flatmem_poke (bd1, BD_IRQN);
   sis_tests::flatmem_poke (bd1 + 4, TR_DUMMY);
   sis_tests::flatmem_poke (bd1 + 12, 0xdeadbeef);
 
   /* Descriptor 2: RT-to-BC (TR=1) reads subaddress 3 straight back
-     (bc_transfer's "else" branch, gr1553.cc:268-269, since the requested
+     (bc_transfer's "else" branch, gr1553.cc:269-270, since the requested
      subaddress is not GR1553_PEER_SUB_TO_BC), which is the only way from
      outside the file to observe that descriptor 0's 32-word write actually
      reached the peer's per-subaddress storage.  */
@@ -494,7 +474,7 @@ TEST_CASE_FIXTURE (
   run (30);
 
   /* The peer's subaddress 3 buffer now holds words 0..31, written via
-     bc_transfer's tr==0 loop (gr1553.cc:255-256) for i in [0,32).  */
+     bc_transfer's tr==0 loop (gr1553.cc:256-257) for i in [0,32).  */
   CHECK (sis_tests::flatmem_peek (bd0 + 12) == 0);
   CHECK (sis_tests::flatmem_peek (bd1 + 12) == 0xdeadbeef);
   CHECK ((read (IRQ) & IRQ_BCEV) != 0);
@@ -510,9 +490,9 @@ TEST_CASE_FIXTURE (
   /* gr1553.cc's own encoding of table 294 (see file header): BD_TYPE set
      and BD_COND set marks a branch (rather than the end-of-list marker),
      and CONDOK == 0xFF (table 294's suggested "constant true condition",
-     p255) makes bc_step take the jump address at bd+4 (gr1553.cc:305-306)
+     p255) makes bc_step take the jump address at bd+4 (gr1553.cc:306-307)
      instead of falling through to bd+16.  No IRQEN here, so bc_irq_log is
-     not called (gr1553.cc:302-303 skipped).  */
+     not called (gr1553.cc:303-304 skipped).  */
   const uint32 bd = 0x100;
   const uint32 jump_target = 0x200;
 
@@ -535,9 +515,9 @@ TEST_CASE_FIXTURE (
     "can log an interrupt, wrapping the BC IRQ ring at its 64-byte "
     "boundary")
 {
-  /* CONDOK != 0xFF is gr1553.cc's "never taken" condition (gr1553.cc:305,
+  /* CONDOK != 0xFF is gr1553.cc's "never taken" condition (gr1553.cc:306,
      307-308): the schedule falls through to bd+16 instead of jumping.
-     IRQEN set here does call bc_irq_log (gr1553.cc:302-303).  */
+     IRQEN set here does call bc_irq_log (gr1553.cc:303-304).  */
   const uint32 bd = 0x100;
   const uint32 bd_next = 0x110;
   const uint32 ring = 0x400; /* 64-byte aligned, table 316 (p265). */
@@ -552,7 +532,7 @@ TEST_CASE_FIXTURE (
   run (10);
 
   CHECK (read (BCSLOT) == bd_next);
-  /* bc_irq_log (gr1553.cc:219-229) wrote the branch descriptor's own
+  /* bc_irq_log (gr1553.cc:220-230) wrote the branch descriptor's own
      address into the ring, then wrapped the ring position (60+4=64 -> 0,
      the ring's own boundary) back to its base.  */
   CHECK (sis_tests::flatmem_peek (ring + 60) == bd);
@@ -564,7 +544,7 @@ TEST_CASE_FIXTURE (
     gr1553_fixture,
     "GR1553 stopping the BC schedule leaves an already queued step inert")
 {
-  /* bc_step's very first check (gr1553.cc:287-288, "if (!bc_running)
+  /* bc_step's very first check (gr1553.cc:288-289, "if (!bc_running)
      return") is the guard against a step that was queued before the
      schedule was stopped.  Set up two descriptors, let the first one fire
      and arm the second, stop the schedule before the second fires, and
@@ -610,7 +590,7 @@ TEST_CASE_FIXTURE (
     "step timer")
 {
   /* gr1553_write's BCCTRL/SCSRT case only calls event() when bc_running
-     was not already set (gr1553.cc:647-652).  If a second SCSRT write
+     was not already set (gr1553.cc:633-638).  If a second SCSRT write
      queued a second step, both would still be due at +1 us: the first to
      fire would advance BCSLOT to the next descriptor exactly as a correct
      single step does, so a second event landing right behind it would
@@ -641,7 +621,7 @@ TEST_CASE_FIXTURE (
 TEST_CASE_FIXTURE (gr1553_fixture,
 		   "GR1553 add announces the controller only when verbose")
 {
-  /* gr1553_add (gr1553.cc:684-693) is the board registration hook, not
+  /* gr1553_add (gr1553.cc:670-679) is the board registration hook, not
      part of chapter 16; the fixture never calls it since the core is
      driven directly with no bus.  The only observable effect from outside
      is the verbose trace.  */
@@ -665,8 +645,8 @@ TEST_CASE_FIXTURE (
     "GR1553 RTCFG enables the emulated peer bus controller, gated by its "
     "own key and started only once")
 {
-  /* gr1553_write's RTCFG case (gr1553.cc:655-674): RTEN's 0->1 edge starts
-     peer_bc_step once (gr1553.cc:662-667); writing RTEN again while already
+  /* gr1553_write's RTCFG case (gr1553.cc:641-660): RTEN's 0->1 edge starts
+     peer_bc_step once (gr1553.cc:648-653); writing RTEN again while already
      running must not queue a second one, exactly like BCCTRL/SCSRT above.
      A wrong-keyed write earlier in this test already established the key
      gate; this focuses on the enable/disable and idempotency.
@@ -692,7 +672,7 @@ TEST_CASE_FIXTURE (
   /* Disabling clears RTSTAT's RUN bit and the running flag, so the event
      queued above for the *next* period must find peer_bc_running false
      when it eventually fires (the same top-of-function guard as bc_step,
-     gr1553.cc:554-555) and do nothing further.  */
+     gr1553.cc:535-536) and do nothing further.  */
   write (RTCFG, (RTKEY << 16)); /* RTEN clear. */
   CHECK ((read (RTSTAT) & 1) == 0);
 
@@ -706,11 +686,11 @@ TEST_CASE_FIXTURE (
     gr1553_fixture,
     "GR1553 the emulated peer only drives the RT address it knows")
 {
-  /* peer_bc_step (gr1553.cc:556-560): "a terminal configured with any
+  /* peer_bc_step (gr1553.cc:537-541): "a terminal configured with any
      other address stays silent".  This is gr1553.cc's own peer, not
      chapter 16 (see file header): the RT config is set to an address
      other than the peer's hardcoded 4, so the whole frame body
-     (gr1553.cc:562-583) is skipped, and the sync register -- which only
+     (gr1553.cc:543-565) is skipped, and the sync register -- which only
      the mode 17 call inside that body would set -- stays zero.  */
   write (RTTAB, 0x1000);
   write (RTCFG, (RTKEY << 16) | (5u << RTCFG_RTADDR_SHIFT) | RTCFG_RTEN);
@@ -730,9 +710,8 @@ TEST_CASE_FIXTURE (
      mode code as illegal has no frame reference, so the frame is not run
      against it."  Zeroing RTMCCTL makes every mode code illegal (field
      00, table 326), including mode code 17's SD field (bits 5:4), so
-     rt_mode_code_shift's mc==17 case (gr1553.cc:485, shift 4) is reached
-     but rt_mode_code's "field == 0" guard (gr1553.cc:521-522) then
-     refuses it.  */
+     rt_mode_code's mc==17 shift of 4 (gr1553.cc:499) is applied but its
+     "field == 0" guard (gr1553.cc:502-503) then refuses it.  */
   write (RTTAB, 0x1000);
   write (RTMCCTL, 0);
   write (RTCFG,
@@ -754,7 +733,7 @@ TEST_CASE_FIXTURE (
     "GR1553 the emulated peer relays subaddress 2 to subaddress 3 and to "
     "the broadcast subaddress, logging and interrupting as configured")
 {
-  /* Full happy path through peer_bc_step (gr1553.cc:548-586) once RTEN is
+  /* Full happy path through peer_bc_step (gr1553.cc:529-568) once RTEN is
      set and the guest RT is configured to answer address 4.  Subaddress
      layout per table 297 (p267): satab + 16*N.  */
   const uint32 satab = 0x1000;
@@ -777,7 +756,7 @@ TEST_CASE_FIXTURE (
   /* Table 298 (p258): TXEN (bit 7) for subaddress 2, RXEN (bit 15) for
      subaddress 3 and RXEN|BCRXE (bits 15,16) for the broadcast
      subaddress 29.  RXIRQ (bit 13) on subaddress 3 tests irqen coming
-     from the subaddress control word (gr1553.cc:459-462) rather than the
+     from the subaddress control word (gr1553.cc:471-474) rather than the
      descriptor's own IRQEN.  */
   sis_tests::flatmem_poke (sa_to_bc + 0x00, SA_TXEN);
   sis_tests::flatmem_poke (sa_to_bc + 0x04,
@@ -789,10 +768,10 @@ TEST_CASE_FIXTURE (
   sis_tests::flatmem_poke (sa_bcast + 0x08, bcast_bd);
 
   /* Table 300 (p259): descriptor control/status word.  The Tx descriptor
-     tests irqen coming from the descriptor's own IRQEN bit (gr1553.cc:458)
+     tests irqen coming from the descriptor's own IRQEN bit (gr1553.cc:470)
      instead of the subaddress control word, and RT_BD_EOL (0x3) as its
      next pointer, so the Tx pointer register is left untouched
-     (gr1553.cc:452-453, "next != EOL" false).  The Rx descriptor points
+     (gr1553.cc:464-465, "next != EOL" false).  The Rx descriptor points
      back at itself as "next", so the pointer register is written but
      ends up unchanged, exercising the "next != EOL" true branch.  */
   sis_tests::flatmem_poke (tx_bd + RT_BD_CTRL_OFFSET, BD_RT_IRQEN);
@@ -813,7 +792,7 @@ TEST_CASE_FIXTURE (
   /* Table 326 (p267-268): keep the reset default (SD field legal, not
      logged) so the frame gate passes, but raise the Synchronize field (S,
      bits 1:0) to 0b11, legal+log+interrupt, so the unconditional
-     rt_mode_code(1, ...) call at the end of the frame (gr1553.cc:581)
+     rt_mode_code(1, ...) call at the end of the frame (gr1553.cc:563)
      both logs and interrupts.  */
   write (RTMCCTL, 0x00000557);
 
@@ -832,27 +811,23 @@ TEST_CASE_FIXTURE (
   run (PEER_BC_PERIOD + 100);
 
   /* The peer relayed what it read from the Tx subaddress into the Rx and
-     broadcast subaddresses (gr1553.cc:574-579, the file header's
+     broadcast subaddresses (gr1553.cc:555-560, the file header's
      documented peer behaviour).  */
   CHECK (peek16 (rx_buf) == 11);
   CHECK (peek16 (rx_buf + 2) == 22);
   CHECK (peek16 (bcast_buf) == 11);
   CHECK (peek16 (bcast_buf + 2) == 22);
 
-  /* Table 300's DV bit (31) is documented as "set to 1 by hardware after
-     transfer" and matches RT_BD_DONE here (gr1553.cc:365); but the SZ
-     field the same table places at bits 8:3 is, in gr1553.cc, ORed in
-     unshifted (gr1553.cc:450, "bdctrl | RT_BD_DONE | wc") instead of
-     "wc << 3", landing in the low bits that table 300 reserves for TRES
-     instead. This is a defect against table 300 (p259, lines 629-649 of
-     this chunk): pinning the current, wrongly-placed value rather than
-     the documented one.  */
+  /* Table 300 (p259): DV (bit 31) is "set to 1 by hardware after transfer",
+     SZ (bits 8:3) is the transfer size counted in 16-bit words, and TRES
+     (bits 2:0) is 000 for success.  Two words transferred, so SZ reads 2
+     and the word reads DV | (2 << 3).  */
   CHECK (sis_tests::flatmem_peek (tx_bd + RT_BD_CTRL_OFFSET) ==
-	 (BD_RT_IRQEN | 0x80000000u | 2));
+	 (BD_RT_IRQEN | 0x80000000u | (2u << 3)));
   CHECK (sis_tests::flatmem_peek (rx_bd + RT_BD_CTRL_OFFSET) ==
-	 (0x80000000u | 2));
+	 (0x80000000u | (2u << 3)));
   CHECK (sis_tests::flatmem_peek (bcast_bd + RT_BD_CTRL_OFFSET) ==
-	 (0x80000000u | 2));
+	 (0x80000000u | (2u << 3)));
 
   /* The Tx descriptor's EOL next pointer left the Tx pointer register
      alone; the Rx descriptor's self-pointing next left the Rx pointer
@@ -867,7 +842,7 @@ TEST_CASE_FIXTURE (
      descriptor), Rx (irqen from RXIRQ), broadcast (no irqen configured
      anywhere), then the Synchronize mode code (irqen from RTMCCTL's S
      field, field == 3).  The mode-17 call ahead of them logged nothing
-     (field == 1, "legal, but not logged", gr1553.cc:531-532).  */
+     (field == 1, "legal, but not logged", gr1553.cc:512-513).  */
   CHECK (sis_tests::flatmem_peek (evlog + 0) ==
 	 (0x80000000u | (0u << 29) | (PEER_SUB_TO_BC << 24) | (2u << 3)));
   CHECK (sis_tests::flatmem_peek (evlog + 4) ==
@@ -878,7 +853,7 @@ TEST_CASE_FIXTURE (
 	 (0x80000000u | (2u << 29) | (1u << 24)));
 
   /* Only the first interrupt-raising log entry (the Tx one, at evlog+0)
-     is recorded as the acknowledge target (gr1553.cc:391-394, "only move
+     is recorded as the acknowledge target (gr1553.cc:398-401, "only move
      that mark when no interrupt is pending"); the Rx and Synchronize
      entries also raised the interrupt condition but found it already
      pending.  */
@@ -887,9 +862,9 @@ TEST_CASE_FIXTURE (
   CHECK (ext_irl[0] == GR1553_TEST_IRQ);
 
   /* Mode code 17 (Synchronize with data word) latches the frame number
-     into RTSYNC (table 324, p267; gr1553.cc:527-529) using the value
-     peer_frame_number had *before* this frame's gr1553.cc:582 increment,
-     i.e. the reset value of 1 (gr1553.cc:606). RTTTAG (table 327) is
+     into RTSYNC (table 324, p267; gr1553.cc:508-510) using the value
+     peer_frame_number had *before* this frame's gr1553.cc:564 increment,
+     i.e. the reset value of 1 (gr1553.cc:592). RTTTAG (table 327) is
      still zero, so only the low half is nonzero.  */
   CHECK (read (RTSYNC) == 1);
 
@@ -908,9 +883,9 @@ TEST_CASE_FIXTURE (
 {
   /* This test leaves subaddress 2 (Tx) unconfigured through its first
      periods (RXEN/TXEN clear), so every period's call against it hits
-     rt_transfer's "!rx && !TXEN" early return (gr1553.cc:427-428) for
+     rt_transfer's "!rx && !TXEN" early return (gr1553.cc:437-438) for
      free; it focuses on subaddress 3 (Rx) to walk through RXEN gating and
-     both flavours of "no usable descriptor" (gr1553.cc:435-436): a null
+     both flavours of "no usable descriptor" (gr1553.cc:443-444): a null
      pointer and RT_BD_EOL.  */
   const uint32 satab = 0x1000;
   const uint32 sa_to_bc = satab + PEER_SUB_TO_BC * 16;
@@ -931,9 +906,9 @@ TEST_CASE_FIXTURE (
   CHECK (sis_tests::flatmem_faults () == 0);
 
   /* Period 2: RXEN set but the pointer is still the power-on zero.
-     gr1553.cc:435, "bd == 0 || bd == RT_BD_EOL", the null-pointer half,
+     gr1553.cc:443, "bd == 0 || bd == RT_BD_EOL", the null-pointer half,
      distinct from period 3's EOL half below (RXEN clear alone would have
-     returned first, at gr1553.cc:425-426, without ever reaching this
+     returned first, at gr1553.cc:435-436, without ever reaching this
      check).  */
   sis_tests::flatmem_poke (sa_to_rt + 0x00, SA_RXEN);
   run (PEER_BC_PERIOD);
@@ -948,7 +923,7 @@ TEST_CASE_FIXTURE (
   CHECK (sis_tests::flatmem_peek (sa_to_rt + 0x08) == BD_EOL);
 
   /* Period 4: a real descriptor whose "next" is a different address, so
-     the Rx pointer register visibly advances (gr1553.cc:452-453, "next !=
+     the Rx pointer register visibly advances (gr1553.cc:464-465, "next !=
      EOL" true) rather than the happy-path test's self-pointing one.  */
   sis_tests::flatmem_poke (rx_bd + RT_BD_CTRL_OFFSET, 0);
   sis_tests::flatmem_poke (rx_bd + RT_BD_DPTR_OFFSET, rx_buf);
@@ -963,7 +938,7 @@ TEST_CASE_FIXTURE (
   CHECK (sis_tests::flatmem_peek (sa_to_rt + 0x08) == rx_bd2);
 
   /* Period 5: the broadcast subaddress with RXEN set but BCRXE clear.
-     gr1553.cc:431, "bcast && !(ctrl & RT_SA_BCRXE)": a legal receive
+     gr1553.cc:439, "bcast && !(ctrl & RT_SA_BCRXE)": a legal receive
      subaddress that still refuses a broadcast because it opted out.  A
      descriptor is present and holds a sentinel so a wrongly-processed
      transfer would be visible.  */
@@ -982,15 +957,12 @@ TEST_CASE_FIXTURE (
   CHECK (sis_tests::flatmem_peek (bcast_bd + RT_BD_CTRL_OFFSET) == 0x12345678);
   CHECK (peek16 (bcast_buf) == 0xbeef);
 
-  /* Period 6: subaddress 2 (Tx) enabled with TXIRQ (gr1553.cc:461-462)
+  /* Period 6: subaddress 2 (Tx) enabled with TXIRQ (gr1553.cc:473-474)
      instead of the happy-path test's descriptor IRQEN bit, so irqen comes
-     from the subaddress control word's transmit side this time.  Point
-     the log squarely at address 0: gr1553_reset's memset (gr1553.cc:591)
-     leaves RTEVSZ at plain zero rather than table 328's documented
-     0xFFFFFFFC default (a second reset-default gap alongside RTCFG's, see
-     the "registers reset to their documented defaults" case above), so
-     with mask 0 the ring never wraps and period 4's earlier, unrelated
-     log call has already moved the write position off of address 0.  */
+     from the subaddress control word's transmit side this time.  RTEVSZ
+     keeps table 328's one-entry reset default, so the log position stays
+     where RTEVLOG points; aim it at address 0 and this period's entry
+     overwrites period 4's earlier, unrelated one there.  */
   sis_tests::flatmem_poke (sa_to_bc + 0x00, SA_TXEN | SA_TXIRQ);
   sis_tests::flatmem_poke (sa_to_bc + 0x04, rx_bd2); /* Reuse as Tx desc. */
   sis_tests::flatmem_poke (rx_bd2 + RT_BD_CTRL_OFFSET, 0);
@@ -999,7 +971,7 @@ TEST_CASE_FIXTURE (
 
   /* Subaddress 3 (Rx) is still enabled from period 4 above and would log
      its own, non-interrupting entry into the same log right after the Tx
-     call in peer_bc_step's fixed order (gr1553.cc:574-575), overwriting
+     call in peer_bc_step's fixed order (gr1553.cc:555-556), overwriting
      the Tx entry this check is after.  Disable it so this period's only
      log call is the Tx one under test.  */
   sis_tests::flatmem_poke (sa_to_rt + 0x00, 0);

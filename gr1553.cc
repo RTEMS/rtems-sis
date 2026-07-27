@@ -33,6 +33,7 @@
  */
 
 #include "config.h"
+#include <assert.h>
 #include <stdio.h>
 #include <string.h>
 #include "sis.h"
@@ -364,6 +365,11 @@ bc_step (int32 arg)
 #define RT_BD_IRQEN (1 << 30)
 #define RT_BD_DONE  (1u << 31)
 
+/* Transfer size in the descriptor control/status word, table 300, a count of
+   16-bit words at bits 8:3. */
+
+#define RT_BD_SZ_SHIFT 3
+
 /* A next pointer of 3 marks the end of a descriptor list. */
 
 #define RT_BD_EOL 0x3
@@ -382,8 +388,8 @@ rt_event_log (uint32 type, uint32 samc, uint32 sz, int irqen)
 {
   uint32 pos = gr1553_regs[GR1553_RTEVLOG / 4];
   uint32 mask = gr1553_regs[GR1553_RTEVSZ / 4];
-  uint32 entry = ((type & 0x3) << 29) | ((samc & 0x1F) << 24) |
-		 ((sz & 0x3F) << 3);
+  uint32 entry =
+      ((type & 0x3) << 29) | ((samc & 0x1F) << 24) | ((sz & 0x3F) << 3);
 
   if (irqen)
     {
@@ -408,8 +414,7 @@ rt_event_log (uint32 type, uint32 samc, uint32 sz, int irqen)
 /* Move WC data words between the descriptor list of subaddress SUBADDR and
    BUF.  RX selects the receive list and the direction of the copy.  BCAST
    marks a transfer broadcast to RT address 31 rather than addressed to this
-   terminal, which a receive subaddress accepts only with BCRXE set.  A
-   broadcast transmit is not a valid command and is ignored. */
+   terminal, which a receive subaddress accepts only with BCRXE set. */
 
 static void
 rt_transfer (uint32 subaddr, int rx, uint16 *buf, uint32 wc, int bcast)
@@ -422,11 +427,13 @@ rt_transfer (uint32 subaddr, int rx, uint16 *buf, uint32 wc, int bcast)
   uint32 i;
   int irqen;
 
+  /* A broadcast transmit is not a valid command, so the emulated bus
+     controller never sends one. */
+  assert (rx || !bcast);
+
   if (rx && !(ctrl & RT_SA_RXEN))
     return;
   if (!rx && !(ctrl & RT_SA_TXEN))
-    return;
-  if (bcast && !rx)
     return;
   if (bcast && !(ctrl & RT_SA_BCRXE))
     return;
@@ -447,7 +454,10 @@ rt_transfer (uint32 subaddr, int rx, uint16 *buf, uint32 wc, int bcast)
 	buf[i] = gr1553_read16 (dptr + i * 2);
     }
 
-  gr1553_write32 (bd + RT_BD_CTRL, bdctrl | RT_BD_DONE | wc);
+  /* Table 300.  Data valid marks the transfer done and the transfer size
+     holds the word count at bits 8:3. */
+  gr1553_write32 (bd + RT_BD_CTRL,
+		  bdctrl | RT_BD_DONE | (wc << RT_BD_SZ_SHIFT));
 
   if (next != RT_BD_EOL)
     gr1553_write32 (sa + ptroff, next);
@@ -464,34 +474,9 @@ rt_transfer (uint32 subaddr, int rx, uint16 *buf, uint32 wc, int bcast)
   rt_event_log (rx ? RT_EV_TYPE_RX : RT_EV_TYPE_TX, subaddr, wc, irqen);
 }
 
-/* Map a mode code number to its RT mode code control register field shift,
-   table 326, non-broadcast fields.  Returns -1 when the mode code has no
-   control field. */
-
-static int
-rt_mode_code_shift (uint32 mc)
-{
-  switch (mc)
-    {
-    case 0:  return 16; /* Dynamic bus control. */
-    case 1:  return 0;  /* Synchronize. */
-    case 3:  return 18; /* Initiate self test. */
-    case 4:
-    case 5:  return 8;  /* Transmitter shutdown. */
-    case 6:
-    case 7:  return 22; /* Inhibit terminal flag. */
-    case 8:  return 26; /* Reset remote terminal. */
-    case 16: return 12; /* Transmit vector word. */
-    case 17: return 4;  /* Synchronize with data. */
-    case 19: return 14; /* Transmit BIT word. */
-    default: return -1;
-    }
-}
-
 /* Deliver a mode code to the guest remote terminal.  Logs a mode-code event
    when the mode code is enabled for logging in the mode code control register,
-   and raises an interrupt when it is enabled for interrupt.  BCAST selects the
-   broadcast field of the pair, which the transmit mode codes do not have.
+   and raises an interrupt when it is enabled for interrupt.
 
    Returns 1 when the terminal accepts the mode code and 0 when the mode code
    control register marks it illegal.  An illegal mode code is answered with
@@ -499,34 +484,28 @@ rt_mode_code_shift (uint32 mc)
    whether it was acted on. */
 
 static int
-rt_mode_code (uint32 mc, int bcast, uint16 data)
+rt_mode_code (uint32 mc, uint16 data)
 {
   uint32 mcc = gr1553_regs[GR1553_RTMCCTL / 4];
-  int shift = rt_mode_code_shift (mc);
+  int shift;
   uint32 field;
 
-  if (shift < 0)
-    return 0;
-
-  if (bcast)
-    {
-      /* Dynamic bus control, transmit vector word and transmit BIT word have
-         no broadcast field, table 326, and broadcast is illegal for them. */
-      if (mc == 0 || mc == 16 || mc == 19)
-	return 0;
-      shift += 2;
-    }
+  /* Table 326.  The emulated bus controller sends synchronize (mode code 1,
+     field at bit 0) and synchronize with data word (mode code 17, field at
+     bit 4), never broadcast, so no other field of the register is decoded. */
+  assert (mc == 1 || mc == 17);
+  shift = mc == 1 ? 0 : 4;
 
   field = (mcc >> shift) & 0x3;
   if (field == 0)
     return 0; /* Illegal. */
 
-  /* Table 512.  The sync register latches the data word of the last legal
+  /* Table 324.  The sync register latches the data word of the last legal
      synchronize with data word mode command, and the RT timer with it.  This
      is the Communication Frame number of ECSS-E-ST-50-13C clause 8.3.1.2a. */
   if (mc == 17)
     gr1553_regs[GR1553_RTSYNC / 4] =
-      (gr1553_regs[GR1553_RTTTAG / 4] << 16) | data;
+	(gr1553_regs[GR1553_RTTTAG / 4] << 16) | data;
 
   if (field < 2)
     return 1; /* Legal, but not logged. */
@@ -560,12 +539,12 @@ peer_bc_step (int32 arg)
   if (rtaddr == GR1553_PEER_RT_ADDRESS)
     {
       /* Establish frame synchronization before running the frame.  A terminal
-         which rejects the synchronize with data word mode code as illegal has
-         no frame reference, so the frame is not run against it.  This is what
-         makes a terminal that builds the mode code control register from zero
-         visible: the mode code is legal at reset and stays legal unless the
-         driver overwrites the field. */
-      if (!rt_mode_code (17, 0, peer_frame_number))
+	 which rejects the synchronize with data word mode code as illegal has
+	 no frame reference, so the frame is not run against it.  This is what
+	 makes a terminal that builds the mode code control register from zero
+	 visible: the mode code is legal at reset and stays legal unless the
+	 driver overwrites the field. */
+      if (!rt_mode_code (17, peer_frame_number))
 	{
 	  event (peer_bc_step, 0, gr1553_us_to_clocks (GR1553_PEER_BC_PERIOD));
 	  return;
@@ -575,10 +554,11 @@ peer_bc_step (int32 arg)
       rt_transfer (GR1553_PEER_SUB_TO_RT, 1, buf, 2, 0);
 
       /* The ECSS Time Message is broadcast to subaddress 29, clause 8.2.1.1d
-         and table 6-1, so it reaches a receive subaddress only with BCRXE. */
+	 and table 6-1, so it reaches a receive subaddress only with BCRXE. */
       rt_transfer (GR1553_PEER_SUB_BCAST, 1, buf, 2, 1);
 
-      rt_mode_code (1, 0, 0); /* Synchronize, communication frame synchronization. */
+      /* Synchronize, communication frame synchronization. */
+      rt_mode_code (1, 0);
       peer_frame_number++;
     }
 
@@ -599,8 +579,12 @@ gr1553_reset (void)
      which hides a driver that builds the register from zero. */
   gr1553_regs[GR1553_RTMCCTL / 4] = 0x00000555;
 
-  /* Table 321.  The sync and bus reset output enables reset to 1. */
-  gr1553_regs[GR1553_RTCFG / 4] = 0x0000E000;
+  /* Table 321.  The sync and bus reset output enables reset to 1 and the RT
+     address resets to 31. */
+  gr1553_regs[GR1553_RTCFG / 4] = 0x0000E000 | GR1553_RTCFG_RTADDR;
+
+  /* Table 328.  The event log size mask resets to a one entry ring. */
+  gr1553_regs[GR1553_RTEVSZ / 4] = 0xFFFFFFFC;
   bc_running = 0;
   peer_bc_running = 0;
   peer_frame_number = 1;
