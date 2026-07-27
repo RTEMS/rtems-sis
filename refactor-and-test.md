@@ -955,6 +955,31 @@ Hard-won here, so the next person does not rediscover them.
   `tests/elf.cc`'s `address_space_cap` is the helper; copy it rather
   than documenting the next such arc as unreachable.
 
+- **A pinned defect is only half the work, and the other half is a decision.**
+  Twelve defects were carried for a round as cases named "(suspected defect)"
+  asserting the wrong behaviour on purpose, so that a silent change would be
+  loud. Fixing them meant rewriting every one of those cases in the same
+  commit as the code: a case still asserting the old value passes and hides
+  the fix. Two turned out to be worth more than their pin said. The GDB glue
+  wrote the RISC-V breakpoint word whatever the target was, which read as
+  cosmetic until `sparc.cc` turned out to recognise `ta 1` explicitly, so the
+  glue was the one thing that could never produce the word its own core looks
+  for. And the manual's five disagreements with the shell were four manual
+  bugs and one real one: `trace` was matched against the internal string
+  `"tra"`, so the documented full word never reached it.
+
+- **A sanitizer report against production code can still be a test bug.**
+  UndefinedBehaviorSanitizer reported a negative shift in `chk_irq`, and the
+  obvious repair is a guard on the extended interrupt line. That would have
+  been wrong. `irqmp_mask` is computed from the line at init and nowhere
+  else, and a board sets the line in `init_sim` before the reset that builds
+  the mask, so the simulator cannot reach it. The IRQMP fixture set the line
+  through init and restored it by assignment alone, leaving a mask that
+  admits extended interrupts and a line that cannot carry them. The guard
+  would have added a branch no shipping build can take, which is the
+  permanent hole in a 100% target this plan exists to avoid. Check which side
+  of the test boundary a sanitizer finding lives on before repairing it.
+
 - **An agent working from a stale base leaves a hole the gate catches.** Six
   of the seven agents this round started on a commit well behind the campaign
   tip; most noticed and fast forwarded, and the one that did not still
