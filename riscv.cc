@@ -2150,7 +2150,9 @@ riscv_set_regi (struct pstate *sregs, int32 reg, uint32 rval)
     }
   else if ((reg >= 33) && (reg < 65))
     {
-      sregs->fsi[reg - 33] = rval;
+      /* A floating point register is the low half of a double register, the
+	 same place the read side reports it from.  */
+      sregs->fsi[((reg - 33) << 1) + BEH] = rval;
     }
   else if ((reg >= 65) && (reg < 4161))
     {
@@ -2185,7 +2187,7 @@ riscv_get_regi (struct pstate *sregs, int32 reg, char *buf, int length)
     }
   else if ((reg >= 65) && (reg < 4161))
     {
-      get_csr (reg - 65, sregs);
+      rval = get_csr (reg - 65, sregs);
     }
   buf[3] = (rval >> 24) & 0x0ff;
   buf[2] = (rval >> 16) & 0x0ff;
