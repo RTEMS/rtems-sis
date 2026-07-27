@@ -23,6 +23,33 @@ following address map:
 
 The DTB (device-tree table) is located at the end of ROM (0x20FF0000).
 
+### CLINT
+
+The CLINT follows the register layout of the SiFive FU540-C000 manual, which
+is what the RISC-V specification leaves to the platform: `msip` at offset 0,
+`mtimecmp` at 0x4000 and `mtime` at 0xbff8, each per hart.
+
+The least significant bit of an `msip` register is reflected in the MSIP bit
+of that hart's `mip` CSR and the other bits read as zero. `mtime` is
+readable and writable; writing it offsets the emulated clock rather than
+disturbing it, and a reset returns it to the clock. A timer interrupt is
+pending whenever `mtime` has reached `mtimecmp`, and both a write to `mtime`
+and a write to `mtimecmp` re-evaluate that.
+
+### PLIC
+
+An interrupt source is delivered only if its priority register is non-zero;
+priority zero is reserved and disables the source. Of the sources that are
+pending and enabled, a claim returns the one with the highest priority, and
+ties are broken by the lowest interrupt ID.
+
+### NS16550
+
+The UART is a 16550 at a four byte register stride, as specified by the
+PC16550D datasheet. Offset 0x08 is the write-only FIFO control register and
+the read-only interrupt identification register, not a scratch register, and
+the line control register is readable as well as writable.
+
 ## Power-down mode
 
 The RISC-V power-down feature (WFI) is supported. When power-down is entered,
