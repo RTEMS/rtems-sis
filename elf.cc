@@ -122,16 +122,17 @@ read_elf_body ()
   Elf32_Ehdr ehdr = efile.ehdr;
   Elf32_Shdr sh, ssh;
   Elf32_Phdr ph[16];
-  char *strtab;
-  char *mem;
+  char *strtab = NULL;
+  char *mem = NULL;
   uint32 *memw, i, j, k, vaddr;
   int bswap = efile.bswap;
   FILE *fp = efile.fp;
+  int res = -1;
 
   fseek (fp, ehdr.e_shoff + ((ehdr.e_shstrndx) * ehdr.e_shentsize), SEEK_SET);
   if ((!fp) || (fread (&ssh, sizeof (ssh), 1, fp) != 1))
     {
-      return (-1);
+      goto out;
     }
 
   /* endian swap if big-endian target */
@@ -146,7 +147,7 @@ read_elf_body ()
   fseek (fp, ssh.sh_offset, SEEK_SET);
   if (fread (strtab, ssh.sh_size, 1, fp) != 1)
     {
-      return (-1);
+      goto out;
     }
 
   for (i = 0; i < ehdr.e_phnum; i++)
@@ -154,7 +155,7 @@ read_elf_body ()
       fseek (fp, ehdr.e_phoff + (i * ehdr.e_phentsize), SEEK_SET);
       if (fread (&ph[i], ehdr.e_phentsize, 1, fp) != 1)
 	{
-	  return (-1);
+	  goto out;
 	}
       if (bswap)
 	{
@@ -172,7 +173,7 @@ read_elf_body ()
       fseek (fp, ehdr.e_shoff + (i * ehdr.e_shentsize), SEEK_SET);
       if (fread (&sh, sizeof (sh), 1, fp) != 1)
 	{
-	  return (-1);
+	  goto out;
 	}
       if (bswap)
 	{
@@ -211,7 +212,7 @@ read_elf_body ()
 		  fseek (fp, sh.sh_offset, SEEK_SET);
 		  if (fread (mem, sh.sh_size, 1, fp) != 1)
 		    {
-		      return (-1);
+		      goto out;
 		    }
 		  memw = (unsigned int *) mem;
 		  if (bswap)
@@ -223,14 +224,19 @@ read_elf_body ()
 	    }
 	  else
 	    {
-	      return (-1);
+	      goto out;
 	    }
 	  free (mem);
+	  mem = NULL;
 	}
     }
 
+  res = ehdr.e_entry;
+
+out:
+  free (mem);
   free (strtab);
-  return (ehdr.e_entry);
+  return res;
 }
 
 int
