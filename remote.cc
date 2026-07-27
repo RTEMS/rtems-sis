@@ -321,9 +321,9 @@ gdb_remote_exec (char *buf)
     case '?': /* last signal */
       if ((ebase.simtime == 0) && (sregs[cpu].pc == last_load_addr) &&
 	  last_load_addr)
-	sprintf (txbuf, "W%02d", sim_stat ());
+	sprintf (txbuf, "W%02x", sim_stat ());
       else
-	sprintf (txbuf, "S%02d", sim_stat ());
+	sprintf (txbuf, "S%02x", sim_stat ());
       break;
     case 'D': /* detach */
       strcpy (txbuf, "OK");

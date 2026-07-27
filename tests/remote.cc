@@ -999,13 +999,12 @@ TEST_CASE_FIXTURE (remote_fixture, "'?' reports the last stop reason")
   CHECK (body_of (intr) == "S02"); /* SIGINT */
   CHECK (body_of (trap) == "S05"); /* SIGTRAP */
 
-  /* Suspected defect: "S AA" is defined as a two digit hexadecimal signal
-     number, but the reply is formatted with %02d.  A null pointer hit is
-     SIGSEGV, 11, which must be sent as "S0b"; the stub sends "S11", which
-     GDB reads as signal 0x11.  The same goes for the SIGTERM of error
-     mode, 15, which must be "S0f".  */
-  CHECK (body_of (seg) == "S11");
-  CHECK (body_of (term) == "S15");
+  /* "Stop Reply Packets": AA of "S AA" is two hexadecimal digits.  A null
+     pointer hit is SIGSEGV, GDB signal 11, so the reply is "S0b", and error
+     mode is SIGTERM, GDB signal 15, so it is "S0f".  Decimal formatting
+     would send "S11" and "S15", which GDB reads as 17 and 21.  */
+  CHECK (body_of (seg) == "S0b");
+  CHECK (body_of (term) == "S0f");
 }
 
 TEST_CASE_FIXTURE (remote_fixture,
@@ -1014,7 +1013,7 @@ TEST_CASE_FIXTURE (remote_fixture,
   /* "Stop Reply Packets": "W AA" means the process exited with status AA.
      The stub reports it while the program still sits on its entry point
      with no simulated time spent, which is the state right after a load.  */
-  std::string exited, ran, moved, noload;
+  std::string exited, ran, moved, noload, hexstatus;
   {
     gdb_session session;
 
@@ -1035,9 +1034,16 @@ TEST_CASE_FIXTURE (remote_fixture,
     sregs[0].pc = 0;
     last_load_addr = 0;
     noload = session.request (pkt ("?"));
+
+    /* AA of "W AA" is hexadecimal as well.  */
+    last_load_addr = RAM;
+    sregs[0].pc = RAM;
+    simstat = NULL_HIT;
+    hexstatus = session.request (pkt ("?"));
   }
 
   CHECK (body_of (exited) == "W00");
+  CHECK (body_of (hexstatus) == "W0b");
   CHECK (body_of (ran) == "S00");
   CHECK (body_of (moved) == "S00");
   CHECK (body_of (noload) == "S00");
