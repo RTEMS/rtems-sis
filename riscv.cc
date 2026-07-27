@@ -2486,6 +2486,10 @@ riscv_disas (char *st, uint32 pc, uint32 inst)
       rs2p = ((inst >> 2) & 7) | 8;
       rs1 = ((inst >> 7) & 0x1f);
       rs2 = ((inst >> 2) & 0x1f);
+
+      /* The guard above rules out the fourth quadrant, so the third carries
+	 the group.  */
+      assert ((inst & 3) != 3);
       switch (inst & 3)
 	{
 	case 0:
@@ -2530,9 +2534,12 @@ riscv_disas (char *st, uint32 pc, uint32 inst)
 	    }
 	  break;
 	case 1:
+	  /* Every value of the function field is assigned in this quadrant,
+	     so the add immediate carries the group.  */
+	  assert (funct3 <= 7);
 	  switch (funct3)
 	    {
-	    case CADDI: /* addi rd, rd, nzimm[5:0] */
+	    default: /* addi rd, rd, nzimm[5:0] */
 	      sop2 = EXTRACT_RVC_IMM (inst);
 	      strcpy (opc, "addi");
 	      sprintf (param, "%s,%s,%d", rtbl[rs1], rtbl[rs1], sop2);
@@ -2604,7 +2611,7 @@ riscv_disas (char *st, uint32 pc, uint32 inst)
 		    case 2: /* or rd', rd', rs2' */
 		      strcpy (opc, "or");
 		      break;
-		    case 3: /* and rd', rd', rs2' */
+		    default: /* and rd', rd', rs2' */
 		      strcpy (opc, "and");
 		      break;
 		    }
@@ -2623,7 +2630,10 @@ riscv_disas (char *st, uint32 pc, uint32 inst)
 	      break;
 	    }
 	  break;
-	case 2:
+	default: /* the third quadrant */
+	  /* Every value of the function field is assigned here too, so the
+	     group which moves and jumps through a register carries it.  */
+	  assert (funct3 <= 7);
 	  switch (funct3)
 	    {
 	    case 0: /* slli rd', rd', shamt[5:0] */
@@ -2646,7 +2656,7 @@ riscv_disas (char *st, uint32 pc, uint32 inst)
 	      sprintf (param, "%s,%d(%s)", ftbl[rs1], offset, rtbl[2]);
 	      strcpy (opc, "flw");
 	      break;
-	    case 4:
+	    default:
 	      if ((inst >> 12) & 1)
 		{
 		  if (rs1)
@@ -2804,6 +2814,9 @@ riscv_disas (char *st, uint32 pc, uint32 inst)
 	case OP_IMM: /* IMM */
 	  sop2 = EXTRACT_ITYPE_IMM (inst);
 	  sprintf (param, "%s,%s,%d", rtbl[rd], rtbl[rs1], sop2);
+	  /* All eight function codes are assigned, so the add immediate
+	     carries the group.  */
+	  assert (funct3 <= 7);
 	  switch (funct3)
 	    {
 	    case IXOR:
@@ -2815,7 +2828,7 @@ riscv_disas (char *st, uint32 pc, uint32 inst)
 	    case IAND:
 	      strcpy (opc, "andi");
 	      break;
-	    case ADD:
+	    default: /* ADD */
 	      if (!rs1)
 		{
 		  strcpy (opc, "li");
@@ -2854,6 +2867,9 @@ riscv_disas (char *st, uint32 pc, uint32 inst)
 	  switch ((inst >> 25) & 3)
 	    {
 	    case 0:
+	      /* All eight function codes are assigned, so the add carries
+		 the group.  */
+	      assert (funct3 <= 7);
 	      switch (funct3)
 		{
 		case IXOR:
@@ -2865,7 +2881,7 @@ riscv_disas (char *st, uint32 pc, uint32 inst)
 		case IAND:
 		  strcpy (opc, "and");
 		  break;
-		case ADD:
+		default: /* ADD */
 		  if ((inst >> 30) & 1)
 		    strcpy (opc, "sub");
 		  else
@@ -2891,9 +2907,12 @@ riscv_disas (char *st, uint32 pc, uint32 inst)
 		}
 	      break;
 	    case 1: /* MUL/DIV */
+	      /* The M extension assigns all eight function codes, so the low
+		 multiply carries the group.  */
+	      assert (funct3 <= 7);
 	      switch (funct3)
 		{
-		case 0: /* MUL */
+		default: /* MUL */
 		  strcpy (opc, "mul");
 		  break;
 		case 1: /* MULH */
