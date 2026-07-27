@@ -373,6 +373,33 @@ public:
     return got;
   }
 
+  /* True when the stub closes the connection within MS milliseconds.  A
+     timeout and a close both leave a read empty, so the difference has to
+     be asked for explicitly.  */
+  bool
+  wait_eof (int ms)
+  {
+    struct pollfd pfd;
+    char buf[256];
+
+    if (fd < 0)
+      return false;
+
+    pfd.fd = fd;
+    pfd.events = POLLIN;
+    for (int waited = 0; waited < ms; waited += 100)
+      {
+	if (poll (&pfd, 1, 100) > 0)
+	  {
+	    int n = read (fd, buf, sizeof (buf));
+	    if (n <= 0)
+	      return n == 0;
+	  }
+      }
+
+    return false;
+  }
+
   /* Send PACKET and collect bytes until a complete reply packet is in
      hand, or the budget runs out.  */
   std::string
@@ -1466,18 +1493,20 @@ TEST_CASE_FIXTURE (remote_fixture, "'D' detaches and closes the connection")
 {
   /* "Packets", 'D': detach from the target, answered "OK", after which
      the stub stops serving the connection.  */
-  std::string reply, after;
+  std::string reply;
+  bool closed = false;
   {
     gdb_session session;
     reply = session.request (pkt ("D"));
-    /* The acknowledgement of that reply is what ends the session.  */
+    /* The acknowledgement of that reply is what ends the session: the stub
+       sends nothing more and hangs up.  */
     session.send_raw ("+");
-    after = session.read_some (2000);
+    closed = session.wait_eof (3000);
     session.finish ();
   }
 
   CHECK (body_of (reply) == "OK");
-  CHECK (after == "");
+  CHECK (closed);
   CHECK (sis_gdb_break == 0);
 }
 
@@ -1487,16 +1516,19 @@ TEST_CASE_FIXTURE (remote_fixture,
   /* Once detached the stub answers no more packets: the '+' that
      acknowledges receipt is the last thing it sends.  */
   std::string reply, after;
+  bool closed = false;
   {
     gdb_session session;
     reply = session.request (pkt ("D"));
     session.send_raw (pkt ("!"));
     after = session.read_some (2000);
+    closed = session.wait_eof (3000);
     session.finish ();
   }
 
   CHECK (body_of (reply) == "OK");
   CHECK (after == "+");
+  CHECK (closed);
 }
 
 /* ------------------------------------------------------------------ */
