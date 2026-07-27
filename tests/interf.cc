@@ -722,45 +722,55 @@ TEST_CASE ("z1 for an unknown address leaves the table alone")
   CHECK (ebase.bpts[0] == RAM);
 }
 
-TEST_CASE ("Z1 is bounded by the watchpoint count (suspected defect)")
+TEST_CASE ("Z1 is bounded by the breakpoint table, not by the watchpoints")
 {
   interf_fixture f;
 
-  /* The hardware breakpoint table is ebase.bpts, sized BPT_MAX, but the
-     insert tests ebase.wprnum, the number of read watchpoints, against that
-     bound.  A target with a full read watchpoint table therefore refuses a
-     Z1 packet although no breakpoint has been set at all.  Pinned as a
-     suspected defect: the count tested should be ebase.bptnum.  */
+  /* Z1 records a hardware breakpoint in ebase.bpts, sized BPT_MAX, so that
+     table alone decides whether the packet can be accepted.  A full read
+     watchpoint table is a different resource and must not make a Z1 fail:
+     the GDB manual, "Packets", answers E01 only when the breakpoint itself
+     cannot be set.  */
   ebase.wprnum = WPR_MAX;
   REQUIRE (ebase.bptnum == 0);
 
-  CHECK (sim_set_watchpoint (RAM, 4, 1) == 0);
-  CHECK (ebase.bptnum == 0);
-
-  ebase.wprnum = 0;
   CHECK (sim_set_watchpoint (RAM, 4, 1) == 1);
   CHECK (ebase.bptnum == 1);
+  CHECK (ebase.bpts[0] == RAM);
+  CHECK (ebase.wprnum == WPR_MAX);
+  ebase.wprnum = 0;
+
+  /* A full breakpoint table is what refuses it.  */
+  ebase.bptnum = BPT_MAX;
+  CHECK (sim_set_watchpoint (RAM + 4, 4, 1) == 0);
+  CHECK (ebase.bptnum == BPT_MAX);
+  ebase.bptnum = 0;
 }
 
-TEST_CASE ("z1 shifts breakpoints into the watchpoints (suspected defect)")
+TEST_CASE ("z1 closes the gap in the breakpoint table")
 {
   interf_fixture f;
 
-  /* Removing a hardware breakpoint that is not the last one has to close the
-     gap in ebase.bpts.  The shift loop writes ebase.wprs instead, so the
-     breakpoint table keeps the stale entry and the read watchpoint table is
-     overwritten with breakpoint addresses.  Pinned as a suspected defect:
-     the destination should be ebase.bpts.  */
+  /* Removing a hardware breakpoint that is not the last one closes the gap in
+     ebase.bpts and leaves every other table alone, so a following Z1 does not
+     resurrect the removed address and the watchpoint tables are untouched.  */
   REQUIRE (sim_set_watchpoint (RAM, 4, 1) == 1);
   REQUIRE (sim_set_watchpoint (RAM + 4, 4, 1) == 1);
-  REQUIRE (ebase.bptnum == 2);
+  REQUIRE (sim_set_watchpoint (RAM + 8, 4, 1) == 1);
+  REQUIRE (ebase.bptnum == 3);
 
   CHECK (sim_clear_watchpoint (RAM, 4, 1) == 1);
 
-  CHECK (ebase.bptnum == 1);
-  CHECK (ebase.bpts[0] == RAM);	    /* should be RAM + 4 */
-  CHECK (ebase.wprs[0] == RAM + 4); /* should not have been touched */
+  CHECK (ebase.bptnum == 2);
+  CHECK (ebase.bpts[0] == RAM + 4);
+  CHECK (ebase.bpts[1] == RAM + 8);
+  CHECK (ebase.wprs[0] == 0);
   CHECK (ebase.wprnum == 0);
+
+  /* The last entry removes without moving anything.  */
+  CHECK (sim_clear_watchpoint (RAM + 8, 4, 1) == 1);
+  CHECK (ebase.bptnum == 1);
+  CHECK (ebase.bpts[0] == RAM + 4);
 }
 
 TEST_CASE ("Z2 and Z3 record a watchpoint with the size mask of its kind")
@@ -806,27 +816,25 @@ TEST_CASE ("Z4 sets both halves of an access watchpoint")
   CHECK (ebase.wprnum == 0);
 }
 
-TEST_CASE ("Z4 rolls back the wrong half on a failure (suspected defect)")
+TEST_CASE ("Z4 rolls back the write half when the read half fails")
 {
   interf_fixture f;
 
-  /* When one half of an access watchpoint cannot be inserted the packet
-     fails, and the half that did go in has to be taken out again.  The write
-     half is inserted first, but the rollback removes a read watchpoint, so
-     a full read watchpoint table leaves a stray write watchpoint behind and
-     drops an unrelated read entry.  Pinned as a suspected defect: the
-     rollback should remove the write watchpoint.
+  /* A Z packet answered E01 must leave the target as it found it, so when one
+     half of an access watchpoint cannot be inserted the half that did go in is
+     taken out again.  The write half is inserted first, so that is the one
+     rolled back, and the read table keeps every entry it already held.
 
-     The read table is filled with the entry the rollback finds, so the
-     search stays inside the array.  */
+     The read table is filled with the entry the search stops on, so it stays
+     inside the array.  */
   ebase.wprnum = WPR_MAX;
   ebase.wprs[WPR_MAX - 1] = RAM;
 
   CHECK (sim_set_watchpoint (RAM, 4, 4) == 0);
 
-  CHECK (ebase.wpwnum == 1); /* should be 0 */
-  CHECK (ebase.wpws[0] == RAM);
-  CHECK (ebase.wprnum == WPR_MAX - 1);
+  CHECK (ebase.wpwnum == 0);
+  CHECK (ebase.wprnum == WPR_MAX);
+  CHECK (ebase.wprs[WPR_MAX - 1] == RAM);
 
   ebase.wprnum = 0;
 }
@@ -876,16 +884,16 @@ TEST_CASE ("z2 and z3 for an unknown address leave the tables alone")
   CHECK (ebase.wprnum == 1);
 }
 
-TEST_CASE ("z2 and z3 keep the wrong size mask (suspected defect)")
+TEST_CASE ("z2 and z3 move the size mask down with its address")
 {
   interf_fixture f;
 
-  /* Removing an entry that is not the last one shifts the addresses down but
-     leaves the mask array untouched, so every entry above the hole keeps the
-     mask of its predecessor.  check_wpr and check_wpw pair wprs[i] with
-     wprm[i], so the surviving watchpoint then covers the wrong region.
-     Pinned as a suspected defect: the mask array has to be shifted with the
-     addresses.  */
+  /* Removing an entry that is not the last one shifts the addresses down, and
+     the mask array has to move with them: check_wpr and check_wpw pair
+     wprs[i] with wprm[i], so a surviving watchpoint that kept its
+     predecessor's mask would cover the wrong region.  The kind of a Z2/Z3
+     packet is the length of that region in bytes (GDB manual, "Packets",
+     Z2/Z3), stored as the mask length - 1.  */
   REQUIRE (sim_set_watchpoint (RAM, 2, 3) == 1);     /* mask 1 */
   REQUIRE (sim_set_watchpoint (RAM + 8, 4, 3) == 1); /* mask 3 */
   REQUIRE (sim_set_watchpoint (RAM, 2, 2) == 1);
@@ -894,12 +902,17 @@ TEST_CASE ("z2 and z3 keep the wrong size mask (suspected defect)")
   CHECK (sim_clear_watchpoint (RAM, 2, 3) == 1);
   CHECK (ebase.wprnum == 1);
   CHECK (ebase.wprs[0] == RAM + 8);
-  CHECK (ebase.wprm[0] == 1); /* should be 3 */
+  CHECK (ebase.wprm[0] == 3);
 
   CHECK (sim_clear_watchpoint (RAM, 2, 2) == 1);
   CHECK (ebase.wpwnum == 1);
   CHECK (ebase.wpws[0] == RAM + 8);
-  CHECK (ebase.wpwm[0] == 1); /* should be 3 */
+  CHECK (ebase.wpwm[0] == 3);
+
+  /* The surviving read watchpoint covers the four bytes its own kind named,
+     which is what check_wpr answers on.  */
+  CHECK (check_wpr (&sregs[0], RAM + 10, 1) == WPT_HIT);
+  ebase.wpaddress = 0;
 }
 
 TEST_CASE ("a zero length Z or z packet is a probe and always succeeds")

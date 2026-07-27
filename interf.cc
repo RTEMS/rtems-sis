@@ -146,7 +146,7 @@ sim_stop (SIM_DESC sd)
 static int
 sis_insert_hw_breakpoint (int addr)
 {
-  if (ebase.wprnum < BPT_MAX)
+  if (ebase.bptnum < BPT_MAX)
     {
       ebase.bpts[ebase.bptnum] = addr;
       ebase.bptnum++;
@@ -170,7 +170,7 @@ sis_remove_hw_breakpoint (int addr)
   if (addr == ebase.bpts[i])
     {
       for (; i < ebase.bptnum - 1; i++)
-	ebase.wprs[i] = ebase.bpts[i + 1];
+	ebase.bpts[i] = ebase.bpts[i + 1];
       ebase.bptnum -= 1;
       if (sis_verbose)
 	printf ("removed hw breakpoint at %x\n", addr);
@@ -206,7 +206,10 @@ sis_remove_watchpoint_read (int addr)
   if (addr == ebase.wprs[i])
     {
       for (; i < ebase.wprnum - 1; i++)
-	ebase.wprs[i] = ebase.wprs[i + 1];
+	{
+	  ebase.wprs[i] = ebase.wprs[i + 1];
+	  ebase.wprm[i] = ebase.wprm[i + 1];
+	}
       ebase.wprnum -= 1;
       if (sis_verbose)
 	printf ("removed read watchpoint at %x\n", addr);
@@ -217,7 +220,7 @@ sis_remove_watchpoint_read (int addr)
 static int
 sis_insert_watchpoint_write (int32 addr, unsigned char mask)
 {
-  if (ebase.wpwnum < WPR_MAX)
+  if (ebase.wpwnum < WPW_MAX)
     {
       ebase.wpws[ebase.wpwnum] = addr;
       ebase.wpwm[ebase.wpwnum] = mask;
@@ -242,7 +245,10 @@ sis_remove_watchpoint_write (int addr)
   if (addr == ebase.wpws[i])
     {
       for (; i < ebase.wpwnum - 1; i++)
-	ebase.wpws[i] = ebase.wpws[i + 1];
+	{
+	  ebase.wpws[i] = ebase.wpws[i + 1];
+	  ebase.wpwm[i] = ebase.wpwm[i + 1];
+	}
       ebase.wpwnum -= 1;
       if (sis_verbose)
 	printf ("removed write watchpoint at %x\n", addr);
@@ -288,7 +294,7 @@ sim_set_watchpoint (uint32 mem, int length, int type)
       if ((res = sis_insert_watchpoint_write (mem, mask)) == SIM_RC_OK)
 	res = sis_insert_watchpoint_read (mem, mask);
       if (res == SIM_RC_FAIL)
-	sis_remove_watchpoint_read (mem);
+	sis_remove_watchpoint_write (mem);
       break;
     default:
       res = 0;

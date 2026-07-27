@@ -532,19 +532,17 @@ TEST_CASE_FIXTURE (
 TEST_CASE_FIXTURE (
     func_fixture,
     "'+bp' silently does nothing once sim_set_watchpoint refuses it "
-    "(interf.cc's hardware breakpoint pool is out of room; note it is "
-    "gated on ebase.wprnum, the *read watchpoint* count, not bptnum, "
-    "which looks like an unrelated bug in interf.cc, out of scope here)")
+    "(interf.cc's hardware breakpoint table is full)")
 {
-  ebase.wprnum = BPT_MAX;
+  ebase.bptnum = BPT_MAX;
 
   stdout_capture capture;
   exec_cmd ("+bp 0x1000");
 
   CHECK (capture.str ().find ("added") == std::string::npos);
-  CHECK (ebase.bptnum == 0);
+  CHECK (ebase.bptnum == BPT_MAX);
 
-  ebase.wprnum = 0;
+  ebase.bptnum = 0;
 }
 
 TEST_CASE_FIXTURE (func_fixture, "'+bp' with no argument lists the "
