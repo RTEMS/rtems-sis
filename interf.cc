@@ -161,13 +161,11 @@ sis_insert_hw_breakpoint (int addr)
 static int
 sis_remove_hw_breakpoint (int addr)
 {
-  int i = 0;
+  uint32 i = 0;
 
-  if (!ebase.bptnum)
-    return 1;
-  while ((i < ebase.bptnum) && (ebase.bpts[i] != addr))
+  while ((i < ebase.bptnum) && (ebase.bpts[i] != (uint32) addr))
     i++;
-  if (addr == ebase.bpts[i])
+  if (i < ebase.bptnum)
     {
       for (; i < ebase.bptnum - 1; i++)
 	ebase.bpts[i] = ebase.bpts[i + 1];
@@ -197,13 +195,11 @@ sis_insert_watchpoint_read (int addr, unsigned char mask)
 static int
 sis_remove_watchpoint_read (int addr)
 {
-  int i = 0;
+  uint32 i = 0;
 
-  if (!ebase.wprnum)
-    return 1;
-  while ((i < ebase.wprnum) && (ebase.wprs[i] != addr))
+  while ((i < ebase.wprnum) && (ebase.wprs[i] != (uint32) addr))
     i++;
-  if (addr == ebase.wprs[i])
+  if (i < ebase.wprnum)
     {
       for (; i < ebase.wprnum - 1; i++)
 	{
@@ -236,13 +232,11 @@ sis_insert_watchpoint_write (int32 addr, unsigned char mask)
 static int
 sis_remove_watchpoint_write (int addr)
 {
-  int i = 0;
+  uint32 i = 0;
 
-  if (!ebase.wpwnum)
-    return 1;
-  while ((i < ebase.wpwnum) && (ebase.wpws[i] != addr))
+  while ((i < ebase.wpwnum) && (ebase.wpws[i] != (uint32) addr))
     i++;
-  if (addr == ebase.wpws[i])
+  if (i < ebase.wpwnum)
     {
       for (; i < ebase.wpwnum - 1; i++)
 	{
@@ -384,7 +378,7 @@ sim_insert_swbreakpoint (uint32 addr, int len)
 int
 sim_remove_swbreakpoint (uint32 addr, int len)
 {
-  int i;
+  uint32 i;
 
   /* find breakpoint to remove */
   for (i = 0; i < ebase.bptnum; i++)
@@ -392,15 +386,15 @@ sim_remove_swbreakpoint (uint32 addr, int len)
       if (ebase.bpts[i] == addr)
 	break;
     }
-  if (ebase.bpts[i] == addr)
+  if (i < ebase.bptnum)
     {
       /* write back saved opcode */
       ms->sis_memory_write (addr, (char *) &ebase.bpsave[i], len);
       if (sis_verbose > 1)
-	printf ("sim_remove_swbreakpoint: remove breakpoint %d at 0x%08x\n", i,
+	printf ("sim_remove_swbreakpoint: remove breakpoint %u at 0x%08x\n", i,
 		addr);
       /* shift down remaining breakpoints */
-      for (; i < ebase.bptnum; i++)
+      for (; i < ebase.bptnum - 1; i++)
 	{
 	  ebase.bpts[i] = ebase.bpts[i + 1];
 	  ebase.bpsave[i] = ebase.bpsave[i + 1];

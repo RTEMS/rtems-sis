@@ -773,6 +773,74 @@ TEST_CASE ("z1 closes the gap in the breakpoint table")
   CHECK (ebase.bpts[0] == RAM + 4);
 }
 
+/* Write the address a removal searches for into the word just past the end of
+   a full table, so a search that runs one element too far matches there.  In
+   struct evcell the array after bpts is bpsave and the array after wprs and
+   wpws is the matching mask array, so the sentinel is written through those.
+   The masks are restored by the caller.  */
+static void
+poison_past_end (void)
+{
+  const uint32 sentinel = RAM;
+
+  ebase.bpsave[0] = sentinel;
+  memcpy (&ebase.wprm[0], &sentinel, 4);
+  memcpy (&ebase.wpwm[0], &sentinel, 4);
+}
+
+TEST_CASE ("z0 to z3 search a full table without reading past its end")
+{
+  interf_fixture f;
+
+  /* A z packet for an address the target does not hold is answered OK for a
+     watchpoint or a hardware breakpoint, and E01 for a software breakpoint,
+     which has an opcode to write back.  Nothing may be removed either way.
+     The search has to stop at the number of entries: with a table exactly
+     full the index reaches the end of the array, and the element there
+     belongs to the next member of the block.  */
+  for (uint32 i = 0; i < BPT_MAX; i++)
+    ebase.bpts[i] = RAM + 4;
+  ebase.bptnum = BPT_MAX;
+  for (uint32 i = 0; i < WPR_MAX; i++)
+    ebase.wprs[i] = RAM + 4;
+  ebase.wprnum = WPR_MAX;
+  for (uint32 i = 0; i < WPW_MAX; i++)
+    ebase.wpws[i] = RAM + 4;
+  ebase.wpwnum = WPW_MAX;
+  poison_past_end ();
+
+  CHECK (sim_clear_watchpoint (RAM, 4, 1) == 1);
+  CHECK (sim_clear_watchpoint (RAM, 4, 3) == 1);
+  CHECK (sim_clear_watchpoint (RAM, 4, 2) == 1);
+  CHECK (sim_clear_watchpoint (RAM, 4, 0) == 0);
+
+  CHECK (ebase.bptnum == BPT_MAX);
+  CHECK (ebase.wprnum == WPR_MAX);
+  CHECK (ebase.wpwnum == WPW_MAX);
+
+  /* A z0 that does hit shifts the entries above it down and stops at the last
+     live one, so the slot the table just gave up keeps what it held and no
+     element past the end is read.  */
+  ebase.bpts[0] = RAM;
+  ebase.bpsave[0] = 0x11111111;
+  ebase.bpts[BPT_MAX - 1] = RAM + 12;
+  ebase.bpsave[BPT_MAX - 1] = 0x44444444;
+
+  CHECK (sim_clear_watchpoint (RAM, 4, 0) == 1);
+  CHECK (ebase.bptnum == BPT_MAX - 1);
+  CHECK (ram_word (RAM) == 0x11111111);
+  CHECK (ebase.bpts[BPT_MAX - 2] == RAM + 12);
+  CHECK (ebase.bpts[BPT_MAX - 1] == RAM + 12);
+  CHECK (ebase.bpsave[BPT_MAX - 1] == 0x44444444);
+
+  ebase.bptnum = 0;
+  ebase.wprnum = 0;
+  ebase.wpwnum = 0;
+  memset (ebase.wprm, 0, sizeof (ebase.wprm));
+  memset (ebase.wpwm, 0, sizeof (ebase.wpwm));
+  memset (ebase.bpsave, 0, sizeof (ebase.bpsave));
+}
+
 TEST_CASE ("Z2 and Z3 record a watchpoint with the size mask of its kind")
 {
   interf_fixture f;
@@ -823,18 +891,15 @@ TEST_CASE ("Z4 rolls back the write half when the read half fails")
   /* A Z packet answered E01 must leave the target as it found it, so when one
      half of an access watchpoint cannot be inserted the half that did go in is
      taken out again.  The write half is inserted first, so that is the one
-     rolled back, and the read table keeps every entry it already held.
-
-     The read table is filled with the entry the search stops on, so it stays
-     inside the array.  */
+     rolled back, and the read table keeps every entry it already held.  */
   ebase.wprnum = WPR_MAX;
-  ebase.wprs[WPR_MAX - 1] = RAM;
+  ebase.wprs[WPR_MAX - 1] = RAM + 8;
 
   CHECK (sim_set_watchpoint (RAM, 4, 4) == 0);
 
   CHECK (ebase.wpwnum == 0);
   CHECK (ebase.wprnum == WPR_MAX);
-  CHECK (ebase.wprs[WPR_MAX - 1] == RAM);
+  CHECK (ebase.wprs[WPR_MAX - 1] == RAM + 8);
 
   ebase.wprnum = 0;
 }
