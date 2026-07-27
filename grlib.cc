@@ -180,11 +180,12 @@ int
 grlib_read (uint32 addr, uint32 *data)
 {
   int i;
-  int res = 0;
 
   for (i = 0; i < ahbsi; i++)
     if ((addr >= ahbscores[i].start) && (addr < ahbscores[i].end))
       {
+	int res;
+
 	if (ahbscores[i].core->read)
 	  res = ahbscores[i].core->read (addr & ahbscores[i].mask, data);
 	else
@@ -192,7 +193,9 @@ grlib_read (uint32 addr, uint32 *data)
 	return !res;
       }
 
-  if (!res && ((addr >= AHBPP_START) && (addr <= AHBPP_END)))
+  /* A slave answered above and returned, so only an address no slave holds
+     reaches here.  */
+  if ((addr >= AHBPP_START) && (addr <= AHBPP_END))
     {
       *data = grlib_ahbpnp_read (addr);
       if (sis_verbose > 1)
@@ -200,7 +203,8 @@ grlib_read (uint32 addr, uint32 *data)
       return 0;
     }
 
-  return !res;
+  /* Neither a slave nor the plug and play area, so the access fails.  */
+  return 1;
 }
 
 int
