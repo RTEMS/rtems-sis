@@ -69,7 +69,14 @@ struct irqmp_fixture : sis_tests::grlib_core_fixture
 
   ~irqmp_fixture ()
   {
+    /* Put the line back through init, not by assignment.  The interrupt
+       mask is computed from the line at init and nowhere else, so
+       restoring one without the other leaves a mask that admits extended
+       interrupts and a line that cannot carry them.  chk_irq then shifts
+       by the unset line, which is undefined, and the next case in the
+       process is the one that pays for it.  */
     irqmp_extirq = saved_extirq;
+    core->init ();
     for (int i = 0; i < NCPU; i++)
       ext_irl[i] = 0;
   }
