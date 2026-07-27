@@ -726,47 +726,53 @@ TEST_CASE ("the listener reports a failed socket call")
   CHECK (conn != 4);
 }
 
-TEST_CASE ("the listener mistakes descriptor 0 for a failure (suspected "
-	   "defect)")
+TEST_CASE ("the listener takes descriptor 0 and rejects -1")
 {
   /* POSIX: socket() returns -1 on failure, and 0 is a perfectly good
-     descriptor.  The listener tests for 0, so it reports a real failure as
-     success and a descriptor 0 as a failure.  */
+     descriptor.  Descriptor 0 therefore serves a connection like any other,
+     and only -1 is the failure.  */
   listener_env env;
   remote::Listener<listener_env> listener (env);
   int conn = -2;
 
   env.socket_fd = 0;
-  CHECK (listener.Open (1234, &conn) == 0);
-  CHECK (env.failure == "socket failed");
-  CHECK (conn == -2);
+  CHECK (listener.Open (1234, &conn) == 1);
+  CHECK (conn == 4);
+  CHECK (env.closed == 0); /* the listening socket, descriptor 0 */
+  CHECK (env.failure == "");
 
-  /* And the real failure sails through to bind.  */
   listener_env broken;
   remote::Listener<listener_env> unlucky (broken);
+  int unused = -2;
+
   broken.socket_fd = -1;
-  broken.bind_result = -1;
-  CHECK (unlucky.Open (1234, &conn) == 0);
-  CHECK (broken.failure == "bind failed");
+  CHECK (unlucky.Open (1234, &unused) == 0);
+  CHECK (broken.failure == "socket failed");
+  /* The sequence stopped, so nothing was bound.  */
+  CHECK (broken.bound_port == -1);
+  CHECK (unused == -2);
 }
 
-TEST_CASE ("create_socket mistakes descriptor 0 for a failure (suspected "
-	   "defect)")
+TEST_CASE ("create_socket serves a connection on descriptor 0")
 {
-  /* socket() reports failure as -1, never as 0.  create_socket tests for
-     0, so it reports success as failure whenever descriptor 0 is free, and
-     would miss the real error.  Closing stdin makes 0 the lowest free
-     descriptor and pins the behaviour.  */
+  /* socket() reports failure as -1, never as 0.  With stdin closed, 0 is
+     the descriptor the kernel hands the listening socket, and the stub must
+     go on to serve the debugger on it.  */
   int port = free_port ();
   REQUIRE (port > 0);
 
-  stderr_sink quiet;
+  /* The client socket is created while stdin is still open, so that it
+     cannot be the one that takes descriptor 0.  */
+  int client = socket (AF_INET, SOCK_STREAM, 0);
+  REQUIRE (client > 0);
+
+  int saved_socket = new_socket;
   int saved = dup (0);
   REQUIRE (saved >= 0);
   close (0);
 
   /* Confirm 0 is the lowest free descriptor before calling.  If it is not,
-     create_socket goes on to accept and blocks for ever.  */
+     the premise of the case is gone.  */
   int probe = open ("/dev/null", O_RDONLY);
   int lowest = probe;
   if (probe >= 0)
@@ -778,11 +784,48 @@ TEST_CASE ("create_socket mistakes descriptor 0 for a failure (suspected "
     }
   REQUIRE (lowest == 0);
 
-  int res = create_socket (port);
+  /* create_socket blocks in accept, so the connection comes from a second
+     thread.  It waits for descriptor 0 to be a listening socket rather than
+     retrying connect, because a retry would need a fresh socket and that
+     socket could be the one to take descriptor 0.  */
+  std::atomic<bool> listening (false);
+  std::thread dialer (
+      [&]
+	{
+	  struct sockaddr_in addr;
+	  int accepting = 0;
+	  socklen_t len = sizeof (accepting);
 
-  /* The listening socket really was created, on descriptor 0.  */
-  CHECK (res == 0);
-  close (0);
+	  for (int i = 0; i < 1000; i++)
+	    {
+	      if (getsockopt (0, SOL_SOCKET, SO_ACCEPTCONN, &accepting,
+			      &len) == 0 &&
+		  accepting)
+		break;
+	      std::this_thread::sleep_for (std::chrono::milliseconds (10));
+	    }
+	  listening = accepting != 0;
+	  if (!listening)
+	    return;
+
+	  memset (&addr, 0, sizeof (addr));
+	  addr.sin_family = AF_INET;
+	  addr.sin_addr.s_addr = htonl (INADDR_LOOPBACK);
+	  addr.sin_port = htons (port);
+	  if (connect (client, (struct sockaddr *) &addr, sizeof (addr)) < 0)
+	    listening = false;
+	});
+
+  int res = create_socket (port);
+  dialer.join ();
+
+  CHECK (listening); /* the listening socket really was descriptor 0 */
+  CHECK (res == 1);
+  CHECK (new_socket > 0);
+
+  close (new_socket);
+  close (client);
+  new_socket = saved_socket;
   dup2 (saved, 0);
   close (saved);
 }

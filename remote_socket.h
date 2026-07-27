@@ -55,11 +55,9 @@ public:
   {
     int fd = env_.Socket ();
 
-    /* A failed socket() returns -1, never 0.  This tests for 0, so a
-       descriptor 0 the kernel handed out is reported as a failure and a
-       real failure is not noticed.  Left as it stands, since the move is
-       not the place to change what the stub does.  */
-    if (fd == 0)
+    /* A failed socket() returns -1.  Zero is a valid descriptor and is what
+       the kernel hands out whenever stdin is closed.  */
+    if (fd < 0)
       {
 	env_.Fail ("socket failed");
 	return 0;
