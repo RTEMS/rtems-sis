@@ -20,6 +20,7 @@
  */
 
 #include "riscv.h"
+#include <assert.h>
 #include <stdio.h>
 #include <inttypes.h>
 #ifndef _WIN32
@@ -839,21 +840,26 @@ static void
 gpt_intr (int32 i)
 {
   gpt_counter[i] = -1;
-  if (gpt_ctrl[i] & 1)
+
+  /* Only gpt_add_intr queues this, and it queues nothing while the enable
+     bit is clear.  Every write which clears that bit takes the queued
+     callback away first, and the reset takes all of them, so a disabled
+     timer has none left to arrive.  Testing the bit again here would leave
+     an arc nothing can take.  */
+  assert (gpt_ctrl[i] & 1);
+
+  if (gpt_ctrl[i] & 2)
     {
-      if (gpt_ctrl[i] & 2)
-	{
-	  gpt_counter[i] = gpt_reload[i];
-	}
-      if (gpt_ctrl[i] & 8)
-	{
-	  /* Set Interrupt Pending (IP) bit to allow for shared interrupt
-	   * handling */
-	  gpt_ctrl[i] |= 0x10;
-	  grlib_set_irq (gpt_irq + i);
-	}
-      gpt_add_intr (i);
+      gpt_counter[i] = gpt_reload[i];
     }
+  if (gpt_ctrl[i] & 8)
+    {
+      /* Set Interrupt Pending (IP) bit to allow for shared interrupt
+       * handling */
+      gpt_ctrl[i] |= 0x10;
+      grlib_set_irq (gpt_irq + i);
+    }
+  gpt_add_intr (i);
 }
 
 static void
@@ -1684,8 +1690,12 @@ plic_read (uint32 addr, uint32 *data)
       else
 	*data = plic_ip[0];
     }
-  else if (addr < PLIC_IPEND)
+  else
     {
+      /* The arms above take everything from the pending register up, so
+	 what is left is below it and names a priority.  Testing for that
+	 again would leave an arc no address can take.  */
+      assert (addr < PLIC_IPEND);
       *data = plic_prio[(addr & 0x0ff) >> 2]; // irq priority, not used for now
     }
   if (sis_verbose)
