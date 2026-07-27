@@ -400,14 +400,29 @@ struct plic_fixture : sis_tests::grlib_core_fixture
 
   /* plic has no init and no reset (const struct grlib_ipcore plic = { NULL,
      NULL, ... }), so plic_prio/plic_ie/plic_ip/plic_thres/plic_claim are
-     static file-local arrays in grlib.cc that live for the whole process.
-     The only way to zero them back through the struct grlib_ipcore
-     interface is the claim/complete cycle of sections 7.10 and 7.11: open
-     every source's enable and threshold, claim and complete until a claim
-     returns 0 (7.10: "The PLIC core will return an ID of zero, if there
-     were no pending interrupts"), then close the enables and priorities
-     again.  Run this before and after every case so one case can never
-     see what an earlier one left pending.  */
+     static file-local arrays in grlib.cc that live for the whole process,
+     shared with whatever else drives the same plic core (tests/ns16550.cc's
+     cases raise interrupts through the same ns16550_write -> plic_irq path
+     and leave bits in plic_ip[0] set when they are done).  The only way to
+     zero them back through the struct grlib_ipcore interface is the
+     claim/complete cycle of sections 7.10 and 7.11: open every source's
+     enable and threshold, claim and complete until a claim returns 0
+     (7.10: "The PLIC core will return an ID of zero, if there were no
+     pending interrupts"), then close the enables and priorities again.
+     Run this before and after every case so one case can never see what an
+     earlier one left pending.
+
+     plic_claim[hart] only ever gets a value inside plic_check_irq
+     (grlib.cc:1625-1637), which only runs from plic_irq or from a
+     completion write (the "irq completion" arm of plic_write).  A claim
+     read hands out whatever is already in plic_claim[hart] and then zeroes
+     it (grlib.cc:1662-1664); it does not compute anything itself.  So a
+     bare read here, with nothing having forced a completion first, returns
+     the stale 0 an earlier claim already read and left behind, the loop
+     exits on its first try, and any bits some other test's raise left in
+     plic_ip[0] survive the drain.  A completion write forces the
+     recompute; do one before the first read as well as after every
+     nonzero one.  */
   void
   drain ()
   {
@@ -419,6 +434,7 @@ struct plic_fixture : sis_tests::grlib_core_fixture
 
 	write (ena, 0xffffffff);
 	write (thres, 0);
+	write (claim, 0); /* completion, forces the first recompute */
 	for (int tries = 0; tries < 40; tries++)
 	  {
 	    uint32 id = read (claim);
@@ -438,6 +454,13 @@ struct plic_fixture : sis_tests::grlib_core_fixture
 	sregs[i].mip = 0;
 	ext_irl[i] = 0;
       }
+
+    /* A future change that breaks the drain should fail loudly here
+       rather than as a mystifying assertion in some unrelated case.  CHECK,
+       not REQUIRE: this runs from the destructor too, where throwing would
+       be unsafe.  */
+    CHECK (read (PLIC_IPEND0) == 0u);
+    CHECK (read (PLIC_IPEND0 + 4) == 0u);
   }
 
   /* Raises an interrupt request the way the ns16550 UART does: grlib.cc
