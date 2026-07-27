@@ -216,6 +216,8 @@ public:
 
     struct rlimit rl = saved;
     rl.rlim_cur = (rlim_t) pages * (rlim_t) sysconf (_SC_PAGESIZE) + headroom;
+    if (saved.rlim_max != RLIM_INFINITY && rl.rlim_cur > saved.rlim_max)
+      rl.rlim_cur = saved.rlim_max;
     REQUIRE (setrlimit (RLIMIT_AS, &rl) == 0);
   }
 
