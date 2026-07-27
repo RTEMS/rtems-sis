@@ -62,11 +62,12 @@ riscv_set_fsr (uint32 fsr)
 
   fsr >>= 5;
   fsr &= 0x3;
+
+  /* Two bits are taken and all four values name a mode, so the nearest mode
+     carries the group and no value is left over.  */
+  assert (fsr <= 3);
   switch (fsr)
     {
-    case 0:
-      fround = FE_TONEAREST;
-      break;
     case 1:
       fround = FE_TOWARDZERO;
       break;
@@ -75,6 +76,9 @@ riscv_set_fsr (uint32 fsr)
       break;
     case 3:
       fround = FE_UPWARD;
+      break;
+    default:
+      fround = FE_TONEAREST;
       break;
     }
   fesetround (fround);
@@ -248,6 +252,11 @@ riscv_dispatch_instruction (struct pstate *sregs)
       rs2p = ((sregs->inst >> 2) & 7) | 8;
       rs1 = ((sregs->inst >> 7) & 0x1f);
       rs2 = ((sregs->inst >> 2) & 0x1f);
+
+      /* The guard above rules out the fourth quadrant, so the third carries
+	 the group.  It is also the commonest, since the stack relative
+	 accesses and the register moves live there.  */
+      assert ((sregs->inst & 3) != 3);
       switch (sregs->inst & 3)
 	{
 	case 0:
@@ -391,9 +400,13 @@ riscv_dispatch_instruction (struct pstate *sregs)
 	    }
 	  break;
 	case 1:
+	  /* Every value of the function field is assigned in this quadrant,
+	     so the add immediate carries the group.  It is also the
+	     commonest of the eight.  */
+	  assert (funct3 <= 7);
 	  switch (funct3)
 	    {
-	    case CADDI: /* addi rd, rd, nzimm[5:0] */
+	    default: /* addi rd, rd, nzimm[5:0] */
 	      sop1 = sregs->r[rs1];
 	      sop2 = EXTRACT_RVC_IMM (sregs->inst);
 	      sregs->r[rs1] = sop1 + sop2;
@@ -442,6 +455,9 @@ riscv_dispatch_instruction (struct pstate *sregs)
 		  sregs->r[rs1p] &= sop2; /* ANDI */
 		  break;
 		case 3:
+		  /* Two bits pick the operation and all four values are
+		     assigned, so the and carries the group.  */
+		  assert (((sregs->inst >> 5) & 3) <= 3);
 		  switch ((sregs->inst >> 5) & 3)
 		    {
 		    case 0: /* sub rd', rd', rs2' */
@@ -453,7 +469,7 @@ riscv_dispatch_instruction (struct pstate *sregs)
 		    case 2:				/* or rd', rd', rs2' */
 		      sregs->r[rs1p] |= sregs->r[rs2p]; /* OR */
 		      break;
-		    case 3: /* and rd', rd', rs2' */
+		    default: /* and rd', rd', rs2' */
 		      sregs->r[rs1p] &= sregs->r[rs2p]; /* AND */
 		      break;
 		    }
@@ -506,11 +522,13 @@ riscv_dispatch_instruction (struct pstate *sregs)
 		}
 	      npc &= ~1;
 	      break;
-	    default:
-	      sregs->trap = TRAP_ILLEG;
 	    }
 	  break;
-	case 2:
+	default: /* the third quadrant */
+	  /* Every value of the function field is assigned here too, so the
+	     group which moves and jumps through a register carries it.  That
+	     group is also the commonest.  */
+	  assert (funct3 <= 7);
 	  switch (funct3)
 	    {
 	    case 0: /* slli rd', rd', shamt[5:0] */
@@ -583,7 +601,7 @@ riscv_dispatch_instruction (struct pstate *sregs)
 		  sregs->fsi[(rs1 << 1) + BEH] = op1;
 		}
 	      break;
-	    case 4:
+	    default:
 	      if ((sregs->inst >> 12) & 1)
 		{
 		  if (rs1)
@@ -688,12 +706,8 @@ riscv_dispatch_instruction (struct pstate *sregs)
 		  sregs->wpaddress = address;
 		}
 	      break;
-	    default:
-	      sregs->trap = TRAP_ILLEG;
 	    }
 	  break;
-	default:
-	  sregs->trap = TRAP_ILLEG;
 	}
     }
   else
@@ -899,9 +913,13 @@ riscv_dispatch_instruction (struct pstate *sregs)
 		}
 	      break;
 	    case 1: /* MUL/DIV */
+	      /* The M extension assigns all eight function codes, so the low
+		 multiply carries the group.  It is also the commonest of the
+		 eight.  */
+	      assert (funct3 <= 7);
 	      switch (funct3)
 		{
-		case 0: /* MUL */
+		default: /* MUL */
 		  sop1 = op1;
 		  sop2 = op2;
 		  sop2 = op1 * op2;
@@ -1648,6 +1666,12 @@ riscv_dispatch_instruction (struct pstate *sregs)
 		      break;
 		    case 1: /* FCLASS */
 		      op1 = fpclassify (sregs->fs[frs1]);
+
+		      /* The host returns one of these five and nothing else,
+			 so the normal class carries the group.  */
+		      assert (op1 == FP_NAN || op1 == FP_INFINITE ||
+			      op1 == FP_ZERO || op1 == FP_SUBNORMAL ||
+			      op1 == FP_NORMAL);
 		      switch (op1)
 			{
 			case FP_NAN:
@@ -1677,7 +1701,7 @@ riscv_dispatch_instruction (struct pstate *sregs)
 			  else
 			    op1 = (1 << 5);
 			  break;
-			case FP_NORMAL:
+			default: /* FP_NORMAL */
 			  if (sregs->fsi[frs1] & 0x80000000)
 			    op1 = (1 << 1);
 			  else
@@ -1823,6 +1847,12 @@ riscv_dispatch_instruction (struct pstate *sregs)
 		    {
 		    case 1:
 		      op1 = fpclassify (sregs->fd[rs1]);
+
+		      /* The host returns one of these five and nothing else,
+			 so the normal class carries the group.  */
+		      assert (op1 == FP_NAN || op1 == FP_INFINITE ||
+			      op1 == FP_ZERO || op1 == FP_SUBNORMAL ||
+			      op1 == FP_NORMAL);
 		      switch (op1)
 			{
 			case FP_NAN:
@@ -1853,7 +1883,7 @@ riscv_dispatch_instruction (struct pstate *sregs)
 			  else
 			    op1 = (1 << 5);
 			  break;
-			case FP_NORMAL:
+			default: /* FP_NORMAL */
 			  if (sregs->fsi[(rs1 << 1) + 1 - BEH] & 0x80000000)
 			    op1 = (1 << 1);
 			  else
