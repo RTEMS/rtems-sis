@@ -23,6 +23,7 @@ help.cc
 interf.cc
 leon2.cc
 riscv.cc
+rv32.cc
 sis.cc
 sisio.cc
 sparc.cc

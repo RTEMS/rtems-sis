@@ -82,7 +82,7 @@ against real descriptors the way `tests/sisio.cc` does.
 ## Where the tree stands
 
 Measured with `./waf configure --enable-coverage && ./waf`, branch metric,
-4557 of 5195 arcs (88%). The totals move as headers join the filter and as
+4786 of 5182 arcs (92%). The totals move as headers join the filter and as
 duplicated and dead code is removed, so compare per file rather than against
 an older total. Read the per file rows of the gcovr report, not its `TOTAL`
 line: that row counts the standard library headers the build pulls in, whose
@@ -95,19 +95,12 @@ tree.
 | `sparc.cc` | 1133 | 1133 |
 | `func.cc` | 603 | 581 |
 | `grlib.cc` | 387 | 385 |
-| `grspw.cc` | 206 | 206 |
-| `gr1553.cc` | 120 | 120 |
-| `leon2.cc` | 140 | 140 |
-| `leon3.cc` | 42 | 38 |
-| `gr740.cc` | 42 | 38 |
-| `rv32.cc` | 50 | 48 |
-| `elf.cc` | 95 | 95 |
-| `interf.cc` | 118 | 118 |
-| `remote.cc` | 226 | 3 |
-| `sis.cc` | 207 | 0 |
-| `memscrub.cc` | 94 | 0 |
+| `leon3.cc` | 42 | 41 |
+| `gr740.cc` | 42 | 41 |
+| `remote.cc` | 226 | 14 |
+| `memscrub.cc` | 94 | 1 |
 | `tap.cc` | 65 | 0 |
-| graduated: `elf.cc`, `erc32_cfg.h`, `erc32_error.h`, `erc32_mec.h`, `erc32_timer.h`, `erc32_uart.h`, `erc32.cc`, `exec.cc`, `gr1553.cc`, `greth.cc`, `grspw.cc`, `help.cc`, `interf.cc`, `leon2.cc`, `riscv.cc`, `sisio.cc`, `sparc.cc`, `uartport.cc` | | 100% |
+| graduated: `elf.cc`, `erc32_cfg.h`, `erc32_error.h`, `erc32_mec.h`, `erc32_timer.h`, `erc32_uart.h`, `erc32.cc`, `exec.cc`, `gr1553.cc`, `greth.cc`, `grspw.cc`, `help.cc`, `interf.cc`, `leon2.cc`, `riscv.cc`, `rv32.cc`, `sis.cc`, `sisio.cc`, `sparc.cc`, `uartport.cc` | | 100% |
 
 Done, graduated in `tests/covered.txt`:
 
@@ -517,12 +510,24 @@ all of the concepts; each test file holds a small `TestEnv` per subsystem.
    and the case does assert the rejection; the failure simply cannot be
    told apart from the one downstream.
 
-   **Two defects are reported and left unfixed.** `read_elf_body` reads
-   `e_phnum` program headers into `Elf32_Phdr ph[16]` with no bound, so a
-   file naming more than sixteen overflows a stack array. No case pins
-   it, because a case that triggered it would corrupt the test binary's
-   stack. `read_elf_header` also leaves the file open when it fails, which
-   is the file descriptor half of the leak AddressSanitizer reports here.
+   **The stack overflow reported here is fixed.** `read_elf_body` read
+   `e_phnum` program headers into `Elf32_Phdr ph[16]` with no bound, and
+   `e_phnum` is a 16-bit field of the file, so a file naming more than
+   sixteen overran the array. `e_phentsize`, also from the file, set the
+   size of each `fread`, so a large value overran it even within sixteen
+   entries. The array is allocated from the count now, and a read takes
+   only what one header holds, leaving `e_phentsize` as the file's stride.
+
+   It was reported as unpinnable, on the grounds that a case triggering it
+   would corrupt the test binary's stack. That is true of a malformed file
+   and not of a well formed one: `build_elf` takes a program header count,
+   and sixty-four headers all naming the same segment load exactly as one
+   does. Restoring the fixed array makes that case abort under glibc's
+   fortified `fread` before it can corrupt anything. **A case that cannot
+   be written safely against a malformed input is often writable against a
+   valid one**, and the allocation failure beside it went the same way:
+   `e_phnum` at 65535 asks for two megabytes, which `address_space_cap`
+   refuses, so that arc is covered rather than left as a gap.
 5. `greth.cc`, `tap.cc`, `grspw.cc`, `gr1553.cc`. Last. They need host tap
    devices and privileges, they model only what the GRLIB example applications
    exercise, and they are where 100% is most likely to force a restructure
