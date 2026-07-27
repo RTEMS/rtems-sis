@@ -22,6 +22,8 @@ grspw.cc
 help.cc
 interf.cc
 leon2.cc
+remote.cc
+remote_socket.h
 riscv.cc
 rv32.cc
 sis.cc

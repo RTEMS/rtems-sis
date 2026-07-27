@@ -43,6 +43,7 @@
 #include <signal.h>
 #include "sis.h"
 #include "sisio.h"
+#include "remote_socket.h"
 
 #define EBREAK	0x00100073
 #define CEBREAK 0x90002
@@ -59,14 +60,88 @@ static char sendbuf[2048] = "$";
 static const char hexchars[] = "0123456789abcdef";
 static int detach = 0;
 
+/* The sockets API, as the listener template sees it.  */
+
+namespace
+{
+
+struct RealEnv
+{
+  int
+  Socket ()
+  {
+    return socket (AF_INET, SOCK_STREAM, 0);
+  }
+
+  int
+  SetReuseAddr (int fd)
+  {
+    int opt = 1;
+    return setsockopt (fd, SOL_SOCKET, SO_REUSEADDR, (char *) &opt,
+		       sizeof (opt));
+  }
+
+  int
+  Bind (int fd, int port)
+  {
+    struct sockaddr_in address;
+
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_port = htons (port);
+
+    return bind (fd, (struct sockaddr *) &address, sizeof (address));
+  }
+
+  int
+  Listen (int fd)
+  {
+    return listen (fd, 1);
+  }
+
+  int
+  Accept (int fd)
+  {
+    struct sockaddr_in address;
+    int addrlen = sizeof (address);
+
+    return accept (fd, (struct sockaddr *) &address, (socklen_t *) &addrlen);
+  }
+
+  void
+  Close (int fd)
+  {
+    closesocket (fd);
+  }
+
+  void
+  Configure (int fd)
+  {
+    int opt = 1;
+    struct protoent *proto;
+
+    setsockopt (fd, SOL_SOCKET, SO_KEEPALIVE, (char *) &opt, sizeof (opt));
+    proto = getprotobyname ("tcp");
+    setsockopt (fd, proto->p_proto, TCP_NODELAY, (char *) &opt, sizeof (opt));
+#ifndef _WIN32
+    fcntl (fd, F_SETOWN, getpid ());
+#endif
+  }
+
+  void
+  Fail (const char *what)
+  {
+    perror (what);
+  }
+};
+
+} /* namespace */
+
 int
 create_socket (int port)
 {
-  int server_fd;
-  struct sockaddr_in address;
-  int opt = 1;
-  int addrlen = sizeof (address);
-  struct protoent *proto;
+  RealEnv env;
+  remote::Listener<RealEnv> listener (env);
 
 #ifdef _WIN32
   WORD wver;
@@ -76,52 +151,7 @@ create_socket (int port)
     return 0;
 #endif
 
-  // Creating socket file descriptor
-  if ((server_fd = socket (AF_INET, SOCK_STREAM, 0)) == 0)
-    {
-      perror ("socket failed");
-      return 0;
-    }
-
-  // Forcefully attaching socket to the port
-  if (setsockopt (server_fd, SOL_SOCKET, SO_REUSEADDR, (char *) &opt,
-		  sizeof (opt)))
-    {
-      perror ("setsockopt");
-      return 0;
-    }
-  address.sin_family = AF_INET;
-  address.sin_addr.s_addr = INADDR_ANY;
-  address.sin_port = htons (port);
-
-  // Forcefully attaching socket to the port
-  if (bind (server_fd, (struct sockaddr *) &address, sizeof (address)) < 0)
-    {
-      perror ("bind failed");
-      return 0;
-    }
-  if (listen (server_fd, 1) < 0)
-    {
-      perror ("listen");
-      return 0;
-    }
-  if ((new_socket = accept (server_fd, (struct sockaddr *) &address,
-			    (socklen_t *) &addrlen)) < 0)
-    {
-      perror ("accept");
-      return 0;
-    }
-  closesocket (server_fd);
-  setsockopt (new_socket, SOL_SOCKET, SO_KEEPALIVE, (char *) &opt,
-	      sizeof (opt));
-  proto = getprotobyname ("tcp");
-  setsockopt (new_socket, proto->p_proto, TCP_NODELAY, (char *) &opt,
-	      sizeof (opt));
-#ifndef _WIN32
-  fcntl (new_socket, F_SETOWN, getpid ());
-#endif
-
-  return 1;
+  return listener.Open (port, &new_socket);
 }
 
 /* poll socket periodically to detect gdb break */
@@ -150,6 +180,50 @@ hex (unsigned char ch)
   if (ch >= 'A' && ch <= 'F')
     return ch - 'A' + 10;
   return -1;
+}
+
+/* Scan the hexadecimal number at *POS and return its value.  The scan stops
+   at the first character that is not a hexadecimal digit, and *POS is left
+   one past it: that character is the separator the protocol puts between a
+   packet's fields.  A packet always ends in '#', so the scan cannot run past
+   the data that was received.  */
+
+static uint32
+gethex (const char *buf, unsigned int *pos)
+{
+  uint32 val = 0;
+  unsigned int i = *pos;
+  int digit;
+
+  while ((digit = hex (buf[i])) >= 0)
+    {
+      val = (val << 4) | digit;
+      i++;
+    }
+  *pos = i + 1;
+
+  return val;
+}
+
+/* The same, for a value sent least significant byte first, which is how a
+   little endian target's register value arrives.  */
+
+static uint32
+gethex_le (const char *buf, unsigned int *pos)
+{
+  uint32 val = 0;
+  unsigned int i = *pos;
+  uint32 byte;
+
+  while (hex (buf[i]) >= 0)
+    {
+      byte = hex (buf[i++]) << 4;
+      byte |= hex (buf[i++]);
+      val = (byte << 24) | (val >> 8);
+    }
+  *pos = i + 1;
+
+  return val;
 }
 
 void
@@ -276,38 +350,15 @@ gdb_remote_exec (char *buf)
       break;
     case 'm': /* read memory */
       i = 1;
-      len = 0;
-      addr = 0;
-      while (buf[i] && (buf[i] != ','))
-	{
-	  addr = (addr << 4) | hex (buf[i]);
-	  i++;
-	}
-      i++;
-      while (buf[i] && (buf[i] != '#'))
-	{
-	  len = (len << 4) | hex (buf[i]);
-	  i++;
-	}
+      addr = gethex (buf, &i);
+      len = gethex (buf, &i);
       sim_read (addr, membuf, len);
       int2hex (txbuf, membuf, len);
       break;
     case 'M': /* write memory */
       i = 1;
-      len = 0;
-      addr = 0;
-      while (buf[i] && (buf[i] != ','))
-	{
-	  addr = (addr << 4) | hex (buf[i]);
-	  i++;
-	}
-      i++;
-      while (buf[i] && (buf[i] != ':'))
-	{
-	  len = (len << 4) | hex (buf[i]);
-	  i++;
-	}
-      i++;
+      addr = gethex (buf, &i);
+      len = gethex (buf, &i);
       j = 0;
       while (buf[i] != '#')
 	{
@@ -320,28 +371,11 @@ gdb_remote_exec (char *buf)
       break;
     case 'P': /* write register */
       i = 1;
-      len = 0;
-      addr = 0;
-      while (buf[i] && (buf[i] != '='))
-	{
-	  addr = (addr << 4) | hex (buf[i]);
-	  i++;
-	}
-      i++;
-      while (buf[i] && (buf[i] != '#'))
-	{
-	  if (cputype == CPU_RISCV)
-	    {
-	      j = hex (buf[i++]);
-	      j <<= 4;
-	      j |= hex (buf[i]);
-	      len = (j << 24) | (len >> 8); /* value is in target order! */
-	    }
-	  else
-	    len = (len << 4) | hex (buf[i]);
-	  i++;
-	}
-      i++;
+      addr = gethex (buf, &i);
+      if (cputype == CPU_RISCV)
+	len = gethex_le (buf, &i); /* value is in target order! */
+      else
+	len = gethex (buf, &i);
       arch->set_register (&sregs[cpu], NULL, len, addr);
       strcpy (txbuf, "OK");
       break;
@@ -353,9 +387,11 @@ gdb_remote_exec (char *buf)
       sprintf (txbuf, "S%02x", i);
       if ((i == SIGTRAP) && ebase.wphit)
 	{
+	  /* check_wpw and check_wpr are the only writers of wptype and set
+	     2 for a write watchpoint and 3 for a read one.  */
 	  if (ebase.wptype == 2)
 	    sprintf (txbuf, "T%02xwatch:%x;", i, ebase.wpaddress);
-	  else if (ebase.wptype == 3)
+	  else
 	    sprintf (txbuf, "T%02xrwatch:%x;", i, ebase.wpaddress);
 	}
       break;
@@ -406,13 +442,7 @@ gdb_remote_exec (char *buf)
     case 'Z': /* add break/watch point */
     case 'z': /* remove break/watch point */
       i = 3;
-      addr = 0;
-      while (buf[i] && (buf[i] != ','))
-	{
-	  addr = (addr << 4) | hex (buf[i]);
-	  i++;
-	}
-      i++;
+      addr = gethex (buf, &i);
       len = hex (buf[i]);
       if (buf[0] == 'Z')
 	j = sim_set_watchpoint (addr, len, hex (buf[1]));

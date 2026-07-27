@@ -25,6 +25,7 @@
 #include "config.h"
 #include "sis.h"
 #include "sisio.h"
+#include "remote_socket.h"
 #include "support.h"
 
 #ifndef _WIN32
@@ -140,6 +141,74 @@ public:
 
 private:
   int saved;
+};
+
+/* A sockets API for remote::Listener that holds its own state and fails
+   where a case tells it to.  The defaults are the successful sequence.  */
+struct listener_env
+{
+  int socket_fd = 3;
+  int reuse = 0;
+  int bind_result = 0;
+  int listen_result = 0;
+  int accept_fd = 4;
+  int bound_port = -1;
+  int closed = -1;
+  int configured = -1;
+  std::string failure;
+
+  int
+  Socket ()
+  {
+    return socket_fd;
+  }
+
+  int
+  SetReuseAddr (int fd)
+  {
+    (void) fd;
+    return reuse;
+  }
+
+  int
+  Bind (int fd, int port)
+  {
+    (void) fd;
+    bound_port = port;
+    return bind_result;
+  }
+
+  int
+  Listen (int fd)
+  {
+    (void) fd;
+    return listen_result;
+  }
+
+  int
+  Accept (int fd)
+  {
+    (void) fd;
+    return accept_fd;
+  }
+
+  void
+  Close (int fd)
+  {
+    closed = fd;
+  }
+
+  void
+  Configure (int fd)
+  {
+    configured = fd;
+  }
+
+  void
+  Fail (const char *what)
+  {
+    failure = what;
+  }
 };
 
 /* A loopback port nothing is listening on.  Bind to port zero, note what
@@ -564,6 +633,94 @@ TEST_CASE_FIXTURE (remote_fixture,
   CHECK (log.find ("connected") == std::string::npos);
   CHECK (new_socket == 0);
   CHECK (sis_gdb_break == 0);
+}
+
+TEST_CASE ("the listener serves one connection")
+{
+  /* The successful sequence: create, allow the port to be rebound, bind,
+     listen with a backlog of one, accept, then drop the listening socket
+     and configure the connection.  */
+  listener_env env;
+  remote::Listener<listener_env> listener (env);
+  int conn = -2;
+
+  CHECK (listener.Open (1234, &conn) == 1);
+  CHECK (conn == 4);
+  CHECK (env.bound_port == 1234);
+  CHECK (env.closed == 3);     /* the listening socket, not the connection */
+  CHECK (env.configured == 4); /* keep-alive and no delay on the connection */
+  CHECK (env.failure == "");
+}
+
+TEST_CASE ("the listener reports a failed socket call")
+{
+  /* POSIX: socket, bind, listen and accept report failure as -1, and
+     setsockopt reports it as a non-zero return.  Each failure stops the
+     sequence and is named.  */
+  listener_env env;
+  remote::Listener<listener_env> listener (env);
+  int conn = -2;
+
+  SUBCASE ("setsockopt")
+  {
+    env.reuse = -1;
+    CHECK (listener.Open (1234, &conn) == 0);
+    CHECK (env.failure == "setsockopt");
+    /* Nothing was bound, so the port is still free.  */
+    CHECK (env.bound_port == -1);
+  }
+
+  SUBCASE ("bind")
+  {
+    env.bind_result = -1;
+    CHECK (listener.Open (1234, &conn) == 0);
+    CHECK (env.failure == "bind failed");
+  }
+
+  SUBCASE ("listen")
+  {
+    env.listen_result = -1;
+    CHECK (listener.Open (1234, &conn) == 0);
+    CHECK (env.failure == "listen");
+  }
+
+  SUBCASE ("accept")
+  {
+    env.accept_fd = -1;
+    CHECK (listener.Open (1234, &conn) == 0);
+    CHECK (env.failure == "accept");
+    /* The accept result is stored before it is checked, so the caller
+       sees the failed descriptor.  */
+    CHECK (conn == -1);
+  }
+
+  /* No failure path hands out a connection to configure.  */
+  CHECK (env.configured == -1);
+  CHECK (conn != 4);
+}
+
+TEST_CASE ("the listener mistakes descriptor 0 for a failure (suspected "
+	   "defect)")
+{
+  /* POSIX: socket() returns -1 on failure, and 0 is a perfectly good
+     descriptor.  The listener tests for 0, so it reports a real failure as
+     success and a descriptor 0 as a failure.  */
+  listener_env env;
+  remote::Listener<listener_env> listener (env);
+  int conn = -2;
+
+  env.socket_fd = 0;
+  CHECK (listener.Open (1234, &conn) == 0);
+  CHECK (env.failure == "socket failed");
+  CHECK (conn == -2);
+
+  /* And the real failure sails through to bind.  */
+  listener_env broken;
+  remote::Listener<listener_env> unlucky (broken);
+  broken.socket_fd = -1;
+  broken.bind_result = -1;
+  CHECK (unlucky.Open (1234, &conn) == 0);
+  CHECK (broken.failure == "bind failed");
 }
 
 TEST_CASE ("create_socket mistakes descriptor 0 for a failure (suspected "
