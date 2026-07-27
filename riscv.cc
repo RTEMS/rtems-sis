@@ -3142,14 +3142,10 @@ riscv_disas (char *st, uint32 pc, uint32 inst)
 		  else
 		    strcpy (opc, "fmin.s");
 		  break;
-		case 0x08: /* FCVTSD / FCVTDS */
-		  switch (funct2)
-		    {
-		    case 0: /* FCVTSD */
-		      strcpy (opc, "fcvt.s.d");
-		      sprintf (param, "%s,%s", ftbl[rd], ftbl[rs1]);
-		      break;
-		    }
+		case 0x08: /* FCVTSD: the single precision group, so the
+			      format is already known to be single */
+		  strcpy (opc, "fcvt.s.d");
+		  sprintf (param, "%s,%s", ftbl[rd], ftbl[rs1]);
 		  break;
 		case 0x0b: /* FSQRTS */
 		  strcpy (opc, "fsqrt.s");
@@ -3248,14 +3244,10 @@ riscv_disas (char *st, uint32 pc, uint32 inst)
 		  else
 		    strcpy (opc, "fmin.d");
 		  break;
-		case 0x08: /* FCVTSD / FCVTDS */
-		  switch (funct2)
-		    {
-		    case 1: /* FCVTDS */
-		      strcpy (opc, "fcvt.d.s");
-		      sprintf (param, "%s,%s", ftbl[rd], ftbl[rs1]);
-		      break;
-		    }
+		case 0x08: /* FCVTDS: the double precision group, so the
+			      format is already known to be double */
+		  strcpy (opc, "fcvt.d.s");
+		  sprintf (param, "%s,%s", ftbl[rd], ftbl[rs1]);
 		  break;
 		case 0x0b: /* FSQRTD */
 		  strcpy (opc, "fsqrt.d");
