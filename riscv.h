@@ -160,6 +160,7 @@
 #define MIP_MSIP 0x008
 #define MIP_MTIP 0x080
 #define MIP_MEIP 0x800
+#define MIE_MSIE 0x008
 #define MIE_MTIE 0x080
 #define MIE_MEIE 0x800
 

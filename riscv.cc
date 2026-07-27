@@ -2017,6 +2017,9 @@ riscv_execute_trap (struct pstate *sregs)
 	    sregs->trap);
   if (sregs->trap >= 256)
     {
+      /* The pseudo traps are the four values from 256 up, so the last of them
+	 carries the group and no case is left over.  */
+      assert (sregs->trap <= NULL_TRAP);
       switch (sregs->trap)
 	{
 	case 256:
@@ -2027,7 +2030,7 @@ riscv_execute_trap (struct pstate *sregs)
 	  return (ERROR_MODE);
 	case WPT_TRAP:
 	  return (WPT_HIT);
-	case NULL_TRAP:
+	default:
 	  return (NULL_HIT);
 	}
     }
