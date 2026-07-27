@@ -97,17 +97,17 @@ tree.
 | `grlib.cc` | 387 | 385 |
 | `grspw.cc` | 206 | 206 |
 | `gr1553.cc` | 120 | 120 |
-| `leon2.cc` | 150 | 141 |
+| `leon2.cc` | 140 | 140 |
 | `leon3.cc` | 42 | 38 |
 | `gr740.cc` | 42 | 38 |
 | `rv32.cc` | 50 | 48 |
-| `elf.cc` | 97 | 91 |
+| `elf.cc` | 95 | 95 |
 | `interf.cc` | 118 | 118 |
 | `remote.cc` | 226 | 3 |
 | `sis.cc` | 207 | 0 |
 | `memscrub.cc` | 94 | 0 |
 | `tap.cc` | 65 | 0 |
-| graduated: `erc32_cfg.h`, `erc32_error.h`, `erc32_mec.h`, `erc32_timer.h`, `erc32_uart.h`, `erc32.cc`, `exec.cc`, `gr1553.cc`, `greth.cc`, `grspw.cc`, `help.cc`, `interf.cc`, `riscv.cc`, `sisio.cc`, `sparc.cc`, `uartport.cc` | | 100% |
+| graduated: `elf.cc`, `erc32_cfg.h`, `erc32_error.h`, `erc32_mec.h`, `erc32_timer.h`, `erc32_uart.h`, `erc32.cc`, `exec.cc`, `gr1553.cc`, `greth.cc`, `grspw.cc`, `help.cc`, `interf.cc`, `leon2.cc`, `riscv.cc`, `sisio.cc`, `sparc.cc`, `uartport.cc` | | 100% |
 
 Done, graduated in `tests/covered.txt`:
 
@@ -437,10 +437,75 @@ all of the concepts; each test file holds a small `TestEnv` per subsystem.
    carries no `NDEBUG`, and stay quiet across all 234 end to end runs.
 3. `leon2.cc`, `leon3.cc`, `gr740.cc`, `rv32.cc`. Thin once `grlib.cc` and the
    shared port module are done.
+
+   **`leon2.cc` is done, 140 of 140 arcs, graduated.** Its last nine arcs
+   were closed by removing dead code rather than by new cases, which is
+   rule 6, and the pre-existing cases in `tests/leon.cc` cover what is
+   left:
+
+   - `chk_irq` searched bits 15 down to 1 for the highest pending
+     interrupt and could fall out of the loop. It cannot: the value it
+     searches is masked to bits 15 to 1, so a nonzero value always has
+     one. The search is now the loop condition, which both arms reach.
+   - `grlib_read_uart` and `grlib_write_uart` each decoded a three-way
+     switch with a verbose complaint for an unimplemented register.
+     `apb_read`, `apb_write` and `uart_intr` are the only callers and they
+     pass the data or the status register and nothing else, so the
+     complaint was unreachable. Both are a single test now.
+   - `store_bytes` switched on the two-bit store size with all four cases
+     named, so the no-case-matched arc was dead. It follows `erc32.cc`'s
+     shape now, an if chain whose last arm needs no test.
+   - `apb_read` and `apb_write` always returned `MOK`, and `memory_read`
+     tested the result for a memory exception that could not happen. Both
+     return void.
+
+   Removed with them: seven unused locals in `memory_write`,
+   `irqctrl_intack` and `leon2_reset`, and the unused `tmp` of
+   `grlib_read_uart`.
+
+   **`leon3.cc` stays at 38 of 42 and does not graduate.** Both remaining
+   arcs are in `init_sim`, which cannot be called from the shared test
+   binary; see the lesson below, and the header comment of
+   `tests/leon.cc`, which records the probe that confirmed it. Nothing
+   short of a teardown hook in `grlib.cc` closes them.
 4. `func.cc`, `elf.cc`, `interf.cc`, `remote.cc`, `sis.cc`. Simulator
    infrastructure with no hardware spec; `doc/` and the GDB remote protocol are
    the references. `func.cc` may deserve to move ahead of step 2 if its harness
    unlocks the board work.
+
+   **`elf.cc` is done, 95 of 95 arcs, graduated.** Its reference is the
+   System V ABI, chapters 4 and 5. Four of the last six arcs were the
+   unswapped side of the loader's byte swap: `tests/elf.cc` only ever
+   built big-endian files, so a file matching the little-endian host
+   never reached the body. `build_elf` now writes every field in the
+   encoding its `EI_DATA` names, and the new case loads a little-endian
+   file whose segment carries a load address separate from its virtual
+   address, so the program header fields are load bearing rather than
+   merely read.
+
+   The remaining two are allocation failures, and they are reachable
+   without contorting anything. `tests/elf.cc`'s `address_space_cap` caps
+   `RLIMIT_AS` just above what the process already maps, reading the
+   current size out of `/proc/self/statm`, so a section header naming
+   four gigabytes fails its allocation while every ordinary allocation in
+   the case still succeeds. The limit is restored on the way out. Use the
+   same seam for any other allocation failure a file has to cover.
+
+   Writing that case is what showed the section name table allocation was
+   not checked at all, while the section contents allocation beside it
+   was: a malformed size handed a null pointer straight to `fread`.
+   **Fixed**, in its own commit ahead of the case that covers it.
+
+   One dead arc went rather than being covered: `read_elf_body` tested its
+   file pointer for null after having already read through it, and
+   `elf_load` only calls it when `fopen` succeeded.
+
+   **Two defects are reported and left unfixed.** `read_elf_body` reads
+   `e_phnum` program headers into `Elf32_Phdr ph[16]` with no bound, so a
+   file naming more than sixteen overflows a stack array. No case pins
+   it, because a case that triggered it would corrupt the test binary's
+   stack. `read_elf_header` also leaves the file open when it fails, which
+   is the file descriptor half of the leak AddressSanitizer reports here.
 5. `greth.cc`, `tap.cc`, `grspw.cc`, `gr1553.cc`. Last. They need host tap
    devices and privileges, they model only what the GRLIB example applications
    exercise, and they are where 100% is most likely to force a restructure
