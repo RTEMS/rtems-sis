@@ -17,6 +17,14 @@ uart_port_open (struct uart_port *port, const char *name, const char *device,
 {
   port->name = name;
 
+  /* Attaching again starts from an unattached port.  A board may reopen one
+     it already opened, and the attempt can fail, so leaving the flags of the
+     previous attachment standing would pair an open port with the null
+     stream this sets below.  */
+  port->open = 0;
+  port->fd = -1;
+  port->ifd = -1;
+
   if (console)
     {
       port->fin = stdin;
@@ -117,7 +125,15 @@ uart_port_restore (struct uart_port *port)
 void
 uart_port_close (struct uart_port *port)
 {
-  if (port->open && port->fin != stdin)
+  if (!port->open)
+    return;
+
+  /* Clear the flag before the close rather than after, so that a second
+     call is a no-op instead of handing the same stream to fclose twice.
+     The boards read this flag to decide whether the port can still carry a
+     character, so a closed port has to report itself shut.  */
+  port->open = 0;
+  if (port->fin != NULL && port->fin != stdin)
     fclose (port->fin);
 }
 
