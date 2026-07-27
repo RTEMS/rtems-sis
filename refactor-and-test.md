@@ -802,7 +802,19 @@ Hard-won here, so the next person does not rediscover them.
   without freeing it. Coverage proves a line ran and mutation proves an
   assertion holds; neither says the line was memory safe. The sweep is cheap
   in a throwaway `git worktree` and is worth repeating whenever a batch
-  merges.
+  merges. A later sweep found a third: `-c` built its shell command by
+  copying an unbounded command line path into a fixed 256 byte allocation.
+  The sanitizer reported only the leak; the overflow came out of reading
+  what the leaked buffer was for, so treat a leak report as a pointer at
+  code worth looking at rather than as the whole finding.
+
+  **A subprocess hides its own sanitizer report.** `tests/sismain.cc` runs
+  each `sis_main` case in a forked child whose output goes to a captured
+  file, so a child that dies under the sanitizer shows up in the parent only
+  as a non-zero exit status, with nothing in the parent's log. That is how
+  the `-c` overflow presented. When a case that forks fails on a sanitized
+  build and the parent log is clean, run the `sis` binary directly with the
+  same arguments.
 
 - **A test may not name a fixed path under `/tmp`.** Three cases in
   `tests/funcq.cc` wrote to one, and when several builds of the suite ran at
