@@ -19,7 +19,7 @@ Set a breakpoint at *address*.
 **`bp`**  
 Print all breakpoints.
 
-**`delete num`**  
+**`-bp num`**; **`delete num`**  
 Delete breakpoint *num*. Use `bp` or `break` to see which number is assigned to
 the breakpoints.
 
@@ -29,7 +29,7 @@ Show RISC-V CSR registers
 **`cont [count]`**  
 Continue execution at present position, optionally for *count* instructions.
 
-**`dis [addr] [count]`**  
+**`disas [addr] [count]`**  
 Disassemble \[*count*\] instructions at address \[*addr*\]. Default values for
 *count* is 16 and *addr* is the present program counter.
 
@@ -51,9 +51,9 @@ after *count* instructions have been executed.
 **`help`**  
 Print a small help menu for the SIS commands.
 
-**`hist [trace_length]`**  
+**`history [trace_length]`**  
 Enable the instruction trace buffer. The *trace_length* last executed
-instructions will be placed in the trace buffer. A `hist` command without a
+instructions will be placed in the trace buffer. A `history` command without a
 *trace_length* will display the trace buffer. Specifying a zero trace length
 will disable the trace buffer.
 
@@ -62,7 +62,7 @@ Load an ELF file into simulator memory.
 
 **`mem [addr] [count]`**  
 Display memory at \[*addr*\] for \[*count*\] bytes. Same default values as for
-the `dis` command.
+the `disas` command.
 
 **`quit`**  
 Exits the simulator.
@@ -90,7 +90,9 @@ The register hardwired to zero, `g0` on SPARC and `zero` on RISC-V, cannot be
 set.
 
 **`reset`**  
-Perform a power-on reset. This command is equal to `run 0`.
+Perform a power-on reset. The simulated time and the execution statistics are
+cleared and every device is reset. Unlike `run`, this does not set the program
+counter from the loaded file and does not execute anything.
 
 **`run [count]`**  
 Reset the simulator and start execution from the entry point of the loaded ELF
@@ -102,13 +104,41 @@ breakpoints remain.
 Execute one instruction and print it to the simulator console. Equal to command
 `trace 1`
 
-**`sym`**  
-List symbols and corresponding addresses in the loaded program.
-
 **`trace [count]`**  
 Resume the simulator at the present position and print each execute instruction
 executes. If an instruction count is given (*count*), the simulator will stop
 after the specified number of instructions.
+
+**`cpu [num]`**  
+Print the cpu the shell acts on, or select cpu *num*. Commands that show or
+set registers apply to this cpu.
+
+**`ncpu [num]`**  
+Print the number of online cpus, or set it to *num*. See
+[Multi-processing](multi-processing.md).
+
+**`debug [level]`**  
+Print the debug level, or set it to *level*. A higher level makes the
+simulator narrate more of what it does.
+
+**`shell command`**  
+Run *command* through the host shell.
+
+**`tlimit value [unit]`**  
+Set a limit on simulated time. The *unit* is `us`, `ms` or `s`, microseconds
+by default. The limit is counted from the present simulated time.
+
+**`tcont value [unit]`**  
+Continue execution at the present position for at most *value* of simulated
+time. Equal to `tlimit` followed by `cont`.
+
+**`tgo address [value [unit]]`**  
+Set pc to *address* and resume, for at most *value* of simulated time. With no
+*value* the entry point of the loaded file is used and no limit is set.
+
+**`trun value [unit]`**  
+Reset the simulator and start execution from the entry point of the loaded ELF
+file, for at most *value* of simulated time. Equal to `run` with a time limit.
 
 **`wmem addr data`**  
 Write *data* to memory at *addr*. Data is written as a 32-bit word.
@@ -116,7 +146,7 @@ Write *data* to memory at *addr*. Data is written as a 32-bit word.
 **`wp`**  
 Print all watchpoints
 
-**`+wpr address`**  
+**`+wpr address`**; **`rwatch address`**  
 Adds an read watchpoint at address *address*.
 
 **`-wpr num`**  

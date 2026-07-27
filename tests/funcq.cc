@@ -19,25 +19,21 @@
    shared with every other test file, so every case restores what it
    touches; see the func_fixture below.
 
-   doc/commands.md is the source of truth for user visible shell behaviour;
-   a case that pins behaviour the manual does not describe says so in its
-   name.  Two discrepancies between the code and the manual turned up while
-   writing these cases and are called out at their case instead of being
-   silently worked around:
+   doc/commands.md is the source of truth for user visible shell behaviour.
+   Three discrepancies between the code and the manual turned up while
+   writing these cases and all three are now settled, two in the manual and
+   one in the shell:
 
-   - doc/commands.md documents "reset" as "equal to run 0"; the code's
-     "reset" case only clears simtime/simstart and calls reset_all() plus
-     reset_stat(), it does not set pc from last_load_addr, does not call
-     ms->boot_init() and does not call run_sim() at all the way "run 0"
-     does.
-   - doc/commands.md documents the trace command as "trace [count]", but
-     the shell only recognises abbreviations that are a prefix of its own
-     internal "tra", so the full word "trace" does not match and falls
-     through to "syntax error"; only "tra" itself (or a shorter prefix)
-     works.
-   - doc/commands.md documents a "sym" command; the code that would
-     implement it is commented out, so "sym" always falls through to
-     "syntax error".  */
+   - the manual described "reset" as "equal to run 0", which it never was:
+     it clears simtime and simstart and calls reset_all() and reset_stat(),
+     and does not set the pc, call boot_init() or run anything.  The manual
+     describes what it does now.
+   - the shell matched the trace command against its own internal "tra", so
+     the documented full word "trace" fell through to "syntax error".  The
+     shell holds the full name now and every prefix down to "tra" reaches
+     it.
+   - the manual documented a "sym" command whose implementation is
+     commented out.  The manual no longer promises one.  */
 
 #include "doctest.h"
 #include "support.h"
@@ -977,11 +973,8 @@ TEST_CASE_FIXTURE (func_fixture, "'quit' returns QUIT without touching "
 }
 
 TEST_CASE_FIXTURE (func_fixture, "'reset' clears the simulated time and "
-				 "the statistics, doc/commands.md \"reset\" "
-				 "(current behaviour: unlike \"run 0\" as "
-				 "documented, it does not set pc from the "
-				 "loaded file, does not call boot_init and "
-				 "does not call run_sim at all)")
+				 "the statistics without running, "
+				 "doc/commands.md \"reset\"")
 {
   ebase.simtime = 12345;
   sregs[0].ninst = 7;
@@ -1853,21 +1846,30 @@ TEST_CASE_FIXTURE (func_fixture,
 }
 
 TEST_CASE_FIXTURE (func_fixture,
-		   "the full word 'trace' does not match, only 'tra' does "
-		   "(current behaviour, contradicts doc/commands.md which "
-		   "documents the command as \"trace [count]\")")
+		   "the full word 'trace' matches, and so does any prefix "
+		   "of it down to 'tra'")
 {
-  stdout_capture capture;
-  exec_cmd ("trace 1");
+  /* doc/commands.md documents the command as "trace [count]", and the
+     shell matches any prefix of a command name, so every spelling from
+     "tra" to the full word has to reach it.  */
+  fill_nops (0, 4);
 
-  CHECK (capture.str ().find ("syntax error") != std::string::npos);
+  for (const char *spelling : { "trace 1", "trac 1", "tra 1" })
+    {
+      sregs[0].pc = 0;
+      sregs[0].npc = 4;
+
+      stdout_capture capture;
+      exec_cmd (spelling);
+
+      CHECK (capture.str ().find ("syntax error") == std::string::npos);
+      CHECK (sregs[0].pc == 4);
+    }
 }
 
 TEST_CASE_FIXTURE (func_fixture,
-		   "'sym' always reports a syntax error (current "
-		   "behaviour, contradicts doc/commands.md which "
-		   "documents a \"sym\" command; the implementation is "
-		   "commented out)")
+		   "'sym' is not a command, and doc/commands.md no longer "
+		   "documents one")
 {
   stdout_capture capture;
   exec_cmd ("sym");

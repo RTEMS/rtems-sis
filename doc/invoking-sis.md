@@ -32,6 +32,12 @@ Emulate a GRISCV (RISCV/GRLIB) SOC device
 **`-rv32`**  
 Emulate a RISC-V RV32IMACFD processor with CLINT module.
 
+**`-riscv`**  
+Select the RISC-V architecture and leave the board to the loaded ELF file.
+Unlike `-griscv` and `-rv32` this names no SOC, so the board comes from the
+file's machine and entry point the way it does when no processor option is
+given at all.
+
 **`-v`**  
 Increase the debug level with 1, to provide more diagnostic messages. Can be
 added multiple times.

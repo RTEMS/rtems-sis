@@ -97,8 +97,6 @@ static int symcount = 0;
 static int batch (struct pstate *sregs, char *fname);
 static void init_event (void);
 static void disp_mem (uint32 addr, uint32 len);
-static void symprint ();
-static uint32 symtoaddr (char *s);
 
 static int
 batch (struct pstate *sregs, char *fname)
@@ -540,7 +538,7 @@ exec_cmd (const char *cmd)
 	      printf ("simulation limit = %u (%.3f ms)\n",
 		      (uint32) ebase.tlimit, ebase.tlimit / ebase.freq / 1000);
 	}
-      else if (strncmp (cmd1, "tra", clen) == 0)
+      else if (strncmp (cmd1, "trace", clen) == 0)
 	{
 	  if ((cmd1 = strtok (NULL, " \t\n\r")) == NULL)
 	    {

@@ -591,15 +591,15 @@ TEST_CASE ("an executable with an unknown entry point falls back to LEON3")
 	     .has ("RISCV/GRLIB emulation enabled"));
 }
 
-TEST_CASE ("-riscv selects the architecture only (suspected defect: "
-	   "undocumented option)")
+TEST_CASE ("-riscv selects the architecture only")
 {
-  /* sis_main accepts -riscv, but it appears neither in
-     doc/invoking-sis.md's option list nor in help.cc's sis_usage, which
-     names -erc32, -leon2, -leon3, -gr740, -griscv and -rv32 as the
-     supported processor switches.  Pinned here as it stands: either the
-     option or the documentation has to change.  */
+  /* doc/invoking-sis.md: "-riscv  Select the RISC-V architecture and leave
+     the board to the loaded ELF file."  With no file there is nothing to
+     read a board from, so the GRLIB default stands.  */
   CHECK (run_shell ({ "sis", "-riscv" }, "").has ("RISCV/GRLIB emulation"));
+
+  /* help.cc's sis_usage lists it alongside the processor switches.  */
+  CHECK (run_shell ({ "sis", "-help" }, "").has ("[-riscv]"));
 
   /* Unlike -griscv and -rv32 it leaves the board to the executable.  */
   temp_file elf ("-rv32.elf", make_elf (EM_RISCV_, 0x80000000, { RISCV_NOP }));

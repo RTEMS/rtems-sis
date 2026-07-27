@@ -32,6 +32,8 @@ sis_usage ()
 	  "is set by default\n");
   printf ("                          Supported values: [ -erc32 | -leon2 | "
 	  "-leon3 | -gr740 | -griscv | -rv32 ]\n");
+  printf ("  [-riscv]             -> Select the RISC-V architecture and take "
+	  "the board from the loaded file\n");
   printf ("  [-v]                 -> Enable verbose output.\n");
   printf ("  [-r]                 -> Start execution immediately without an "
 	  "interactive shell.\n");
