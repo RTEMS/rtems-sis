@@ -664,6 +664,27 @@ TEST_CASE ("-c runs a batch file at start-up")
   CHECK_FALSE (run_shell ({ "sis", "-c" }, "").has ("batch-file-ran"));
 }
 
+TEST_CASE ("-c takes a batch file whose path is long")
+{
+  /* doc/invoking-sis.md puts no length on the file name, and the path
+     comes straight from the command line.  The command was once built by
+     copying it into a fixed 256 byte allocation, which a path this long
+     ran past.  Only a sanitized build sees the overflow, so this case is a
+     guard for that build rather than a check of its own.  */
+  std::string suffix (225, 'b');
+
+  temp_file batch (("-" + suffix + ".txt").c_str (), "echo long-path-ran\n");
+
+  /* "batch " and the terminator take seven of the 256, so a path past 249
+     is what ran off the end.  A single name cannot exceed 255 bytes, which
+     is why this is as long as it is.  */
+  REQUIRE (batch.path ().size () > 249);
+
+  sis_result r = run_shell ({ "sis", "-c", batch.path () }, "");
+
+  CHECK (r.has ("long-path-ran"));
+}
+
 TEST_CASE ("-r starts execution without the interactive shell")
 {
   /* doc/invoking-sis.md: "-r  Start execution immediately without an

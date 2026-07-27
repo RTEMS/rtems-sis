@@ -49,7 +49,7 @@ sis_main (int argc, char **argv)
   int freq = 0;
   int copt = 0;
 
-  char *cfile, *bacmd;
+  char *cfile;
   std::string cmdq[HIST_LEN];
   int cmdi = 0;
   int i;
@@ -344,10 +344,13 @@ sis_main (int argc, char **argv)
 
   if (copt)
     {
-      bacmd = (char *) malloc (256);
-      strcpy (bacmd, "batch ");
-      strcat (bacmd, cfile);
-      exec_cmd (bacmd);
+      /* The path comes from the command line and is not bounded, so a
+	 fixed buffer overflowed on a long one.  The allocation was also
+	 never freed.  */
+      std::string bacmd = "batch ";
+
+      bacmd += cfile;
+      exec_cmd (bacmd.c_str ());
     }
   if (tlim[0])
     {
