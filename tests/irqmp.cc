@@ -29,6 +29,17 @@ const uint32 ICLEAR = 0x0c;
 const uint32 MPSTAT = 0x10;
 const uint32 BROADCAST = 0x14;
 const uint32 IMASK = 0x40;
+const uint32 IMASK1 = 0x44;
+const uint32 IMASK2 = 0x48;
+const uint32 IMASK3 = 0x4c;
+const uint32 IFORCE0 = 0x80;
+const uint32 IFORCE1 = 0x84;
+const uint32 IFORCE2 = 0x88;
+const uint32 IFORCE3 = 0x8c;
+const uint32 PEXTACK0 = 0xc0;
+const uint32 PEXTACK1 = 0xc4;
+const uint32 PEXTACK2 = 0xc8;
+const uint32 PEXTACK3 = 0xcc;
 
 struct irqmp_fixture : sis_tests::grlib_core_fixture
 {
@@ -179,4 +190,219 @@ TEST_CASE_FIXTURE (irqmp_fixture, "IRQMP a core raises through grlib_set_irq")
   grlib_set_irq (13);
   CHECK (read (IPEND) == (1u << 13));
   CHECK (ext_irl[0] == 13);
+}
+
+TEST_CASE_FIXTURE (irqmp_fixture,
+		   "IRQMP an extended interrupt forwards through eirq")
+{
+  /* Section 96.3.2 puts extended interrupts 16 to 31 in IPEND[31:16].
+     chk_irq folds any of those bits into the eirq line named by MPSTAT's
+     EIRQ field (96.3.5), which is what actually reaches the CPU.  */
+  irqmp_extirq = 14;
+
+  write (IMASK, (1 << 14) | (1 << 20));
+  write (IPEND, 1 << 20);
+
+  CHECK (ext_irl[0] == 14);
+  CHECK ((read (IPEND) & (1u << 20)) != 0);
+}
+
+TEST_CASE_FIXTURE (irqmp_fixture,
+		   "IRQMP intack finds the pending extended interrupt")
+{
+  /* Section 96.3.10: acknowledging the eirq level records the highest
+     pending extended interrupt's ID in PEXTACK and clears its IPEND bit.  */
+  irqmp_extirq = 14;
+
+  write (IMASK, (1 << 14) | (1 << 20));
+  write (IPEND, 1 << 20);
+  CHECK (ext_irl[0] == 14);
+
+  sregs[0].intack (14, 0);
+
+  CHECK (read (PEXTACK0) == 20);
+  CHECK ((read (IPEND) & (1u << 20)) == 0);
+  CHECK (ext_irl[0] == 0);
+}
+
+TEST_CASE_FIXTURE (
+    irqmp_fixture,
+    "IRQMP intack on eirq with no extended interrupt pending clears force")
+{
+  /* Section 96.3.10: PEXTACK reads 0 when the eirq assertion did not come
+     from an extended interrupt.  Here eirq itself was forced directly, so
+     the acknowledge still has to clear that plain force bit.  */
+  irqmp_extirq = 14;
+
+  write (IMASK, 1 << 14);
+  write (IFORCE, 1 << 14);
+  CHECK (ext_irl[0] == 14);
+
+  sregs[0].intack (14, 0);
+
+  CHECK (read (PEXTACK0) == 0);
+  CHECK (read (IFORCE) == 0);
+  CHECK (ext_irl[0] == 0);
+}
+
+TEST_CASE_FIXTURE (irqmp_fixture, "IRQMP intack clears a forced interrupt")
+{
+  /* A plain (non-extended) interrupt raised through the force register is
+     cleared from IFORCE, not from IPEND, on acknowledge.  */
+  irqmp_extirq = 14;
+
+  write (IMASK, 1 << 6);
+  write (IFORCE, 1 << 6);
+  CHECK (ext_irl[0] == 6);
+
+  sregs[0].intack (6, 0);
+
+  CHECK (read (IFORCE) == 0);
+  CHECK (read (IPEND) == 0);
+  CHECK (ext_irl[0] == 0);
+}
+
+TEST_CASE_FIXTURE (irqmp_fixture, "IRQMP intack clears a pending interrupt")
+{
+  /* The same plain interrupt raised through IPEND instead is cleared from
+     IPEND on acknowledge, not from IFORCE.  */
+  irqmp_extirq = 14;
+
+  write (IMASK, 1 << 6);
+  write (IPEND, 1 << 6);
+  CHECK (ext_irl[0] == 6);
+
+  sregs[0].intack (6, 0);
+
+  CHECK (read (IPEND) == 0);
+  CHECK (ext_irl[0] == 0);
+}
+
+TEST_CASE_FIXTURE (irqmp_fixture,
+		   "IRQMP processor N extended acknowledge is per CPU")
+{
+  /* Section 96.3.10 gives every CPU its own PEXTACK register at 0xC0 +
+     4*n.  Acknowledging on CPU 1 must only touch PEXTACK1.  */
+  irqmp_extirq = 14;
+
+  write (IMASK1, (1 << 14) | (1 << 22));
+  write (IPEND, 1 << 22);
+
+  sregs[1].intack (14, 1);
+
+  CHECK (read (PEXTACK0) == 0);
+  CHECK (read (PEXTACK1) == 22);
+  CHECK (read (PEXTACK2) == 0);
+  CHECK (read (PEXTACK3) == 0);
+}
+
+TEST_CASE_FIXTURE (irqmp_fixture, "IRQMP per-CPU masks are independent")
+{
+  /* Section 96.3.8 gives each CPU its own PIMASK register at 0x40 + 4*n.
+     The same IPEND bits can present a different level to each CPU.  */
+  int saved_ncpu = ncpu;
+  ncpu = 4;
+
+  write (IMASK, 0xfffe);
+  write (IMASK1, 1 << 5);
+  write (IMASK2, 1 << 5);
+  write (IMASK3, 1 << 5);
+  write (IPEND, (1 << 5) | (1 << 9));
+
+  CHECK (read (IMASK1) == (1u << 5));
+  CHECK (read (IMASK2) == (1u << 5));
+  CHECK (read (IMASK3) == (1u << 5));
+  CHECK (ext_irl[0] == 9);
+  CHECK (ext_irl[1] == 5);
+  CHECK (ext_irl[2] == 5);
+  CHECK (ext_irl[3] == 5);
+
+  ncpu = saved_ncpu;
+}
+
+TEST_CASE_FIXTURE (irqmp_fixture,
+		   "IRQMP per-CPU force registers are independent")
+{
+  /* Section 96.3.9 gives each CPU its own PIFORCE register at 0x80 + 4*n.
+     Forcing one CPU must not raise the others.  */
+  int saved_ncpu = ncpu;
+  ncpu = 4;
+
+  write (IMASK, 0xfffe);
+  write (IMASK1, 0xfffe);
+  write (IMASK2, 0xfffe);
+  write (IMASK3, 0xfffe);
+
+  write (IFORCE0, 1 << 3);
+  write (IFORCE1, 1 << 7);
+  write (IFORCE2, 1 << 10);
+  write (IFORCE3, 1 << 12);
+
+  CHECK (read (IFORCE0) == (1u << 3));
+  CHECK (read (IFORCE1) == (1u << 7));
+  CHECK (read (IFORCE2) == (1u << 10));
+  CHECK (read (IFORCE3) == (1u << 12));
+
+  CHECK (ext_irl[0] == 3);
+  CHECK (ext_irl[1] == 7);
+  CHECK (ext_irl[2] == 10);
+  CHECK (ext_irl[3] == 12);
+
+  ncpu = saved_ncpu;
+}
+
+TEST_CASE_FIXTURE (irqmp_fixture,
+		   "IRQMP init masks extended interrupts off when eirq is 0")
+{
+  /* irqmp_init picks the interrupt mask from irqmp_extirq: nonzero (the
+     default -1 included) allows the extended interrupt bits 31:16, and
+     zero (eirq disabled) restricts the mask to the plain interrupts
+     15:1, per section 96.3.2.  The fixture only runs init once with its
+     own default, so re-run it here with eirq explicitly disabled.  */
+  irqmp_extirq = 0;
+  core->init ();
+
+  write (IMASK, 0xffffffff);
+  CHECK (read (IMASK) == 0xfffe);
+
+  write (IPEND, 0xffffffff);
+  CHECK (read (IPEND) == 0xfffe);
+}
+
+TEST_CASE_FIXTURE (irqmp_fixture, "IRQMP reading an unmapped offset is zero")
+{
+  /* ILEVEL (96.3.1) and IRQMAP (96.3.12) are registers the manual defines
+     but grlib.cc does not implement; any offset outside the cases irqmp_read
+     matches falls through to a zero read.  */
+  CHECK (read (0x00) == 0);
+}
+
+TEST_CASE_FIXTURE (irqmp_fixture,
+		   "IRQMP a broadcast interrupt reaches every CPU")
+{
+  /* Section 96.3.6: a broadcast interrupt is written to the force register
+     of every CPU, not just CPU 0.  */
+  int saved_ncpu = ncpu;
+  ncpu = 4;
+
+  write (IMASK, 0xfffe);
+  write (IMASK1, 0xfffe);
+  write (IMASK2, 0xfffe);
+  write (IMASK3, 0xfffe);
+  write (BROADCAST, 1 << 8);
+
+  grlib_set_irq (8);
+
+  CHECK (read (IFORCE0) == (1u << 8));
+  CHECK (read (IFORCE1) == (1u << 8));
+  CHECK (read (IFORCE2) == (1u << 8));
+  CHECK (read (IFORCE3) == (1u << 8));
+  CHECK (read (IPEND) == 0);
+
+  CHECK (ext_irl[0] == 8);
+  CHECK (ext_irl[1] == 8);
+  CHECK (ext_irl[2] == 8);
+  CHECK (ext_irl[3] == 8);
+
+  ncpu = saved_ncpu;
 }
