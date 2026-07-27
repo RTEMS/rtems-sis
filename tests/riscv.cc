@@ -2951,3 +2951,156 @@ TEST_CASE_FIXTURE (riscv_fixture, "RISC-V a watchpoint stops a float load")
   ebase.wprnum = saved;
   ebase.wphit = 0;
 }
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V an interrupt is marked asynchronous")
+{
+  /* Chapter 3 of the privileged specification puts the interrupt bit at the
+     top of mcause and the cause in the low bits, which is what tells a
+     handler an interrupt apart from an exception.  */
+  sregs[0].mtvec = 0x4000;
+  sregs[0].pc = 0x2000;
+
+  /* The controller interrupts are the levels above 16, and taking one
+     acknowledges it at the controller.  */
+  static int acked = -1;
+  static int acked_cpu = -1;
+  sregs[0].intack = [] (int32 level, int32 cpu)
+    {
+      acked = level;
+      acked_cpu = cpu;
+    };
+
+  sregs[0].trap = 20;
+  CHECK (riscv.execute_trap (&sregs[0]) == 0);
+  CHECK (sregs[0].mcause == (0x80000000 | 20));
+  CHECK (acked == 4);
+  CHECK (acked_cpu == 0);
+
+  /* Level 16 is the lowest of the group and is not acknowledged, the pending
+     line is dropped instead.  */
+  acked = -1;
+  ext_irl[0] = 0x1b;
+  sregs[0].trap = 16;
+  CHECK (riscv.execute_trap (&sregs[0]) == 0);
+  CHECK (sregs[0].mcause == (0x80000000 | 16));
+  CHECK (acked == -1);
+  CHECK (ext_irl[0] == 0);
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the local interrupts clear pending")
+{
+  /* The three local interrupts of the machine level are numbered by their
+     cause, and taking one clears its own bit of mip and no other.  */
+  struct
+  {
+    uint32 trap;
+    uint32 bit;
+  } cases[] = {
+    { 0x23, MIP_MSIP }, /* machine software */
+    { 0x27, MIP_MTIP }, /* machine timer */
+    { 0x2b, MIP_MEIP }, /* machine external */
+  };
+
+  sregs[0].mtvec = 0x4000;
+
+  for (auto c : cases)
+    {
+      INFO ("cause " << c.trap);
+      sregs[0].mip = MIP_MSIP | MIP_MTIP | MIP_MEIP;
+      ext_irl[0] = 0x1b;
+      sregs[0].trap = c.trap;
+
+      CHECK (riscv.execute_trap (&sregs[0]) == 0);
+      CHECK (sregs[0].mcause == (0x80000000 | (c.trap & 0x1f)));
+      CHECK ((sregs[0].mip & c.bit) == 0);
+      CHECK ((sregs[0].mip & ~c.bit & (MIP_MSIP | MIP_MTIP | MIP_MEIP)) != 0);
+
+      /* None of the three is a controller level, so the pending line is
+	 dropped rather than acknowledged.  */
+      CHECK (ext_irl[0] == 0);
+    }
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V an interrupt needs both enables")
+{
+  /* A pending external interrupt reaches the core only with the global
+     enable and the external enable both set.  Either one alone leaves it
+     waiting.  */
+  ext_irl[0] = 0x1b;
+  sregs[0].trap = 0;
+
+  sregs[0].mstatus = 0;
+  sregs[0].mie = 0;
+  CHECK (riscv.check_interrupts (&sregs[0]) == 0);
+  CHECK (sregs[0].trap == 0);
+
+  sregs[0].mstatus = MSTATUS_MIE;
+  sregs[0].mie = 0;
+  CHECK (riscv.check_interrupts (&sregs[0]) == 0);
+  CHECK (sregs[0].trap == 0);
+
+  sregs[0].mstatus = 0;
+  sregs[0].mie = MIE_MEIE;
+  CHECK (riscv.check_interrupts (&sregs[0]) == 0);
+  CHECK (sregs[0].trap == 0);
+
+  /* With both set the check answers with the line, which is what the run
+     loop turns into a trap.  */
+  sregs[0].mstatus = MSTATUS_MIE;
+  sregs[0].mie = MIE_MEIE;
+  CHECK (riscv.check_interrupts (&sregs[0]) == 0x1b);
+
+  /* A core already taking a trap is left to finish it.  */
+  sregs[0].trap = TRAP_ILLEG;
+  CHECK (riscv.check_interrupts (&sregs[0]) == 0);
+  sregs[0].trap = 0;
+
+  ext_irl[0] = 0;
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the local interrupts raise a line")
+{
+  /* A pending and enabled local interrupt raises the same line the board
+     would, one line per cause, and it wakes a core out of power-down.  */
+  struct
+  {
+    uint32 pending;
+    uint32 enable;
+    uint32 line;
+  } cases[] = {
+    { MIP_MEIP, MIE_MEIE, 0x1b },
+    { MIP_MSIP, MIE_MSIE, 0x13 },
+    { MIP_MTIP, MIE_MTIE, 0x17 },
+  };
+
+  for (auto c : cases)
+    {
+      INFO ("pending " << c.pending);
+      ext_irl[0] = 0;
+      sregs[0].mstatus = MSTATUS_MIE;
+      sregs[0].mip = c.pending;
+      sregs[0].mie = c.enable;
+      sregs[0].pwd_mode = 1;
+      sregs[0].pwdstart = sregs[0].simtime;
+
+      rv32_check_lirq (0);
+      CHECK (ext_irl[0] == c.line);
+      CHECK (sregs[0].pwd_mode == 0);
+    }
+
+  /* With the global enable clear nothing is raised at all.  */
+  ext_irl[0] = 0;
+  sregs[0].mstatus = 0;
+  sregs[0].mip = MIP_MTIP;
+  sregs[0].mie = MIE_MTIE;
+  rv32_check_lirq (0);
+  CHECK (ext_irl[0] == 0);
+
+  /* Pending without the matching enable raises nothing either.  */
+  sregs[0].mstatus = MSTATUS_MIE;
+  sregs[0].mie = 0;
+  rv32_check_lirq (0);
+  CHECK (ext_irl[0] == 0);
+
+  ext_irl[0] = 0;
+}
