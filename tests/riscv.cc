@@ -2368,6 +2368,11 @@ TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the named control registers")
   arch->set_register (&sregs[0], (char *) "mstatus", 0xffffffff, 0);
   CHECK (sregs[0].mstatus == MSTATUS_MASK);
 
+  /* The report names the value the register kept, not the one asked for,
+     so a user sees the fields the write dropped.  */
+  CHECK (cap.str ().find ("mstatus = 6280 (0x00001888)") != std::string::npos);
+  stdout_capture rest;
+
   arch->set_register (&sregs[0], (char *) "mtvec", 0x40001234, 0);
   CHECK (sregs[0].mtvec == 0x40001234);
 
@@ -2398,7 +2403,7 @@ TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the named control registers")
   arch->set_register (&sregs[0], (char *) "frm", 2, 0);
   CHECK (((sregs[0].fsr >> 5) & 7) == 2);
 
-  CHECK (!cap.str ().empty ());
+  CHECK (!rest.str ().empty ());
 
   /* A name the core does not know is reported and changes nothing.  A
      capture answers once, so each phase gets its own.  */
@@ -2465,19 +2470,34 @@ TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the register displays print")
   fd (5) = 1.5;
   sregs[0].mtvec = 0x40000100;
 
+  /* The integer names are checked against the integer display alone.  The
+     float display would satisfy a search for s0 with its fs0, so folding
+     the two together would make the check pass without meaning it.  */
   arch->display_registers (&sregs[0]);
+  std::string ints = cap.str ();
+
+  stdout_capture rest;
   arch->display_ctrl (&sregs[0]);
   arch->display_special (&sregs[0]);
   arch->display_fpu (&sregs[0]);
-
-  std::string out = cap.str ();
+  std::string out = rest.str ();
 
   /* The displays name the registers the way the ABI does, and the control
      display disassembles the instruction the pc stands on.  */
-  CHECK (out.find ("0A0A0A0A") != std::string::npos);
+  CHECK (ints.find ("0A0A0A0A") != std::string::npos);
   CHECK (out.find ("mtvec") != std::string::npos);
   CHECK (out.find ("40000100") != std::string::npos);
   CHECK (out.find ("misa") != std::string::npos);
+
+  /* Every register is named the way the ABI names it, so the display, the
+     disassembler and the register write all agree.  Checking only one of
+     the two files here is what let the display call x0 z0 while everything
+     else called it zero.  */
+  for (int i = 0; i < 32; i++)
+    {
+      INFO ("integer name ", abi_int[i]);
+      CHECK (ints.find (abi_int[i]) != std::string::npos);
+    }
   for (int i = 0; i < 32; i++)
     {
       INFO ("float name ", abi_fp[i]);
@@ -3223,4 +3243,36 @@ TEST_CASE_FIXTURE (riscv_fixture, "RISC-V a jump to zero stops the run")
   sregs[0].pc = 0x200;
   sregs[0].npc = 0x202;
   CHECK (exec (0xb501) == NULL_TRAP); /* c.j -0x200 */
+}
+
+TEST_CASE_FIXTURE (riscv_fixture,
+		   "RISC-V the float status keeps only its own bits")
+{
+  /* Chapter 20 gives fcsr eight bits and reserves the rest for extensions
+     this core does not have, which it must ignore on a write and read as
+     zero.  Its two windows are three bits of rounding mode and five of
+     accrued flags, and neither may spill into the other.  */
+  set (1, 0xffffffff);
+
+  CHECK (exec (itype (OP_SYS, 0, CSRRW, 1, CSR_FCSR)) == 0);
+  CHECK (sregs[0].fsr == 0xff);
+  CHECK (exec (itype (OP_SYS, 2, CSRRS, 0, CSR_FCSR)) == 0);
+  CHECK (get (2) == 0xff);
+
+  sregs[0].fsr = 0;
+  CHECK (exec (itype (OP_SYS, 0, CSRRW, 1, CSR_FRM)) == 0);
+  CHECK (sregs[0].fsr == 0xe0);
+
+  sregs[0].fsr = 0;
+  CHECK (exec (itype (OP_SYS, 0, CSRRW, 1, CSR_FFLAGS)) == 0);
+  CHECK (sregs[0].fsr == 0x1f);
+
+  /* Each window reads back its own field and not the whole word.  */
+  sregs[0].fsr = 0xff;
+  CHECK (exec (itype (OP_SYS, 2, CSRRS, 0, CSR_FRM)) == 0);
+  CHECK (get (2) == 7);
+  CHECK (exec (itype (OP_SYS, 2, CSRRS, 0, CSR_FFLAGS)) == 0);
+  CHECK (get (2) == 0x1f);
+
+  sregs[0].fsr = 0;
 }
