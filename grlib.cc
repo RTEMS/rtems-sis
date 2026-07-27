@@ -510,7 +510,10 @@ irqmp_init (void)
       sregs[i].intack = irqmp_intack;
     }
 
-  if (irqmp_extirq)
+  /* Section 96.3.5 makes EIRQ a line number from 1 to 15, and 0 means the
+     core has no extended interrupts.  The default is -1, which is not a
+     line either, so test for a real one rather than for non-zero.  */
+  if (irqmp_extirq > 0)
     irqmp_mask = 0xfffffffe;
   else
     irqmp_mask = 0x0000fffe;
@@ -910,19 +913,23 @@ gpt_ctrl_write (uint32 val, int i)
       /* Reload.  */
       gpt_counter[i] = gpt_reload[i];
     }
-  if (val & 1)
-    {
-      gpt_ctrl[i] = val & 0xb;
-      remove_event (gpt_intr, i);
-      gpt_add_intr (i);
-    }
-  gpt_ctrl[i] = val & 0xb;
+  /* The interrupt sets IP and a one written to it clears it, so a write
+     which does not carry that bit has to leave it standing.  Masking it out
+     of every write would clear it whatever the driver asked for.  */
+  gpt_ctrl[i] = (val & 0xb) | (gpt_ctrl[i] & 0x10);
 
   if (val & 0x10)
     {
       /* Clear Interrupt Pending (IP) bit if a 1 is written to it */
       gpt_ctrl[i] &= ~0x10;
     }
+
+  /* Any write reschedules the timer.  A write which clears the enable bit
+     has to take the queued callback away too, or it still arrives and wraps
+     the counter of a timer which is no longer running.  gpt_add_intr does
+     nothing while the enable bit is clear.  */
+  remove_event (gpt_intr, i);
+  gpt_add_intr (i);
 }
 
 static uint32
@@ -997,7 +1004,11 @@ gpt_write (uint32 addr, uint32 *data, uint32 sz)
 
   switch (addr & 0xff)
     {
+    case GPTIMER_SCALER: /* 0x00 */
     case GPTIMER_SCLOAD: /* 0x04 */
+      /* Table 464 makes the scaler value writable and table 465 says a
+	 write to the reload register sets it too.  This model keeps one
+	 value for both, so either address sets it.  */
       gpt_scaler_set (*data);
       break;
 

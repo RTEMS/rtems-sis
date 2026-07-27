@@ -296,18 +296,13 @@ TEST_CASE_FIXTURE (
   CHECK ((read (CTRL1) & IP) == 0);
 }
 
-TEST_CASE_FIXTURE (
-    gptimer_fixture,
-    "GPTIMER pin: disabling a timer does not cancel its pending underflow")
+TEST_CASE_FIXTURE (gptimer_fixture,
+		   "GPTIMER disabling a timer cancels its underflow")
 {
-  /* Not in the scoped manual, and arguably a defect: gpt_ctrl_write only
-     calls remove_event when the write's EN bit is 1 (the "start" case).
-     A write that clears EN leaves an already scheduled gpt_intr in the
-     queue.  That callback still runs at the old deadline: it always sets
-     gpt_counter[i] to all ones, and only the disabled timer's interrupt
-     and reschedule are skipped.  A timer "disabled" this way therefore
-     still has its counter silently clobbered once the old deadline
-     arrives.  */
+  /* A write which clears the enable bit stops the timer, so the callback
+     scheduled for the old deadline has to go with it.  Left queued it
+     still arrives and wraps the counter, which would let a stopped timer
+     change its own value.  */
   write (SCLOAD, 0);
   write (RELOAD1, 0);
   write (TIMER1, 3);
@@ -317,8 +312,13 @@ TEST_CASE_FIXTURE (
   CHECK (read (TIMER1) == 3);
 
   run (4);
-  CHECK (read (TIMER1) == 0xffffffff);
+  CHECK (read (TIMER1) == 3);
   CHECK (ext_irl[0] == 0);
+
+  /* Enabling it again schedules a fresh underflow from where it stood.  */
+  write (CTRL1, EN);
+  run (8);
+  CHECK (read (TIMER1) != 3);
 }
 
 TEST_CASE_FIXTURE (gptimer_fixture,
@@ -346,16 +346,21 @@ TEST_CASE_FIXTURE (gptimer_fixture,
   CHECK ((read (CTRL1) & IP) != 0);
 }
 
-TEST_CASE_FIXTURE (
-    gptimer_fixture,
-    "GPTIMER pin: a write to the scaler value register itself is ignored")
+TEST_CASE_FIXTURE (gptimer_fixture,
+		   "GPTIMER the scaler value register is writable")
 {
-  /* Not in the scoped manual, and a likely defect: table 464 (40.3.1)
-     marks the Scaler Value Register itself "rw", but gpt_write has no
-     case for offset 0x00 at all, so a direct write to SCALER changes
-     nothing.  Only writes to SCLOAD (0x04) reach gpt_scaler_set.  */
+  /* Table 464 (40.3.1) marks the Scaler Value Register "rw", and table 465
+     says a write to the reload register sets the scaler too.  This model
+     keeps one value for both, so either address sets it.  */
   write (SCALER, 0x1234);
-  CHECK (read (SCALER) == 0xffff);
+  CHECK (read (SCALER) == 0x1234);
+
+  write (SCLOAD, 0x0abc);
+  CHECK (read (SCALER) == 0x0abc);
+
+  /* The scaler is sixteen bits wide, so the value above them is dropped.  */
+  write (SCALER, 0xdead1234);
+  CHECK (read (SCALER) == 0x1234);
 }
 
 TEST_CASE_FIXTURE (gptimer_fixture,

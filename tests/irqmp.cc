@@ -55,6 +55,16 @@ struct irqmp_fixture : sis_tests::grlib_core_fixture
       ext_irl[i] = 0;
   }
 
+  /* A board picks the extended interrupt line and only then runs init,
+     which is where the interrupt mask is computed from it.  A case which
+     set the line afterwards would drive a mask built from the default.  */
+  void
+  use_extirq (int line)
+  {
+    irqmp_extirq = line;
+    core->init ();
+  }
+
   ~irqmp_fixture ()
   {
     irqmp_extirq = saved_extirq;
@@ -142,7 +152,7 @@ TEST_CASE_FIXTURE (irqmp_fixture, "IRQMP the status register reports the CPUs")
   /* Section 96.3.5 puts the CPU count less one at the top of MPSTAT, the
      extended interrupt line in bits 19 to 16, and one power down status bit
      per CPU at the bottom.  */
-  irqmp_extirq = 10;
+  use_extirq (10);
 
   sregs[0].pwd_mode = 0;
   CHECK (((read (MPSTAT) >> 28) & 0xf) == (uint32) (ncpu - 1));
@@ -198,7 +208,7 @@ TEST_CASE_FIXTURE (irqmp_fixture,
   /* Section 96.3.2 puts extended interrupts 16 to 31 in IPEND[31:16].
      chk_irq folds any of those bits into the eirq line named by MPSTAT's
      EIRQ field (96.3.5), which is what actually reaches the CPU.  */
-  irqmp_extirq = 14;
+  use_extirq (14);
 
   write (IMASK, (1 << 14) | (1 << 20));
   write (IPEND, 1 << 20);
@@ -212,7 +222,7 @@ TEST_CASE_FIXTURE (irqmp_fixture,
 {
   /* Section 96.3.10: acknowledging the eirq level records the highest
      pending extended interrupt's ID in PEXTACK and clears its IPEND bit.  */
-  irqmp_extirq = 14;
+  use_extirq (14);
 
   write (IMASK, (1 << 14) | (1 << 20));
   write (IPEND, 1 << 20);
@@ -232,7 +242,7 @@ TEST_CASE_FIXTURE (
   /* Section 96.3.10: PEXTACK reads 0 when the eirq assertion did not come
      from an extended interrupt.  Here eirq itself was forced directly, so
      the acknowledge still has to clear that plain force bit.  */
-  irqmp_extirq = 14;
+  use_extirq (14);
 
   write (IMASK, 1 << 14);
   write (IFORCE, 1 << 14);
@@ -249,7 +259,7 @@ TEST_CASE_FIXTURE (irqmp_fixture, "IRQMP intack clears a forced interrupt")
 {
   /* A plain (non-extended) interrupt raised through the force register is
      cleared from IFORCE, not from IPEND, on acknowledge.  */
-  irqmp_extirq = 14;
+  use_extirq (14);
 
   write (IMASK, 1 << 6);
   write (IFORCE, 1 << 6);
@@ -266,7 +276,7 @@ TEST_CASE_FIXTURE (irqmp_fixture, "IRQMP intack clears a pending interrupt")
 {
   /* The same plain interrupt raised through IPEND instead is cleared from
      IPEND on acknowledge, not from IFORCE.  */
-  irqmp_extirq = 14;
+  use_extirq (14);
 
   write (IMASK, 1 << 6);
   write (IPEND, 1 << 6);
@@ -283,7 +293,7 @@ TEST_CASE_FIXTURE (irqmp_fixture,
 {
   /* Section 96.3.10 gives every CPU its own PEXTACK register at 0xC0 +
      4*n.  Acknowledging on CPU 1 must only touch PEXTACK1.  */
-  irqmp_extirq = 14;
+  use_extirq (14);
 
   write (IMASK1, (1 << 14) | (1 << 22));
   write (IPEND, 1 << 22);
@@ -359,8 +369,7 @@ TEST_CASE_FIXTURE (irqmp_fixture,
      zero (eirq disabled) restricts the mask to the plain interrupts
      15:1, per section 96.3.2.  The fixture only runs init once with its
      own default, so re-run it here with eirq explicitly disabled.  */
-  irqmp_extirq = 0;
-  core->init ();
+  use_extirq (0);
 
   write (IMASK, 0xffffffff);
   CHECK (read (IMASK) == 0xfffe);
