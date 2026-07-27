@@ -25,10 +25,13 @@ fail, `test-run` reports it and returns non zero. See [Gating](#gating).
 | `gr740_smp` | `sis -gr740 -m 4 -r ${EXE}` |
 | `griscv` | `sis -griscv -r ${EXE}` |
 | `griscv_smp` | `sis -griscv -m 4 -r ${EXE}` |
+| `grv32imac` | `sis -griscv -r ${EXE}` |
 | `leon2` | `sis -leon2 -r ${EXE}` |
 
 There is no `-gr712rc` flag. The GR712RC is a dual core LEON3FT, so it runs on
-the LEON3 board model with `-leon3`. Redirect stdin from `/dev/null` for an
+the LEON3 board model with `-leon3`. There is no `-grv32imac` flag either: that
+BSP is the same GRLIB RISC-V system as `griscv` built for a smaller instruction
+set, so it runs on `-griscv` too. Redirect stdin from `/dev/null` for an
 unattended run; SIS polls stdin for the emulated UART and an inherited stdin
 that never closes stalls the run.
 
@@ -58,10 +61,33 @@ configuration per board, and stripped of debug information with `strip -g`.
 | `gr740_smp` | 33 | 0 | clean |
 | `griscv` | 28 | 0 | clean |
 | `griscv_smp` | 33 | 0 | clean |
+| `grv32imac` | 28 | 0 | clean |
 | `leon2` | 28 | 0 | clean |
 
 The non SMP boards carry 28 tests, the SMP boards add the five `smp*` tests for
 33.
+
+## The two RISC-V configurations
+
+`griscv` and `grv32imac` are the same GRLIB RISC-V system and the same RTEMS
+BSP family, built for different instruction sets: `griscv` is `rv32imafd` with
+hardware floating point, `grv32imac` is `rv32imac`, soft float and with the
+compressed instructions. `grv32imac` is the only configuration here which
+exercises the compressed decoder, so it is what keeps that half of `riscv.cc`
+honest against real code.
+
+Both link at `0x40000000`, which is where a GRLIB system has its RAM.
+`RISCV_RAM_REGION_BEGIN` defaults to `0x80000000` in the RTEMS build system and
+is overridden to `0x40000000` for `riscv/griscv` alone, so every other BSP of
+the `griscv` family needs the option set explicitly:
+
+```ini
+[riscv/grv32imac]
+RISCV_RAM_REGION_BEGIN = 0x40000000
+```
+
+Without it the image lands on the APB bridge rather than in memory, and the run
+either goes nowhere or dies in the AMBA scan.
 
 ## Interrupt tests and timing noise
 

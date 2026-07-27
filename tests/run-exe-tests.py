@@ -38,6 +38,7 @@ BOARDS = {
     'gr740_smp': ['-gr740', '-m', '4'],
     'griscv': ['-griscv'],
     'griscv_smp': ['-griscv', '-m', '4'],
+    'grv32imac': ['-griscv'],
     'leon2': ['-leon2'],
 }
 
