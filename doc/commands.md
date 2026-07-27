@@ -76,9 +76,18 @@ resets the statistic information.
 **`reg [reg_name] [value]`**  
 Print or set the CPU registers. `reg` without parameters prints the CPU
 registers. `reg` *reg_name value* sets the corresponding register to *value*.
-Valid register names for SPARC are psr, tbr, wim, y, g1-g7, o0-o7 and l0-l7.
-Valid register names for RISCV-V are mtvec, mstatus, pc, ra, sp, gp, tp, t0-t6,
-s0-s11 and a0-a7.
+Valid register names for SPARC are pc, npc, psr, tbr, wim, y, fsr, and the
+window registers g1-g7, o0-o7, l0-l7 and i0-i7.
+
+Valid register names for RISC-V are pc, the integer registers ra, sp, gp, tp,
+t0-t6, s0-s11 and a0-a7 under their ABI names, the floating point registers
+ft0-ft11, fs0-fs11 and fa0-fa7, and the control registers mstatus, mtvec,
+mepc, mcause, mie, mip, mscratch, fcsr, fflags and frm. A control register is
+written the way a `csrw` instruction writes it, so a field the core does not
+implement is dropped rather than stored.
+
+The register hardwired to zero, `g0` on SPARC and `zero` on RISC-V, cannot be
+set.
 
 **`reset`**  
 Perform a power-on reset. This command is equal to `run 0`.

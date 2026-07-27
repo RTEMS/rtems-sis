@@ -2124,6 +2124,19 @@ riscv_check_interrupts (struct pstate *sregs)
   return 0;
 }
 
+static const char rtbl[32][8] = { "zero", "ra", "sp", "gp", "tp", "t0",	 "t1",
+				  "t2",	  "s0", "s1", "a0", "a1", "a2",	 "a3",
+				  "a4",	  "a5", "a6", "a7", "s2", "s3",	 "s4",
+				  "s5",	  "s6", "s7", "s8", "s9", "s10", "s11",
+				  "t3",	  "t4", "t5", "t6" };
+
+static const char ftbl[32][8] = { "ft0",  "ft1", "ft2",	 "ft3",	 "ft4", "ft5",
+				  "ft6",  "ft7", "fs0",	 "fs1",	 "fa0", "fa1",
+				  "fa2",  "fa3", "fa4",	 "fa5",	 "fa6", "fa7",
+				  "fs2",  "fs3", "fs4",	 "fs5",	 "fs6", "fs7",
+				  "fs8",  "fs9", "fs10", "fs11", "ft8", "ft9",
+				  "ft10", "ft11" };
+
 static void
 riscv_set_regi (struct pstate *sregs, int32 reg, uint32 rval)
 {
@@ -2195,56 +2208,62 @@ riscv_gdb_get_reg (char *buf)
   return (65 * 4);
 }
 
+/* The control registers the shell may write, by the name the disassembler and
+   the csr display use.  A write goes through set_csr, so the shell and a csrw
+   instruction agree on what it does.  The registers set_csr rejects are left
+   out.  */
+static const struct
+{
+  char name[9];
+  uint32 csr;
+} wtbl[] = { { "mstatus", CSR_MSTATUS },   { "mtvec", CSR_MTVEC },
+	     { "mepc", CSR_MEPC },	   { "mcause", CSR_MCAUSE },
+	     { "mie", CSR_MIE },	   { "mip", CSR_MIP },
+	     { "mscratch", CSR_MSCRATCH }, { "fflags", CSR_FFLAGS },
+	     { "frm", CSR_FRM },	   { "fcsr", CSR_FCSR } };
+
+/* The index of a name in a register name table, or the table size when the
+   table does not hold it.  */
+static uint32
+name_index (const char table[][8], uint32 size, const char *name)
+{
+  uint32 i;
+
+  for (i = 0; i < size; i++)
+    if (strcmp (table[i], name) == 0)
+      break;
+  return i;
+}
+
 static void
 riscv_set_rega (struct pstate *sregs, char *reg, uint32 rval)
 {
-  int32 err = 0;
+  uint32 i;
 
-  if (strcmp (reg, "psr") == 0)
-    sregs->psr = (rval = (rval & 0x00f03fff));
-  else if (strcmp (reg, "mtvec") == 0)
-    sregs->mtvec = (rval = (rval & 0xfffffff0));
-  else if (strcmp (reg, "mstatus") == 0)
-    sregs->mstatus = (rval = (rval & 0x0ff));
-  else if (strcmp (reg, "pc") == 0)
+  if (strcmp (reg, "pc") == 0)
     sregs->pc = rval;
-  else if (strcmp (reg, "fsr") == 0)
+  else if (strcmp (reg, rtbl[0]) == 0)
     {
-      sregs->fsr = rval;
-      riscv_set_fsr (rval);
+      printf ("cannot set %s\n", rtbl[0]);
+      return;
     }
-  else if (strcmp (reg, "g0") == 0)
-    err = 2;
-  else if (strcmp (reg, "x1") == 0)
-    sregs->r[1] = rval;
-  else if (strcmp (reg, "x2") == 0)
-    sregs->r[2] = rval;
-  else if (strcmp (reg, "x3") == 0)
-    sregs->r[3] = rval;
-  else if (strcmp (reg, "x4") == 0)
-    sregs->r[4] = rval;
-  else if (strcmp (reg, "x5") == 0)
-    sregs->r[5] = rval;
-  else if (strcmp (reg, "x6") == 0)
-    sregs->r[6] = rval;
-  else if (strcmp (reg, "x7") == 0)
-    sregs->r[7] = rval;
+  else if ((i = name_index (rtbl, 32, reg)) < 32)
+    sregs->r[i] = rval;
+  else if ((i = name_index (ftbl, 32, reg)) < 32)
+    sregs->fsi[(i << 1) + BEH] = rval;
   else
-    err = 1;
-  switch (err)
     {
-    case 0:
-      printf ("%s = %d (0x%08x)\n", reg, rval, rval);
-      break;
-    case 1:
-      printf ("no such regiser: %s\n", reg);
-      break;
-    case 2:
-      printf ("cannot set x0\n");
-      break;
-    default:
-      break;
+      for (i = 0; i < sizeof (wtbl) / sizeof (wtbl[0]); i++)
+	if (strcmp (wtbl[i].name, reg) == 0)
+	  break;
+      if (i == sizeof (wtbl) / sizeof (wtbl[0]))
+	{
+	  printf ("no such register: %s\n", reg);
+	  return;
+	}
+      set_csr (wtbl[i].csr, sregs, rval);
     }
+  printf ("%s = %d (0x%08x)\n", reg, rval, rval);
 }
 
 static void
@@ -2259,9 +2278,6 @@ riscv_set_register (struct pstate *sregs, char *reg, uint32 rval, uint32 addr)
 static void
 riscv_display_registers (struct pstate *sregs)
 {
-
-  int i;
-
   printf ("\n        0 - 7        8 - 15        16 - 23       24 - 31\n");
   printf (" z0:  %08X  s0: %08X  a6: %08X  s8: %08X\n", sregs->r[0],
 	  sregs->r[8], sregs->r[16], sregs->r[24]);
@@ -2304,8 +2320,6 @@ mstatus: %08X\n",
 static void
 riscv_display_special (struct pstate *sregs)
 {
-  uint32 i;
-
   printf ("\n 0x001  fcsr    :  %08X\n", get_csr (CSR_FCSR, sregs));
   printf (" 0x300  mstatus :  %08X\n", get_csr (CSR_MSTATUS, sregs));
   printf (" 0x301  misa    :  %08X\n", get_csr (CSR_MISA, sregs));
@@ -2323,7 +2337,6 @@ static void
 riscv_display_fpu (struct pstate *sregs)
 {
   int i;
-  float t;
 
   printf ("\n fsr: %08X\n\n", sregs->fsr);
   printf (
@@ -2353,19 +2366,7 @@ riscv_display_fpu (struct pstate *sregs)
   printf ("\n");
 }
 
-static char rtbl[32][8] = {
-  "zero", "ra", "sp", "gp", "tp",  "t0",  "t1", "t2", "s0", "s1", "a0",
-  "a1",	  "a2", "a3", "a4", "a5",  "a6",  "a7", "s2", "s3", "s4", "s5",
-  "s6",	  "s7", "s8", "s9", "s10", "s11", "t3", "t4", "t5", "t6"
-};
-
-static char ftbl[32][8] = { "ft0", "ft1", "ft2",  "ft3", "ft4", "ft5",	"ft6",
-			    "ft7", "fs0", "fs1",  "fa0", "fa1", "fa2",	"fa3",
-			    "fa4", "fa5", "fa6",  "fa7", "fs2", "fs3",	"fs4",
-			    "fs5", "fs6", "fs7",  "fs8", "fs9", "fs10", "fs11",
-			    "ft8", "ft9", "ft10", "ft11" };
-
-char *
+static const char *
 ctbl (uint32 address)
 {
   switch (address)
