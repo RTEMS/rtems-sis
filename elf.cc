@@ -129,8 +129,10 @@ read_elf_body ()
   FILE *fp = efile.fp;
   int res = -1;
 
+  /* efile.fp comes from the checked fopen of elf_load and read_elf_header
+     has already read through it, so it is never null here.  */
   fseek (fp, ehdr.e_shoff + ((ehdr.e_shstrndx) * ehdr.e_shentsize), SEEK_SET);
-  if ((!fp) || (fread (&ssh, sizeof (ssh), 1, fp) != 1))
+  if (fread (&ssh, sizeof (ssh), 1, fp) != 1)
     {
       goto out;
     }
@@ -143,7 +145,13 @@ read_elf_body ()
       ssh.sh_offset = SWAP_UINT32 (ssh.sh_offset);
       ssh.sh_size = SWAP_UINT32 (ssh.sh_size);
     }
+  /* A malformed size can ask for more than the host can allocate, and the
+     read below would then dereference a null pointer.  */
   strtab = (char *) malloc (ssh.sh_size);
+  if (strtab == NULL)
+    {
+      goto out;
+    }
   fseek (fp, ssh.sh_offset, SEEK_SET);
   if (fread (strtab, ssh.sh_size, 1, fp) != 1)
     {
@@ -262,7 +270,9 @@ elf_load (char *fname, int load)
 	printf ("File read error\n");
       else
 	printf (" Loaded %s, entry 0x%08x\n", fname, res);
-      fclose (efile.fp);
     }
+  /* A header-only load and a rejected file used to keep the stream, so a
+     shell that loaded repeatedly ran out of descriptors.  */
+  fclose (fp);
   return res;
 }
