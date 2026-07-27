@@ -31,8 +31,21 @@
    bridges (apbmst, apbmst2) and the plug&play indices are process-global
    and shared with tests/grlibcores.cc, so:
 
-   - The AHB master/slave fakes here live at 1 MB windows (0x20000000,
-     0x21000000) nothing else in the tree ever touches.
+   - The AHB master/slave fakes here live at 1 MB windows (0x50000000,
+     0x51000000, 0x52000000) clear of every board's own registrations
+     (erc32.cc is self-contained; leon2.cc/leon3.cc use 0x00000000,
+     0x40000000, 0x80000000 and leon3.cc also 0x90000000; gr740.cc uses
+     0x00000000, 0xC0000000 and the 0xFF8xxxxx-0xFFExxxxx range; rv32.cc
+     uses 0x00100000, 0x02000000, 0x0C000000, 0x10000000, 0x20000000 and
+     0x80000000).  This file originally used 0x20000000 and 0x21000000,
+     which were clear of every board at the time but collide with
+     rv32.cc's own ROM window once tests/rv32board.cc registers the real
+     rv32 board: whichever of the two lazily-registering files' first
+     test case happens to run first under --order-by=rand wins that
+     address in grlib.cc's shared, append-only ahbscores[], and the
+     other's cases then read back the winner's data instead of their
+     own.  Moved here rather than in tests/rv32board.cc since rv32.cc's
+     address is the real one and this file's was always arbitrary.
    - The APB fakes mount on bridge 0 (apbmst) at offset 0xd00 and on
      bridge 1 (apbmst2) at offsets 0xc00 and 0x1000-0x3f00, all clear of
      the 0x200/0x300/0x500 offsets tests/grlibcores.cc's own cases rely on
@@ -134,13 +147,13 @@ ahbs_add (int irq, uint32 addr, uint32 mask)
   (void) mask;
 }
 
-/* Mounted at 0x20000000, 1 MB window: every callback set, so it drives the
+/* Mounted at 0x50000000, 1 MB window: every callback set, so it drives the
    "core found, callback present" path of grlib_init/grlib_reset/
    grlib_read/grlib_write.  */
 const struct grlib_ipcore ahbs_full = { ahbs_init, ahbs_reset, ahbs_read,
 					ahbs_write, ahbs_add };
 
-/* Mounted at 0x21000000: init/reset/read/write are all NULL but add is
+/* Mounted at 0x51000000: init/reset/read/write are all NULL but add is
    set, so grlib_ahbs_add still claims its window (the "true" side of its
    own null check) while grlib_read/grlib_write hit the "no callback"
    fallback (their own "else res = 1") for an address that does match a
@@ -152,9 +165,9 @@ const struct grlib_ipcore ahbs_noio = { NULL, NULL, NULL, NULL, ahbs_add };
    it never claims any address.  */
 const struct grlib_ipcore ahbs_no_add = { NULL, NULL, NULL, NULL, NULL };
 
-const uint32 ahbs_full_base = 0x20000000;
-const uint32 ahbs_noio_base = 0x21000000;
-const uint32 ahbs_no_add_base = 0x22000000;
+const uint32 ahbs_full_base = 0x50000000;
+const uint32 ahbs_noio_base = 0x51000000;
+const uint32 ahbs_no_add_base = 0x52000000;
 
 /* Registers the fakes above exactly once for the whole binary.  Idempotent
    by construction: every case below calls it before touching any of the
@@ -488,8 +501,14 @@ TEST_CASE_FIXTURE (
 {
   ensure_ahb_registered ();
 
+  /* 0x00000000 would have been the obvious unmapped address, but it is
+     leon2.cc's/leon3.cc's ROM and gr740.cc's RAM window (see the address
+     list above): a genuine board test registering either would make this
+     address mapped whenever it registered first.  ahbs_no_add_base's own
+     1 MB window ends here, so one word past it is still clear of every
+     board and of every fake this file mounts. */
   uint32 data = 0x55667788;
-  int rc = grlib_read (0x00000000, &data);
+  int rc = grlib_read (ahbs_no_add_base + 0x00100000, &data);
 
   CHECK (rc == 1);
   CHECK (data == 0x55667788);
@@ -537,9 +556,10 @@ TEST_CASE_FIXTURE (
   ensure_ahb_registered ();
 
   /* Unlike grlib_read, grlib_write has no plug&play fallback at all: the
-     plug&play area is read-only from the CPU's point of view.  */
+     plug&play area is read-only from the CPU's point of view.  0x00000000
+     is avoided for the same reason as the grlib_read case above. */
   uint32 data = 0x11;
-  int rc = grlib_write (0x00000000, &data, 2);
+  int rc = grlib_write (ahbs_no_add_base + 0x00100000, &data, 2);
 
   CHECK (rc == 1);
 }
