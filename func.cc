@@ -942,7 +942,12 @@ remove_event (void (*cfunc) (int32), int32 arg)
 	  evdel->nxt = ebase.freeq;
 	  ebase.freeq = evdel;
 	}
-      ev1 = ev1->nxt;
+      else
+	/* Only step on when nothing was taken out.  The entry after the one
+	   removed is now the one this cell points at, so stepping on here as
+	   well would carry the walk past it without ever testing it, and a
+	   second entry naming the same callback would stay queued.  */
+	ev1 = ev1->nxt;
     }
   ebase.evtime = ebase.eq.nxt->time;
 }
