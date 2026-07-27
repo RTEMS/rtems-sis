@@ -115,15 +115,18 @@ set_csr (uint32 address, struct pstate *sregs, uint32 value)
       sregs->mcause = value;
       break;
     case CSR_FFLAGS:
-      sregs->fsr = (sregs->fsr & ~0x1f) | value;
+      sregs->fsr = (sregs->fsr & ~0x1f) | (value & 0x1f);
       riscv_set_fsr (sregs->fsr);
       break;
     case CSR_FRM:
-      sregs->fsr = (sregs->fsr & ~0xe0) | (value << 5);
+      sregs->fsr = (sregs->fsr & ~0xe0) | ((value & 0x7) << 5);
       riscv_set_fsr (sregs->fsr);
       break;
     case CSR_FCSR:
-      sregs->fsr = value;
+      /* Bits 31 to 8 belong to extensions this core does not have, and
+	 chapter 20 says an implementation without them ignores a write and
+	 reads them as zero.  */
+      sregs->fsr = value & 0xff;
       riscv_set_fsr (sregs->fsr);
       break;
     default:
@@ -2267,6 +2270,10 @@ riscv_set_rega (struct pstate *sregs, char *reg, uint32 rval)
 	  return;
 	}
       set_csr (wtbl[i].csr, sregs, rval);
+
+      /* A control register drops the fields this core does not implement,
+	 so report what it kept rather than what was asked for.  */
+      rval = get_csr (wtbl[i].csr, sregs);
     }
   printf ("%s = %d (0x%08x)\n", reg, rval, rval);
 }
@@ -2284,7 +2291,7 @@ static void
 riscv_display_registers (struct pstate *sregs)
 {
   printf ("\n        0 - 7        8 - 15        16 - 23       24 - 31\n");
-  printf (" z0:  %08X  s0: %08X  a6: %08X  s8: %08X\n", sregs->r[0],
+  printf ("zero: %08X  s0: %08X  a6: %08X  s8: %08X\n", sregs->r[0],
 	  sregs->r[8], sregs->r[16], sregs->r[24]);
   printf (" ra:  %08X  s1: %08X  a7: %08X  s9: %08X\n", sregs->r[1],
 	  sregs->r[9], sregs->r[17], sregs->r[25]);
