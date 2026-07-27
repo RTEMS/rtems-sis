@@ -1701,6 +1701,10 @@ TEST_CASE_FIXTURE (riscv_fixture,
   CHECK (exec (0x9001 | (1u << 12) | (0u << 10)) == TRAP_ILLEG); /* srli 32+ */
   CHECK (exec (0x9001 | (1u << 12) | (1u << 10)) == TRAP_ILLEG); /* srai 32+ */
   CHECK (exec (0x9001 | (1u << 12) | (3u << 10)) == TRAP_ILLEG); /* subw */
+
+  /* The first quadrant leaves the fifth function code open, since the byte
+     and halfword forms which took it are a later extension.  */
+  CHECK (exec (0x8000) == TRAP_ILLEG);
 }
 
 TEST_CASE_FIXTURE (riscv_fixture, "RISC-V a register is set by its number")
@@ -2888,6 +2892,14 @@ TEST_CASE_FIXTURE (riscv_fixture, "RISC-V a watchpoint stops a store")
   CHECK (exec (stype (OP_FSW, 2, 1, 3, 0)) == WPT_TRAP);
   CHECK (ebase.wphit != 0);
 
+  /* And a float store elsewhere is not a hit either.  */
+  ebase.wphit = 0;
+  set (1, 0x2100);
+  sis_tests::flatmem_poke (0x2100, 0);
+  CHECK (exec (stype (OP_FSW, 2, 1, 3, 0)) == 0);
+  CHECK (ebase.wphit == 0);
+  CHECK (sis_tests::flatmem_peek (0x2100) == 0x0badf00d);
+
   ebase.wpwnum = saved;
   ebase.wphit = 0;
 }
@@ -2926,6 +2938,11 @@ TEST_CASE_FIXTURE (riscv_fixture, "RISC-V a resumed store is not repeated")
   ebase.wphit = 0;
   CHECK (exec (stype (OP_STORE, SW, 1, 2, 0)) == WPT_TRAP);
   CHECK (sis_tests::flatmem_peek (0x40) == 0x11);
+
+  /* The float store lets its write through the same way.  */
+  ebase.wphit = 0;
+  CHECK (exec (stype (OP_FSW, 2, 1, 3, 0)) == WPT_TRAP);
+  CHECK (sis_tests::flatmem_peek (0x40) == 0x0badf00d);
 
   ebase.wpwnum = saved;
   ebase.wphit = 0;
@@ -3131,6 +3148,14 @@ TEST_CASE_FIXTURE (riscv_fixture, "RISC-V a watchpoint stops a float load")
   CHECK (ebase.wphit != 0);
   CHECK (fsi (3) == 0);
 
+  /* A float load elsewhere is not a hit and reads the word it asked for.  */
+  ebase.wphit = 0;
+  sis_tests::flatmem_poke (0x2100, 0x3f800000);
+  set (1, 0x2100);
+  CHECK (exec (itype (OP_FLOAD, 3, 2, 1, 0)) == 0);
+  CHECK (ebase.wphit == 0);
+  CHECK (fs (3) == 1.0f);
+
   ebase.wprnum = saved;
   ebase.wphit = 0;
 }
@@ -3238,7 +3263,10 @@ TEST_CASE_FIXTURE (riscv_fixture, "RISC-V an interrupt needs both enables")
   CHECK (riscv.check_interrupts (&sregs[0]) == 0);
   sregs[0].trap = 0;
 
+  /* With no line raised the enables alone are nothing to answer.  */
   ext_irl[0] = 0;
+  CHECK (riscv.check_interrupts (&sregs[0]) == 0);
+  CHECK (sregs[0].trap == 0);
 }
 
 TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the local interrupts raise a line")
@@ -3285,7 +3313,41 @@ TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the local interrupts raise a line")
   rv32_check_lirq (0);
   CHECK (ext_irl[0] == 0);
 
+  /* A core which is already running has no power-down time to account for,
+     so the line is raised and nothing else moves.  */
   ext_irl[0] = 0;
+  sregs[0].mstatus = MSTATUS_MIE;
+  sregs[0].mip = MIP_MTIP;
+  sregs[0].mie = MIE_MTIE;
+  sregs[0].pwd_mode = 0;
+  sregs[0].pwdtime = 0;
+  rv32_check_lirq (0);
+  CHECK (ext_irl[0] == 0x17);
+  CHECK (sregs[0].pwd_mode == 0);
+  CHECK (sregs[0].pwdtime == 0);
+
+  ext_irl[0] = 0;
+}
+
+TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the verbose reports say what ran")
+{
+  /* At the second verbosity the core narrates a control register write and
+     a trap.  Nothing else reads these lines, so a case only pins that each
+     names what it reports.  */
+  sis_verbose = 2;
+
+  stdout_capture csr;
+  sregs[0].mstatus = 0;
+  CHECK (exec (itype (OP_SYS, 0, CSRRW, 1, CSR_MSTATUS)) == 0);
+  std::string written = csr.str ();
+  CHECK (written.find ("set csr") != std::string::npos);
+  CHECK (written.find ("300") != std::string::npos);
+
+  stdout_capture trap;
+  sregs[0].trap = TRAP_EBREAK;
+  arch->execute_trap (&sregs[0]);
+  std::string taken = trap.str ();
+  CHECK (taken.find ("trap") != std::string::npos);
 }
 
 TEST_CASE_FIXTURE (riscv_fixture, "RISC-V the accrued exception flags")
