@@ -264,7 +264,9 @@ sis_main (int argc, char **argv)
 
   switch (cputype)
     {
-    case CPU_ERC32:
+    /* ERC32 is the default board, so it also catches a cpu type the
+       selection above cannot produce.  */
+    default:
       printf (" ERC32 emulation enabled\n");
       cputype = CPU_ERC32;
       ms = &erc32sys;
@@ -311,12 +313,6 @@ sis_main (int argc, char **argv)
       if (!freq)
 	freq = 50;
       break;
-    default:
-      printf (" ERC32 emulation enabled\n");
-      cputype = CPU_ERC32;
-      ms = &erc32sys;
-      if (!freq)
-	freq = 14;
     }
 
 #ifdef ENABLE_L1CACHE
@@ -389,7 +385,8 @@ sis_main (int argc, char **argv)
 	}
       switch (stat)
 	{
-	case OK:
+	/* OK, and any other status exec_cmd may grow, needs no report.  */
+	default:
 	  break;
 	case CTRL_C:
 	  printf ("\b\bInterrupt!\n");
@@ -421,8 +418,6 @@ sis_main (int argc, char **argv)
 	  break;
 	case QUIT:
 	  cont = 0;
-	  break;
-	default:
 	  break;
 	}
       ctrl_c = 0;
