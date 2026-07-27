@@ -507,6 +507,13 @@ TEST_CASE_FIXTURE (leon2_regs_fixture,
   stdout_capture cap3;
   leon2_wr (R_IRQCTRL_IFR, 1u << 9);
   CHECK (cap3.str ().find ("IU irl: 9") != std::string::npos);
+
+  /* Requesting the same level again leaves it where it is, which is not a
+     rise, so it is narrated once and not again.  */
+  stdout_capture cap4;
+  leon2_wr (R_IRQCTRL_IFR, 1u << 9);
+  REQUIRE (ext_irl[0] == 9);
+  CHECK (cap4.str ().find ("IU irl") == std::string::npos);
 }
 
 TEST_CASE_FIXTURE (leon2_regs_fixture,
