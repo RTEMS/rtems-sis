@@ -171,7 +171,10 @@ memory_write (uint32 addr, uint32 *data, int32 sz, int32 *ws)
     }
   else if ((addr >= ROM_START) && (addr < ROM_END))
     {
-      grlib_store_bytes (romb, addr, data, sz);
+      /* The read path and get_mem_ptr both mask, and the array is only as
+	 wide as the mask, so an unmasked index here ran off the end of it.  */
+      waddr = addr & ROM_MASK;
+      grlib_store_bytes (romb, waddr, data, sz);
       return 0;
     }
   else

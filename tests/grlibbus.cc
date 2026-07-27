@@ -31,8 +31,8 @@
    bridges (apbmst, apbmst2) and the plug&play indices are process-global
    and shared with tests/grlibcores.cc, so:
 
-   - The AHB master/slave fakes here live at 1 MB windows (0x50000000,
-     0x51000000, 0x52000000) clear of every board's own registrations
+   - The AHB master/slave fakes here live at 1 MB windows (0x70000000,
+     0x71000000, 0x72000000) clear of every board's own registrations
      (erc32.cc is self-contained; leon2.cc/leon3.cc use 0x00000000,
      0x40000000, 0x80000000 and leon3.cc also 0x90000000; gr740.cc uses
      0x00000000, 0xC0000000 and the 0xFF8xxxxx-0xFFExxxxx range; rv32.cc
@@ -147,13 +147,13 @@ ahbs_add (int irq, uint32 addr, uint32 mask)
   (void) mask;
 }
 
-/* Mounted at 0x50000000, 1 MB window: every callback set, so it drives the
+/* Mounted at 0x70000000, 1 MB window: every callback set, so it drives the
    "core found, callback present" path of grlib_init/grlib_reset/
    grlib_read/grlib_write.  */
 const struct grlib_ipcore ahbs_full = { ahbs_init, ahbs_reset, ahbs_read,
 					ahbs_write, ahbs_add };
 
-/* Mounted at 0x51000000: init/reset/read/write are all NULL but add is
+/* Mounted at 0x71000000: init/reset/read/write are all NULL but add is
    set, so grlib_ahbs_add still claims its window (the "true" side of its
    own null check) while grlib_read/grlib_write hit the "no callback"
    fallback (their own "else res = 1") for an address that does match a
@@ -165,9 +165,9 @@ const struct grlib_ipcore ahbs_noio = { NULL, NULL, NULL, NULL, ahbs_add };
    it never claims any address.  */
 const struct grlib_ipcore ahbs_no_add = { NULL, NULL, NULL, NULL, NULL };
 
-const uint32 ahbs_full_base = 0x50000000;
-const uint32 ahbs_noio_base = 0x51000000;
-const uint32 ahbs_no_add_base = 0x52000000;
+const uint32 ahbs_full_base = 0x70000000;
+const uint32 ahbs_noio_base = 0x71000000;
+const uint32 ahbs_no_add_base = 0x72000000;
 
 /* Registers the fakes above exactly once for the whole binary.  Idempotent
    by construction: every case below calls it before touching any of the
