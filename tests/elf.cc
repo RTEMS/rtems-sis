@@ -247,6 +247,12 @@ struct elf_fixture
     init_bpt (sregs);
     ms->init_sim ();
     sis_verbose = 0;
+
+    /* reset_all leaves emulated memory alone, so a case that asserts the
+       loader wrote a word would otherwise pass on what an earlier case
+       left at the same address.  */
+    const char zeros[16] = { 0 };
+    ms->sis_memory_write (ERC32_RAM, zeros, sizeof (zeros));
   }
 
   ~elf_fixture ()
