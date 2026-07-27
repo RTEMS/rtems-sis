@@ -121,7 +121,7 @@ read_elf_body ()
 {
   Elf32_Ehdr ehdr = efile.ehdr;
   Elf32_Shdr sh, ssh;
-  Elf32_Phdr ph[16];
+  Elf32_Phdr *ph = NULL;
   char *strtab = NULL;
   char *mem = NULL;
   uint32 *memw, i, j, k, vaddr;
@@ -158,10 +158,21 @@ read_elf_body ()
       goto out;
     }
 
+  /* e_phnum comes from the file and reaches 65535, so a fixed array of
+     sixteen was overrun by a malformed one.  The spare entry keeps the
+     count from reaching calloc as a zero.  */
+  ph = (Elf32_Phdr *) calloc (ehdr.e_phnum + 1, sizeof (Elf32_Phdr));
+  if (ph == NULL)
+    {
+      goto out;
+    }
+
   for (i = 0; i < ehdr.e_phnum; i++)
     {
       fseek (fp, ehdr.e_phoff + (i * ehdr.e_phentsize), SEEK_SET);
-      if (fread (&ph[i], ehdr.e_phentsize, 1, fp) != 1)
+      /* e_phentsize is the file's stride between entries and is no promise
+	 about this buffer, so read only what one header holds.  */
+      if (fread (&ph[i], sizeof (Elf32_Phdr), 1, fp) != 1)
 	{
 	  goto out;
 	}
@@ -243,6 +254,7 @@ read_elf_body ()
 
 out:
   free (mem);
+  free (ph);
   free (strtab);
   return res;
 }

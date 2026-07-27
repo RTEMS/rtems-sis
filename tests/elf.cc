@@ -79,7 +79,7 @@ const size_t SHDR_SIZE = sizeof (Elf32_Shdr);
 bytes
 build_elf (elf_layout *layout, uint16 machine = EM_SPARC,
 	   uint32 entry = ERC32_RAM, unsigned char data = ELFDATA2MSB,
-	   unsigned char cls = ELFCLASS32)
+	   unsigned char cls = ELFCLASS32, uint16 phnum = 1)
 {
   const bool msb = (data == ELFDATA2MSB);
   static const char names[] = "\0.text\0.shstrtab";
@@ -89,7 +89,7 @@ build_elf (elf_layout *layout, uint16 machine = EM_SPARC,
   elf_layout l;
   l.ehdr = 0;
   l.phdr = EHDR_SIZE;
-  l.text_data = l.phdr + PHDR_SIZE;
+  l.text_data = l.phdr + PHDR_SIZE * phnum;
   l.shstrtab_data = l.text_data + text_size;
   l.shdr = l.shstrtab_data + names_size;
   l.sh_text = l.shdr + SHDR_SIZE;
@@ -114,18 +114,25 @@ build_elf (elf_layout *layout, uint16 machine = EM_SPARC,
   put32 (b, offsetof (Elf32_Ehdr, e_shoff), (uint32) l.shdr, msb);
   put16 (b, offsetof (Elf32_Ehdr, e_ehsize), (uint16) EHDR_SIZE, msb);
   put16 (b, offsetof (Elf32_Ehdr, e_phentsize), (uint16) PHDR_SIZE, msb);
-  put16 (b, offsetof (Elf32_Ehdr, e_phnum), 1, msb);
+  put16 (b, offsetof (Elf32_Ehdr, e_phnum), phnum, msb);
   put16 (b, offsetof (Elf32_Ehdr, e_shentsize), (uint16) SHDR_SIZE, msb);
   put16 (b, offsetof (Elf32_Ehdr, e_shnum), 3, msb);
   put16 (b, offsetof (Elf32_Ehdr, e_shstrndx), 2, msb);
 
-  put32 (b, l.phdr + offsetof (Elf32_Phdr, p_type), PT_LOAD, msb);
-  put32 (b, l.phdr + offsetof (Elf32_Phdr, p_offset), (uint32) l.text_data,
-	 msb);
-  put32 (b, l.phdr + offsetof (Elf32_Phdr, p_vaddr), ERC32_RAM, msb);
-  put32 (b, l.phdr + offsetof (Elf32_Phdr, p_paddr), ERC32_RAM, msb);
-  put32 (b, l.phdr + offsetof (Elf32_Phdr, p_filesz), text_size, msb);
-  put32 (b, l.phdr + offsetof (Elf32_Phdr, p_memsz), text_size, msb);
+  /* Every program header describes the same segment, so a file built with
+     more than one is well formed rather than merely long.  */
+  for (uint16 e = 0; e < phnum; e++)
+    {
+      const size_t o = l.phdr + PHDR_SIZE * e;
+
+      put32 (b, o + offsetof (Elf32_Phdr, p_type), PT_LOAD, msb);
+      put32 (b, o + offsetof (Elf32_Phdr, p_offset), (uint32) l.text_data,
+	     msb);
+      put32 (b, o + offsetof (Elf32_Phdr, p_vaddr), ERC32_RAM, msb);
+      put32 (b, o + offsetof (Elf32_Phdr, p_paddr), ERC32_RAM, msb);
+      put32 (b, o + offsetof (Elf32_Phdr, p_filesz), text_size, msb);
+      put32 (b, o + offsetof (Elf32_Phdr, p_memsz), text_size, msb);
+    }
 
   /* Recognisable words, byte swapped by the loader on a little-endian
      host, so the values below are what memory should end up holding.  */
@@ -673,6 +680,32 @@ TEST_CASE_FIXTURE (elf_fixture,
    loader answers with a read error rather than dereferencing null.  The
    size below asks calloc for four gigabytes, which the capped address
    space refuses.  */
+/* e_phnum is a 16-bit field of the file and reaches 65535.  The program
+   headers were read into a fixed array of sixteen on the stack, so a file
+   naming more than that overran it.  Sixty-four well formed headers, all
+   naming the same segment, load exactly as one does.
+
+   Only a sanitized build sees the overrun; on an ordinary build this case
+   passes either way, so it is a guard for that build.  */
+TEST_CASE_FIXTURE (elf_fixture,
+		   "elf_load takes more program headers than a fixed array")
+{
+  elf_layout l;
+  elf_on_disk file (
+      build_elf (&l, EM_SPARC, ERC32_RAM, ELFDATA2MSB, ELFCLASS32, 64));
+
+  std::string text;
+  int res = load (file.name (), 1, &text);
+
+  CHECK (res == (int) ERC32_RAM);
+
+  uint32 word = 0;
+  ms->sis_memory_read (ERC32_RAM, (char *) &word, 4);
+  CHECK (word == 0x01020304);
+  ms->sis_memory_read (ERC32_RAM + 4, (char *) &word, 4);
+  CHECK (word == 0x05060708);
+}
+
 TEST_CASE_FIXTURE (elf_fixture, "elf_load reports a section it cannot buffer")
 {
   elf_layout l;
