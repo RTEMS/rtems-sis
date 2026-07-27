@@ -93,6 +93,11 @@ const uint32 DESC_EN = 1u << 11;
 const uint32 MDIO_WRITE = 1;
 const uint32 MDIO_READ = 2;
 
+/* A broadcast destination address, accepted by greth_rxready independent
+   of the configured MAC (section 53.9.1's RE description).  Shared by
+   several SUBCASEs below.  */
+const unsigned char broadcast_dst[6] = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
+
 /* Offsets on the IRQMP register file, transcribed in tests/irqmp.cc from
    chapter 96 of the same manual.  Used here only as a bystander: greth.cc
    raises an interrupt through the shared grlib_set_irq, and driving IRQMP
@@ -172,6 +177,48 @@ frame_equals (const std::vector<unsigned char> &got, const unsigned char *want,
   return true;
 }
 
+/* Packs four bytes in host (little endian) order, the layout flatmem_poke's
+   plain memcpy leaves in memory.  With arch->bswap == 0 (a RISC-V core, see
+   riscv.cc) greth_tx/greth_rxready index a tx/rx buffer with no XOR at all,
+   so a frame byte at offset i in the wire order sits at the same offset in
+   memory: no reversal to cancel out, unlike be32 above.  */
+uint32
+le32 (unsigned char b0, unsigned char b1, unsigned char b2, unsigned char b3)
+{
+  return (uint32) b0 | ((uint32) b1 << 8) | ((uint32) b2 << 16) |
+	 ((uint32) b3 << 24);
+}
+
+void
+poke_frame_raw (uint32 addr, const unsigned char *bytes, int len)
+{
+  for (int i = 0; i < len; i += 4)
+    {
+      unsigned char b0 = bytes[i];
+      unsigned char b1 = i + 1 < len ? bytes[i + 1] : 0;
+      unsigned char b2 = i + 2 < len ? bytes[i + 2] : 0;
+      unsigned char b3 = i + 3 < len ? bytes[i + 3] : 0;
+
+      sis_tests::flatmem_poke (addr + i, le32 (b0, b1, b2, b3));
+    }
+}
+
+bool
+frame_at_raw (uint32 addr, const unsigned char *bytes, int len)
+{
+  for (int i = 0; i < len; i += 4)
+    {
+      unsigned char b0 = bytes[i];
+      unsigned char b1 = i + 1 < len ? bytes[i + 1] : 0;
+      unsigned char b2 = i + 2 < len ? bytes[i + 2] : 0;
+      unsigned char b3 = i + 3 < len ? bytes[i + 3] : 0;
+
+      if (sis_tests::flatmem_peek (addr + i) != le32 (b0, b1, b2, b3))
+	return false;
+    }
+  return true;
+}
+
 struct greth_fixture : sis_tests::grlib_core_fixture
 {
   int saved_irq;
@@ -244,9 +291,6 @@ TEST_CASE_FIXTURE (greth_fixture, "GRETH")
        broadcast packet below is simply not accepted, which is exactly
        what section 53.9.1's RE description says and lets STAT stay
        untouched by anything but the write below.  */
-    const unsigned char broadcast_dst[6] = {
-      0xff, 0xff, 0xff, 0xff, 0xff, 0xff
-    };
     greth_rxready (const_cast<unsigned char *> (broadcast_dst), 6);
     CHECK (read (STAT) == 0);
 
@@ -345,8 +389,13 @@ TEST_CASE_FIXTURE (greth_fixture, "GRETH")
     CHECK (sis_tests::faketap_init_calls == 1);
     CHECK (sis_tests::faketap_init_mac == 0x000203040506ul);
 
-    /* greth_tx's first firing is 100 clocks after the arm.  */
+    /* greth_tx's first firing is 100 clocks after the arm.  This is also
+       the only send in the file at the default sis_verbose == 0, so it is
+       what pins the "packet transmitted" diagnostic (verbose diagnostics
+       SUBCASE, further down) as verbose-only rather than unconditional.  */
+    sis_tests::stdout_capture cap;
     run (200);
+    CHECK (cap.str ().empty ());
 
     REQUIRE (sis_tests::faketap_writes.size () == 1);
     CHECK (frame_equals (sis_tests::faketap_writes[0].bytes, frame, 18));
@@ -389,6 +438,94 @@ TEST_CASE_FIXTURE (greth_fixture, "GRETH")
     CHECK (sis_tests::faketap_writes.size () == 2);
     CHECK ((read (STAT) & STAT_TI) == 0);
     CHECK (read (TXBASE) == 0x3000);
+
+    /* Section 53.9.1's TE bit gates greth_tx's descriptor walk ahead of
+       whether any descriptor is enabled.  Clear it entirely for one
+       firing: the still-enabled descriptor from above is left completely
+       untouched.  */
+    write (CTRL, CTRL_RE);
+    sis_tests::flatmem_poke (0x3000, DESC_EN | 4);
+    size_t writes_before_te_off = sis_tests::faketap_writes.size ();
+    run (5000);
+    CHECK (sis_tests::faketap_writes.size () == writes_before_te_off);
+    CHECK (read (TXBASE) == 0x3000);
+
+    /* greth_tx only ever gets (re-)armed on the one RE 0->1 transition this
+       whole file can produce (see the file header), so every scenario that
+       needs the polling event to actually fire has to live in this
+       SUBCASE, still riding the event this SUBCASE's own CTRL write
+       armed.  Section 53.3 / the transmit descriptor pointer register:
+       "The pointer will automatically wrap back to zero when the upper
+       boundary has been reached", independent of the WR bit, which only
+       makes the pointer wrap early.  Put the pointer at the 1 kB boundary
+       (0x53f8) on a descriptor with WR clear and CTRL_TI clear, so the
+       wrap comes from reaching the boundary on its own and no interrupt is
+       raised even though the send still completes.  The descriptor still
+       asks for one (DESC_IE set), so it is CTRL_TI, not DESC_IE, holding
+       the interrupt back.  */
+    write (CTRL, CTRL_RE | CTRL_TE);
+    const unsigned char boundary_frame[4] = { 0x10, 0x20, 0x30, 0x40 };
+    write (TXBASE, 0x53f8);
+    sis_tests::flatmem_poke (0x53f8, DESC_EN | DESC_IE | 4);
+    sis_tests::flatmem_poke (0x53fc, 0x5400);
+    poke_frame (0x5400, boundary_frame, 4);
+
+    size_t tx_writes = sis_tests::faketap_writes.size ();
+    run (5000);
+
+    REQUIRE (sis_tests::faketap_writes.size () == tx_writes + 1);
+    CHECK (frame_equals (sis_tests::faketap_writes.back ().bytes,
+			 boundary_frame, 4));
+    CHECK (read (TXBASE) == 0x5000);
+    CHECK (ext_irl[0] == 0);
+
+    /* greth_tx/greth_rxready reach the tx/rx buffer through
+       ptr[arch->bswap ^ i]; the sparc32 fixture arch always takes the
+       XOR-reversal path (bswap == 3).  A RISC-V core has bswap == 0 on a
+       little endian host (riscv.cc), so this drives the same code with
+       the plain, unreversed copy the "current behaviour" name pins:
+       chapter 53 says nothing about host/target endianness, that is a
+       simulator implementation detail.  This also captures the verbose
+       "packet transmitted" diagnostic (also not in chapter 53), which
+       needs a live send the same way.  */
+    arch = &riscv;
+
+    const unsigned char le_frame[4] = { 0xaa, 0xbb, 0xcc, 0xdd };
+    write (CTRL, CTRL_RE | CTRL_TE | CTRL_TI);
+    write (TXBASE, 0x7000);
+    sis_tests::flatmem_poke (0x7000, DESC_EN | DESC_IE | 4);
+    sis_tests::flatmem_poke (0x7004, 0x7100);
+    poke_frame_raw (0x7100, le_frame, 4);
+
+    tx_writes = sis_tests::faketap_writes.size ();
+    {
+      sis_verbose = 2;
+      sis_tests::stdout_capture cap;
+
+      run (5000);
+
+      CHECK (cap.str ().find ("packet transmitted") != std::string::npos);
+      sis_verbose = 0;
+    }
+
+    REQUIRE (sis_tests::faketap_writes.size () == tx_writes + 1);
+    CHECK (
+	frame_equals (sis_tests::faketap_writes.back ().bytes, le_frame, 4));
+
+    arch = &sparc32;
+    sis_verbose = 0;
+
+    /* Section 53.9.1's RST bit replaces the control register with only
+       the speed bit, clearing RE; writing RE again afterwards satisfies
+       the first two conditions of greth_write's arm check (data has RE,
+       greth_ctrl does not) but mac is already nonzero from the transition
+       at the top of this SUBCASE, so this must not call sis_tap_init a
+       second time.  */
+    int init_calls = sis_tests::faketap_init_calls;
+    write (CTRL, CTRL_RS);
+    CHECK (read (CTRL) == CTRL_SP);
+    write (CTRL, CTRL_RE | CTRL_TE);
+    CHECK (sis_tests::faketap_init_calls == init_calls);
   }
 
   SUBCASE ("receive path")
@@ -469,5 +606,145 @@ TEST_CASE_FIXTURE (greth_fixture, "GRETH")
     CHECK ((read (STAT) & STAT_RI) == 0);
     CHECK (sis_tests::flatmem_peek (0x4100) == 0);
     CHECK (read (RXBASE) == 0x4000);
+  }
+
+  SUBCASE ("receive pointer wrap at the fixed boundary without WR, "
+	   "interrupt gating, and the little endian (bswap 0) tap path")
+  {
+    /* CTRL_RE was already latched to one by an earlier SUBCASE's
+       process-wide state (see the file header); this only changes CTRL_RI
+       and leaves RE alone, not a 0->1 transition.  Section 53.4.1, table
+       789's WR field description: "The pointer automatically wraps to
+       zero when the 1 kB boundary of the descriptor table is reached."
+       First pin the plain increment (no WR, not at the boundary) that the
+       earlier receive SUBCASE never exercised, with CTRL_RI clear so an
+       IE descriptor still raises no interrupt.  GRETH_TEST_IRQ is
+       unmasked so a wrongly raised interrupt would actually show up in
+       ext_irl instead of being swallowed by IRQMP's own mask.  */
+    uint32 imask = 1u << GRETH_TEST_IRQ;
+    irqmp.write (IRQMP_IMASK, &imask, 2);
+
+    write (CTRL, CTRL_RE);
+    write (RXBASE, 0x6000);
+    sis_tests::flatmem_poke (0x6000, DESC_EN | DESC_IE);
+    sis_tests::flatmem_poke (0x6004, 0x6100);
+
+    greth_rxready (const_cast<unsigned char *> (broadcast_dst), 6);
+
+    CHECK ((read (STAT) & STAT_RI) != 0);
+    CHECK (ext_irl[0] == 0);
+    CHECK (read (RXBASE) == 0x6008);
+
+    /* Now the boundary case: WR clear, IE clear, CTRL_RI set.  The
+       pointer still wraps on reaching the boundary and no interrupt is
+       raised, this time because the descriptor did not ask for one.  */
+    write (STAT, STAT_RI);
+    write (CTRL, CTRL_RE | CTRL_RI);
+    write (RXBASE, 0x63f8);
+    sis_tests::flatmem_poke (0x63f8, DESC_EN);
+    sis_tests::flatmem_poke (0x63fc, 0x6500);
+
+    greth_rxready (const_cast<unsigned char *> (broadcast_dst), 6);
+
+    CHECK ((read (STAT) & STAT_RI) != 0);
+    CHECK (ext_irl[0] == 0);
+    CHECK (read (RXBASE) == 0x6000);
+
+    /* greth_rxready reaches the rx buffer through ptr[arch->bswap ^ i];
+       the sparc32 fixture arch above always takes the XOR-reversal path
+       (bswap == 3).  A RISC-V core has bswap == 0 on a little endian host
+       (riscv.cc), so this drives the same code with the plain, unreversed
+       copy the "current behaviour" name pins: chapter 53 says nothing
+       about host/target endianness, that is a simulator implementation
+       detail.  */
+    arch = &riscv;
+
+    write (CTRL, CTRL_RE | CTRL_RI);
+    write (RXBASE, 0x7200);
+    sis_tests::flatmem_poke (0x7200, DESC_EN | DESC_IE);
+    sis_tests::flatmem_poke (0x7204, 0x7300);
+    const unsigned char rx_frame[8] = { 0xff, 0xff, 0xff, 0xff,
+					0xff, 0xff, 0x11, 0x22 };
+
+    greth_rxready (const_cast<unsigned char *> (rx_frame), 8);
+
+    CHECK ((read (STAT) & STAT_RI) != 0);
+    CHECK (frame_at_raw (0x7300, rx_frame, 8));
+
+    arch = &sparc32;
+  }
+
+  SUBCASE ("verbose diagnostics")
+  {
+    /* None of the printf calls below are part of chapter 53; this SUBCASE
+       pins today's diagnostic output rather than a documented register
+       effect.  Registers are set up at the default verbosity and only
+       raised around the call whose output a case checks, so a setup write
+       never adds noise to another case's capture.  */
+    {
+      sis_tests::stdout_capture cap;
+
+      write (MDIO, (0x2222u << 16) | (0u << 6) | MDIO_WRITE);
+      write (MDIO, (0u << 6) | MDIO_READ);
+
+      CHECK (cap.str ().empty ());
+    }
+
+    {
+      sis_verbose = 2;
+      sis_tests::stdout_capture cap;
+
+      write (MDIO, (0x1234u << 16) | (0u << 6) | MDIO_WRITE);
+      write (MDIO, (0u << 6) | MDIO_READ);
+
+      std::string out = cap.str ();
+      CHECK (out.find ("MDIO write a:") != std::string::npos);
+      CHECK (out.find ("MDIO read a:") != std::string::npos);
+      sis_verbose = 0;
+    }
+
+    {
+      sis_tests::stdout_capture cap;
+
+      write (MACMSB, 0x0002);
+
+      CHECK (cap.str ().empty ());
+    }
+
+    {
+      sis_verbose = 2;
+      sis_tests::stdout_capture cap;
+
+      write (MACMSB, 0x0001);
+
+      CHECK (cap.str ().find ("APB write a:") != std::string::npos);
+      sis_verbose = 0;
+    }
+
+    write (CTRL, CTRL_RE);
+    write (RXBASE, 0x7400);
+    sis_tests::flatmem_poke (0x7400, 0);
+
+    {
+      sis_tests::stdout_capture cap;
+
+      greth_rxready (const_cast<unsigned char *> (broadcast_dst), 6);
+
+      CHECK (cap.str ().empty ());
+    }
+
+    sis_tests::flatmem_poke (0x7400, 0);
+
+    {
+      sis_verbose = 2;
+      sis_tests::stdout_capture cap;
+
+      greth_rxready (const_cast<unsigned char *> (broadcast_dst), 6);
+
+      std::string out = cap.str ();
+      CHECK (out.find ("net: read 6 bytes from device") != std::string::npos);
+      CHECK (out.find ("net: received packet dropped!") != std::string::npos);
+      sis_verbose = 0;
+    }
   }
 }

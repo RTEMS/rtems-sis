@@ -25,6 +25,13 @@
 #include "config.h"
 #include "grlibcore.h"
 
+/* greth.cc defines this as a plain global with no header of its own, and
+   grlib.cc's greth_add reaches it the same way; see tests/greth.cc.  The
+   declaration has to sit outside the anonymous namespace below, which
+   would otherwise give it internal linkage and make it a different object
+   from the one greth_add writes.  */
+extern int greth_irq;
+
 namespace
 {
 
@@ -115,6 +122,34 @@ fake_add (int irq, uint32 addr, uint32 mask)
 
 const struct grlib_ipcore fake_core = { NULL, fake_reset, fake_read,
 					fake_write, fake_add };
+
+/* A second minimal core, with init set and reset/read/write left NULL: the
+   opposite combination from fake_core above.  apbbus_init/apbbus_reset/
+   apbbus_read/apbbus_write each guard their call to a core's callback
+   behind a null check, and fake_core alone only ever shows one side of
+   each check (init always NULL, reset/read/write always set).  Mounting
+   this alongside fake_core exercises the other side without disturbing
+   the offsets fake_core's own cases rely on, since it goes in a distinct
+   256 byte window.  Device id 0x101, also not a real GAISLER_* id.  */
+
+int fake2_init_calls;
+
+void
+fake2_init (void)
+{
+  fake2_init_calls++;
+}
+
+void
+fake2_add (int irq, uint32 addr, uint32 mask)
+{
+  (void) irq;
+  grlib_apbpp_add (GRLIB_PP_ID (VENDOR_GAISLER, 0x101, 0, 0),
+		   GRLIB_PP_APBADDR (addr, mask));
+}
+
+const struct grlib_ipcore fake_core2 = { fake2_init, NULL, NULL, NULL,
+					 fake2_add };
 
 }
 
@@ -357,4 +392,162 @@ TEST_CASE_FIXTURE (apbmst_fixture,
 
   apbmst2.init ();
   apbmst2.reset ();
+}
+
+/* -------------------------------------------------------------------- */
+/* GRETH / L2C / LEON3 add wrappers                                     */
+/* -------------------------------------------------------------------- */
+
+/* greth_add, l2c_add and leon3_add (grlib.cc) are thin wrappers around a
+   plug&play registration plus a verbose-only identification banner; none
+   of that is part of any core's own register file, so nothing here comes
+   from ref/.  Reusing l2c as the fixture's core is arbitrary: none of
+   these cases touch it, and l2c has no init/reset of its own to run.  */
+struct wrapper_add_fixture : sis_tests::grlib_core_fixture
+{
+  int saved_greth_irq;
+
+  wrapper_add_fixture ()
+      : sis_tests::grlib_core_fixture (&l2c), saved_greth_irq (greth_irq)
+  {
+  }
+
+  ~wrapper_add_fixture () { greth_irq = saved_greth_irq; }
+};
+
+TEST_CASE_FIXTURE (wrapper_add_fixture,
+		   "GRETH/L2C/LEON3 add wrappers are silent by default")
+{
+  sis_tests::stdout_capture cap;
+
+  greth.add (3, 0x80000000, 0xfff);
+  l2c.add (0, 0x80000000, 0xfff);
+  leon3s.add (0, 0, 0);
+
+  CHECK (cap.str ().empty ());
+}
+
+TEST_CASE_FIXTURE (
+    wrapper_add_fixture,
+    "GRETH/L2C/LEON3 add wrappers print an identification banner when verbose")
+{
+  sis_verbose = 1;
+
+  {
+    sis_tests::stdout_capture cap;
+
+    greth.add (3, 0x80000000, 0xfff);
+
+    CHECK (cap.str ().find ("GRETH") != std::string::npos);
+  }
+  /* greth_add's one piece of actual state: the irq a board picked is what
+     grlib_set_irq (reached from greth.cc) later raises.  */
+  CHECK (greth_irq == 3);
+
+  {
+    sis_tests::stdout_capture cap;
+
+    l2c.add (0, 0x80000000, 0xfff);
+
+    CHECK (cap.str ().find ("Level 2 Cache") != std::string::npos);
+  }
+
+  {
+    sis_tests::stdout_capture cap;
+
+    leon3s.add (0, 0, 0);
+
+    CHECK (cap.str ().find ("LEON3") != std::string::npos);
+  }
+}
+
+/* -------------------------------------------------------------------- */
+/* APBMST dispatch to a core with no init/reset/read/write              */
+/* -------------------------------------------------------------------- */
+
+TEST_CASE_FIXTURE (
+    apbmst_fixture,
+    "APBMST init/reset/read/write skip a mounted core's null callbacks")
+{
+  apbmst.add (0, 0x80000000, 0xfff);
+
+  /* A distinct 256 byte window from fake_core's, so this does not disturb
+     the offsets the fake_core cases above rely on.  */
+  int init_calls_before = fake2_init_calls;
+  grlib_apb_add (&fake_core2, 0, 0x80000300, 0xfff);
+
+  apbmst.init ();
+  CHECK (fake2_init_calls == init_calls_before + 1);
+
+  /* fake_core2.reset is NULL; apbmst.reset () also walks fake_core (mounted
+     by earlier cases in this file, if any ran first) or, if this is the
+     first case to mount anything, just fake_core2.  Either way this must
+     not crash on the NULL reset.  */
+  apbmst.reset ();
+
+  /* fake_core2.read is NULL: apbbus_read marks the address matched (so the
+     0xFF000 plug&play fallback below it is not reached) but leaves *data
+     untouched.  */
+  uint32 data = 0xdeadbeef;
+  apbmst.read (0x300, &data);
+  CHECK (data == 0xdeadbeef);
+
+  /* fake_core2.write is NULL: apbbus_write must not crash reaching for a
+     write callback that is not there.  */
+  data = 0x12345678;
+  apbmst.write (0x300, &data, 2);
+
+  /* An address below every mounted core's window (fake_core starts at
+     0x200) fails the range check's own first comparison rather than its
+     second: every other case in this file only ever probes an address
+     past a mounted core's end, never before its start.  */
+  data = 0x55555555;
+  apbmst.read (0x100, &data);
+  CHECK (data == 0x55555555);
+}
+
+TEST_CASE_FIXTURE (apbmst_fixture,
+		   "APBMST verbose diagnostics for the bridge add and the "
+		   "plug-and-play read fallback")
+{
+  /* Neither of these printf calls is part of the APBCTRL chapter (see the
+     file header): it has no register table at all.  Both pin today's
+     diagnostic output.  */
+  {
+    sis_tests::stdout_capture cap;
+
+    apbmst.add (0, 0x80000000, 0xfff);
+
+    CHECK (cap.str ().empty ());
+  }
+
+  {
+    sis_verbose = 1;
+    sis_tests::stdout_capture cap;
+
+    apbmst.add (0, 0x80000000, 0xfff);
+
+    CHECK (cap.str ().find ("AHB/APB Bridge") != std::string::npos);
+    sis_verbose = 0;
+  }
+
+  {
+    sis_tests::stdout_capture cap;
+
+    uint32 data = 0;
+    apbmst.read (0xff000, &data);
+
+    CHECK (cap.str ().empty ());
+  }
+
+  {
+    sis_verbose = 2;
+    sis_tests::stdout_capture cap;
+
+    uint32 data = 0;
+    apbmst.read (0xff000, &data);
+
+    CHECK (cap.str ().find ("APB PP read a:") != std::string::npos);
+    sis_verbose = 0;
+  }
 }

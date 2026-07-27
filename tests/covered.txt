@@ -15,6 +15,7 @@ erc32_mec.h
 erc32_timer.h
 erc32_uart.h
 exec.cc
+greth.cc
 help.cc
 riscv.cc
 sisio.cc
