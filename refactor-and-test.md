@@ -72,7 +72,7 @@ an older total.
 
 | Area | Arcs | Taken |
 |---|---|---|
-| `riscv.cc` | 1106 | 1098 |
+| `riscv.cc` | 1106 | 1106 |
 | `func.cc` | 603 | 30 |
 | `grlib.cc`, `grspw.cc`, `gr1553.cc`, `greth.cc`, `memscrub.cc`, `tap.cc` | 1002 | 0 |
 | `sis.cc`, `remote.cc`, `interf.cc` | 547 | 0 |
@@ -237,12 +237,10 @@ all of the concepts; each test file holds a small `TestEnv` per subsystem.
    before its swap, so a store charges its hold for the sibling register.
    It is timing only, not a wrong result.
 
-   Then `riscv.cc`. At 1098 of 1106 arcs. Same shape as the SPARC core and
-   it reuses the flat memory, which now swaps a sub-word address by
+   Then `riscv.cc`. **100% line and branch**, from 912 arcs when this
+   started, and graduated in `tests/covered.txt`. Same shape as the SPARC
+   core and it reuses the flat memory, which now swaps a sub-word address by
    `arch->bswap` rather than by the host so one window serves both.
-
-   The only arcs left are the eight in `riscv_get_regi` that the missing `p`
-   packet makes dead, below.
 
    Nineteen arcs were the range check gcc emits on a switch whose case set
    already covers every value a masked selector can hold: the compressed
@@ -287,13 +285,14 @@ all of the concepts; each test file holds a small `TestEnv` per subsystem.
      pseudo trap default, and an unreachable all zero word guard in the byte
      load which the compressed decoder already catches.
 
-   One gap found and left alone, because closing it is protocol visible:
-   `remote.cc` handles `g` and `P` but not `p`, so a debugger can **write** a
-   control register through `P` and never read one back. That also makes the
-   control register branch of `riscv_get_regi` unreachable, which is the one
-   thing standing between the register access path and full coverage. Decide
-   whether the `g` packet should carry the control registers before finishing
-   that file.
+   One gap found and closed, protocol visible but additively: `remote.cc`
+   handled `g` and `P` but not `p`, so a debugger could **write** a control
+   register through `P` and never read one back. `p` now answers, through a
+   new `gdb_get_regi` in `cpu_arch`, and a register the target does not have
+   replies empty so a session which never sends `p` is unchanged. Widening
+   the `g` packet was the alternative and was not taken, since its layout is
+   what gdb already agrees with. Verified against a socket, not only through
+   the vtable: `P` writing `mstatus` and `p` reading back the masked value.
    Its decoder has been through the exhaustive switch restructure already,
    and it is worth knowing that **it bought no speed there**: the RISC-V
    fields are masked to their width at extraction, so the compiler already
