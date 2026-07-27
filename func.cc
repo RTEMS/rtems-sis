@@ -750,6 +750,11 @@ init_bpt (struct pstate *sregs)
   for (i = 0; i < ncpu; i++)
     {
       sregs[i].histind = 0;
+      /* Dropping the pointer without this leaks the buffer the 'hist'
+	 command allocated.  That command frees before it reallocates, so
+	 the buffer is owned here too.  A null pointer is the usual case and
+	 free takes it.  */
+      free (sregs[i].histbuf);
       sregs[i].histbuf = NULL;
     }
   ebase.tlimit = 0;
