@@ -1084,6 +1084,37 @@ TEST_CASE_FIXTURE (remote_fixture, "'P' writes one register")
   CHECK (sregs[0].g[1] == 0x12345678);
 }
 
+TEST_CASE_FIXTURE (remote_fixture, "'p' reads one register")
+{
+  /* "Packets", 'p n...': read register n and answer with its value in
+     target byte order.  SPARC is big endian, so the digits come most
+     significant first.  Register 1 is %g1.  */
+  std::string reply;
+  {
+    gdb_session session;
+    sregs[0].g[1] = 0xdeadbeef;
+    reply = session.request (pkt ("p1"));
+    session.finish ();
+  }
+
+  CHECK (body_of (reply) == "deadbeef");
+}
+
+TEST_CASE_FIXTURE (remote_fixture, "'p' answers an unknown register empty")
+{
+  /* "Packets": a register the stub does not have is answered with the
+     empty packet, which is what gdb_get_regi reports by returning a
+     length of zero.  SPARC has 72 of them, so 99 has none.  */
+  std::string reply;
+  {
+    gdb_session session;
+    reply = session.request (pkt ("p99"));
+    session.finish ();
+  }
+
+  CHECK (body_of (reply) == "");
+}
+
 TEST_CASE_FIXTURE (remote_fixture, "'P' takes a RISC-V value little endian")
 {
   /* Same packet, but RV32 is little endian, so the least significant byte

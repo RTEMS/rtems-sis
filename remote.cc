@@ -335,12 +335,7 @@ gdb_remote_exec (char *buf)
       break;
     case 'p': /* read one register */
       i = 1;
-      addr = 0;
-      while (buf[i] && (buf[i] != '#'))
-	{
-	  addr = (addr << 4) | hex (buf[i]);
-	  i++;
-	}
+      addr = gethex (buf, &i);
       len = arch->gdb_get_regi (&sregs[cpu], addr, membuf);
 
       /* An empty reply is how the protocol says a register is not there.
