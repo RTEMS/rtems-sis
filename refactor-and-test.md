@@ -72,7 +72,7 @@ an older total.
 
 | Area | Arcs | Taken |
 |---|---|---|
-| `riscv.cc` | 1125 | 1100 |
+| `riscv.cc` | 1106 | 1098 |
 | `func.cc` | 603 | 30 |
 | `grlib.cc`, `grspw.cc`, `gr1553.cc`, `greth.cc`, `memscrub.cc`, `tap.cc` | 1002 | 0 |
 | `sis.cc`, `remote.cc`, `interf.cc` | 547 | 0 |
@@ -237,34 +237,30 @@ all of the concepts; each test file holds a small `TestEnv` per subsystem.
    before its swap, so a store charges its hold for the sibling register.
    It is timing only, not a wrong result.
 
-   Then `riscv.cc`. **In progress**, at 1100 of 1125 arcs. Same shape as the
-   SPARC core and it reuses the flat memory, which now swaps a sub-word
-   address by `arch->bswap` rather than by the host so one window serves
-   both.
+   Then `riscv.cc`. At 1098 of 1106 arcs. Same shape as the SPARC core and
+   it reuses the flat memory, which now swaps a sub-word address by
+   `arch->bswap` rather than by the host so one window serves both.
 
-   What is left is 25 arcs of two kinds, and no more of it is reachable from
-   a test.
-
-   Seventeen are the range check gcc emits on a switch whose selector is
-   masked to the width of its case set, so no value can miss: the compressed
-   quadrant and its three function fields, the two bit operation field of
-   the compressed arithmetic group, the eight function codes of the M
-   extension, the rounding mode field, and the classification a host
-   `fpclassify` returns. Rule 6 closes each of them, and closing all of them
-   measured **5% slower** on `grv32imac/crypt01` (65.9 s to 68.9 s over
-   three runs each). The cost does not follow the change: reverting the
-   whole executor half left the time at 69 s, and adding a comment and one
-   never taken branch to the disassembler alone moved an otherwise
-   unmodified tree from 65.9 s to 67.2 s. So `riscv.cc` is layout sensitive
-   at the 2% level and the rest is unattributed. The restructuring is
-   reverted and the arcs are left open, since performance not regressing
-   outranks the gate. **Open decision:** whether to mark them with gcovr's
-   `GCOVR_EXCL_BR_LINE`, which states the invariant in the source and costs
-   no codegen. No file uses an exclusion marker yet, so adopting one is a
-   project convention to settle first.
-
-   The other eight are the branches of `riscv_get_regi` that the missing `p`
+   The only arcs left are the eight in `riscv_get_regi` that the missing `p`
    packet makes dead, below.
+
+   Nineteen arcs were the range check gcc emits on a switch whose case set
+   already covers every value a masked selector can hold: the compressed
+   quadrant and its three function fields, the two bit operation field of the
+   compressed arithmetic group, the eight function codes of the M extension,
+   the rounding mode field, the class a host `fpclassify` returns, and the
+   format test each conversion case sat under after its group had already
+   selected that format. Rule 6 closes them, with the commonest case chosen
+   from the case counts six RTEMS binaries produce rather than guessed.
+
+   **Measure a change to this file by interleaving the two binaries, never by
+   timing one build and then the other.** Timing the restructured tree in one
+   block and the base in another made it look 5% slower on `crypt01`, and the
+   reading survived three runs each, so it looked solid. Building both to
+   fixed paths and alternating `base, new, base, new` showed no difference at
+   all (65.0 s against 64.8 s median). The host drifts by more than the effect
+   over the minutes a rebuild takes, and a sequential A/B attributes that
+   drift to the change.
 
    Eight bugs so far, each confirmed against `ref/` before the test:
 
