@@ -72,10 +72,12 @@ struct grlib_core_fixture
 
     /* A board calls init once and reset on every power cycle.  Some cores
        compute a decode mask in init that reset does not, so a case which
-       skipped it would drive a core whose registers read back as zero.  */
+       skipped it would drive a core whose registers read back as zero.
+       A core with no state to clear, such as l2c, leaves reset NULL.  */
     if (core->init)
       core->init ();
-    core->reset ();
+    if (core->reset)
+      core->reset ();
   }
 
   ~grlib_core_fixture ()
