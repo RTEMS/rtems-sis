@@ -391,25 +391,18 @@ TEST_CASE_FIXTURE (leon2_regs_fixture,
   CHECK (ext_irl[0] == 1);
 }
 
-TEST_CASE_FIXTURE (
-    leon2_regs_fixture,
-    "LEON2 (current behaviour, contradicts spec 7.2.1) interrupt 15 can "
-    "never reach the IU through the mask register")
+TEST_CASE_FIXTURE (leon2_regs_fixture,
+		   "spec (figure 8) the mask register carries interrupt 15")
 {
-  /* Figure 8 documents IMASK as bits [15:1], and 7.2.1 states "interrupt
-     15 cannot be maskable by the integer unit".  leon2.cc's IRQCTRL_IMR
-     write instead masks to 0x7ffe (bits 14:1), dropping bit 15, so
-     irqctrl_imr can never have its own bit 15 set; chk_irq's
-     "(ipr|ifr) & imr" then always clears bit 15 out of itmp regardless of
-     what ipr or ifr hold.  The code's actual effect is the opposite of
-     what the manual promises: level 15 is permanently masked rather than
-     permanently unmaskable.  Flagged as a suspected defect in the final
-     report; not fixed here.  */
+  /* Figure 8 puts the interrupt mask in bits 15 to 1.  The write used to
+     keep only bits 14 to 1, so bit 15 could never be set and chk_irq's
+     "(ipr|ifr) & imr" cleared the highest interrupt out of every request,
+     whatever the pending and forced registers held.  */
   leon2_wr (R_IRQCTRL_IMR, 0xffff); /* every bit, including 15 */
-  CHECK (leon2_rd (R_IRQCTRL_IMR) == 0x7ffe);
+  CHECK (leon2_rd (R_IRQCTRL_IMR) == 0xfffe);
 
   leon2_wr (R_IRQCTRL_IFR, 1u << 15);
-  CHECK (ext_irl[0] == 0); /* the manual would have this reach the IU */
+  CHECK (ext_irl[0] == 15);
 }
 
 TEST_CASE_FIXTURE (leon2_regs_fixture,
@@ -431,17 +424,16 @@ TEST_CASE_FIXTURE (leon2_regs_fixture,
 }
 
 TEST_CASE_FIXTURE (leon2_regs_fixture,
-		   "LEON2 (current behaviour) reserved IFR/IMR/ICR bit 0 "
+		   "spec (figures 8 to 11) reserved IFR/IMR/ICR bit 0 "
 		   "is dropped on every write")
 {
-  /* Figure 9/10/11 reserve bit 0; the code enforces that by masking every
-     write to these three registers with 0x...e (IMR: 0x7ffe, IFR/ICR:
-     0xfffe/0x0fffe).  */
+  /* Bit 0 is reserved in all four registers and there is no interrupt
+     zero, so every write drops it and keeps bits 15 to 1.  */
   leon2_wr (R_IRQCTRL_IFR, 0xffffffffu);
   CHECK (leon2_rd (R_IRQCTRL_IFR) == 0xfffe);
 
   leon2_wr (R_IRQCTRL_IMR, 0xffffffffu);
-  CHECK (leon2_rd (R_IRQCTRL_IMR) == 0x7ffe);
+  CHECK (leon2_rd (R_IRQCTRL_IMR) == 0xfffe);
 }
 
 TEST_CASE_FIXTURE (leon2_regs_fixture,

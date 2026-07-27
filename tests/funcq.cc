@@ -769,15 +769,16 @@ TEST_CASE_FIXTURE (func_fixture, "'cpu n' selects the active cpu")
   cpu = 0; /* back in range before the fixture touches sregs[cpu] again */
 }
 
-TEST_CASE_FIXTURE (
-    func_fixture,
-    "'cpu' above NCPU clamps to NCPU, one past the last valid index "
-    "(suspected defect: sregs[] only has NCPU entries, 0..NCPU-1)")
+TEST_CASE_FIXTURE (func_fixture,
+		   "'cpu' above the last cpu clamps to the last one")
 {
+  /* sregs[] holds NCPU of them, so the highest index a command may leave
+     behind is NCPU - 1.  Clamping to NCPU itself named a register block
+     one past the end which every later command then indexed.  */
   exec_cmd ("cpu 99");
 
-  CHECK (cpu == NCPU);
-  cpu = 0; /* back in range: NCPU itself is out of bounds for sregs[] */
+  CHECK (cpu == NCPU - 1);
+  cpu = 0;
 }
 
 TEST_CASE_FIXTURE (func_fixture,
@@ -936,18 +937,24 @@ TEST_CASE_FIXTURE (func_fixture, "'wmem'/'mem' round-trip a word")
   CHECK (daddr == 0x40 + 16);
 }
 
-TEST_CASE_FIXTURE (func_fixture,
-		   "'wmem' with neither address nor data argument "
-		   "changes daddr not at all (current behaviour, "
-		   "undocumented for this case: the write still happens, "
-		   "with an unspecified value, since there is no argument "
-		   "count check before the write)")
+TEST_CASE_FIXTURE (func_fixture, "'wmem' with no data argument writes nothing")
 {
+  /* The value written used to be whatever the local held, so a bare wmem
+     put an uninitialised word into memory at the last address displayed.  */
   daddr = 0x44;
+  ms->sis_memory_write (daddr, (char *) "\xaa\xaa\xaa\xaa", 4);
 
   exec_cmd ("wmem");
 
+  uint32 word = 0;
+  ms->sis_memory_read (daddr, (char *) &word, 4);
   CHECK (daddr == 0x44);
+  CHECK (word == 0xaaaaaaaa);
+
+  /* An address on its own names where a later write goes, and still
+     writes nothing by itself.  */
+  exec_cmd ("wmem 0x48");
+  CHECK (daddr == 0x48);
 }
 
 TEST_CASE_FIXTURE (func_fixture, "'mem' with no argument continues from "

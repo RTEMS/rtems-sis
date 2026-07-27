@@ -389,8 +389,10 @@ exec_cmd (const char *cmd)
 	  if ((cmd1 = strtok (NULL, " \t\n\r")) != NULL)
 	    {
 	      cpu = VAL (cmd1);
-	      if (cpu > NCPU)
-		cpu = NCPU;
+	      /* sregs[] holds NCPU of them, so NCPU itself is one past the
+		 last, and everything downstream indexes with this.  */
+	      if (cpu >= NCPU)
+		cpu = NCPU - 1;
 	    }
 	  printf ("active cpu: %d\n", cpu);
 	}
@@ -408,9 +410,14 @@ exec_cmd (const char *cmd)
 	{
 	  if ((cmd1 = strtok (NULL, " \t\n\r")) != NULL)
 	    daddr = VAL (cmd1);
+	  /* Write only what the command carried.  Writing whatever the
+	     local happened to hold put an uninitialised word into the
+	     emulated memory when the data argument was left out.  */
 	  if ((cmd2 = strtok (NULL, " \t\n\r")) != NULL)
-	    len = VAL (cmd2);
-	  ms->sis_memory_write (daddr, (char *) &len, 4);
+	    {
+	      len = VAL (cmd2);
+	      ms->sis_memory_write (daddr, (char *) &len, 4);
+	    }
 	}
       else if (strncmp (cmd1, "perf", clen) == 0)
 	{

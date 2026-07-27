@@ -368,7 +368,9 @@ apb_write (uint32 addr, uint32 data)
       break;
 
     case IRQCTRL_IMR: /* 0x240 */
-      irqctrl_imr = data & 0x7ffe;
+      /* Figure 8 puts the mask in bits 15 to 1, so keeping only 14 to 1
+	 left the highest interrupt with no way to be enabled at all.  */
+      irqctrl_imr = data & 0xfffe;
       chk_irq ();
       break;
 
