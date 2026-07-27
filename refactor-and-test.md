@@ -500,6 +500,23 @@ all of the concepts; each test file holds a small `TestEnv` per subsystem.
    file pointer for null after having already read through it, and
    `elf_load` only calls it when `fopen` succeeded.
 
+   **The mutation audit found three unasserted lines**, two of them in
+   `tests/leon.cc` and one order dependence in `tests/elf.cc`, all fixed
+   here. `reset_all` leaves emulated memory alone, so the cases asserting
+   the loader wrote a word were passing on what an earlier case had left
+   at the same address; the fixture zeroes it now. Nothing checked that a
+   LEON2 APB access reports no memory exception and no waitstate, nor
+   what waitstate count `store_bytes` reports, so faulting every APB
+   access and charging seven waitstates on every store both changed
+   nothing any case could see. Do this pass before claiming a file.
+
+   One survivor is left and is honest. Breaking the test that reads the
+   section name table header survives, because a garbage header reaches
+   the allocation and the read below, which reject the file for their own
+   reasons and produce the same `File read error`. The guard is covered
+   and the case does assert the rejection; the failure simply cannot be
+   told apart from the one downstream.
+
    **Two defects are reported and left unfixed.** `read_elf_body` reads
    `e_phnum` program headers into `Elf32_Phdr ph[16]` with no bound, so a
    file naming more than sixteen overflows a stack array. No case pins
@@ -880,6 +897,14 @@ Hard-won here, so the next person does not rediscover them.
   the `-c` overflow presented. When a case that forks fails on a sanitized
   build and the parent log is clean, run the `sis` binary directly with the
   same arguments.
+
+- **An allocation failure is testable, so do not write it off.** Two
+  arcs of `elf.cc` were allocation failure returns, the shape this file
+  lists as a legitimate gap. `RLIMIT_AS`, set just above what the
+  process already maps and restored on the way out, makes one huge
+  allocation fail while every ordinary one still succeeds.
+  `tests/elf.cc`'s `address_space_cap` is the helper; copy it rather
+  than documenting the next such arc as unreachable.
 
 - **A test may not name a fixed path under `/tmp`.** Three cases in
   `tests/funcq.cc` wrote to one, and when several builds of the suite ran at
