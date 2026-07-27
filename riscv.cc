@@ -2496,6 +2496,13 @@ riscv_disas (char *st, uint32 pc, uint32 inst)
   unsigned char op, funct3, funct5, rs1p, rs2p, funct2, frs1, frs2, frd;
   int64 sop64a, sop64b;
   uint64 op64a, op64b;
+  /* Sized from the worst case, not from the widest possible sprintf
+     argument: rtbl and ftbl hold register names of at most 4 characters
+     though the arrays are declared 8 wide, and ctbl returns a control
+     register name of at most 8.  The longest opc is "fcvt.wu.s" at 9, the
+     longest param is the four operand fused multiply list at 21 or a
+     branch's "rs1,rs2,0x########" at 20, and the longest stmp is
+     ",0x########" at 11.  */
   char opc[16], param[32], stmp[16];
 
   strcpy (opc, "unimp");
@@ -2593,7 +2600,7 @@ riscv_disas (char *st, uint32 pc, uint32 inst)
 		{
 		  sop2 = EXTRACT_RVC_ADDI16SP_IMM (inst);
 		  strcpy (opc, "addi");
-		  sprintf (param, "%s,%s,%d", rtbl[rs1], rtbl[rs1], sop2);
+		  sprintf (param, "%s,%s,%d", rtbl[2], rtbl[2], sop2);
 		}
 	      else
 		{ /* CLUI:  lui rd, nzuimm[17:12 */
@@ -3348,8 +3355,8 @@ riscv_disas (char *st, uint32 pc, uint32 inst)
 	    }
 	  break;
 	case OP_FMADD:
-	  sprintf (param, "%s,%s, %s, %s", ftbl[rd], ftbl[rs1], ftbl[rs2],
-		   ftbl[inst >> 27]);
+	  snprintf (param, sizeof (param), "%s,%s, %s, %s", ftbl[rd],
+		    ftbl[rs1], ftbl[rs2], ftbl[inst >> 27]);
 	  switch ((inst >> 25) & 3)
 	    {
 	    case 0: /* OP_FMADDS */
@@ -3361,8 +3368,8 @@ riscv_disas (char *st, uint32 pc, uint32 inst)
 	    }
 	  break;
 	case OP_FMSUB:
-	  sprintf (param, "%s,%s, %s, %s", ftbl[rd], ftbl[rs1], ftbl[rs2],
-		   ftbl[inst >> 27]);
+	  snprintf (param, sizeof (param), "%s,%s, %s, %s", ftbl[rd],
+		    ftbl[rs1], ftbl[rs2], ftbl[inst >> 27]);
 	  switch ((inst >> 25) & 3)
 	    {
 	    case 0: /* OP_FMSUBS */
@@ -3374,8 +3381,8 @@ riscv_disas (char *st, uint32 pc, uint32 inst)
 	    }
 	  break;
 	case OP_FNMSUB:
-	  sprintf (param, "%s,%s, %s, %s", ftbl[rd], ftbl[rs1], ftbl[rs2],
-		   ftbl[inst >> 27]);
+	  snprintf (param, sizeof (param), "%s,%s, %s, %s", ftbl[rd],
+		    ftbl[rs1], ftbl[rs2], ftbl[inst >> 27]);
 	  switch ((inst >> 25) & 3)
 	    {
 	    case 0: /* OP_FNMSUBS */
@@ -3387,8 +3394,8 @@ riscv_disas (char *st, uint32 pc, uint32 inst)
 	    }
 	  break;
 	case OP_FNMADD:
-	  sprintf (param, "%s,%s, %s, %s", ftbl[rd], ftbl[rs1], ftbl[rs2],
-		   ftbl[inst >> 27]);
+	  snprintf (param, sizeof (param), "%s,%s, %s, %s", ftbl[rd],
+		    ftbl[rs1], ftbl[rs2], ftbl[inst >> 27]);
 	  switch ((inst >> 25) & 3)
 	    {
 	    case 0: /* OP_FNMADDS */
