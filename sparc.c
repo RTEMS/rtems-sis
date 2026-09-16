@@ -1657,14 +1657,20 @@ sparc_get_accex ()
   return accx;
 }
 
+static int isnansd(double *d)
+{
+  return(isnan(*d) && (!(((*(unsigned long int *) d) >> 51) & 1)));
+}
+
 static int
 fpexec (op3, rd, rs1, rs2, sregs)
      uint32 op3, rd, rs1, rs2;
      struct pstate *sregs;
 {
   uint32 opf, tem, accex;
-  int32 fcc;
+  int32 fcc = 0;
   uint32 ldadj;
+  int fcmpexc = 0;
 
   if (sregs->fpstate == FP_EXC_MODE)
     {
@@ -1758,11 +1764,14 @@ fpexec (op3, rd, rs1, rs2, sregs)
       sregs->fsr &= ~(fcc << 10);
       sregs->ftime += T_FCMPs;
       sregs->frd = 32;		/* rd ignored */
-      if ((fcc == 0) && (opf == FCMPEs))
-	{
-	  sregs->fpstate = FP_EXC_PE;
-	  sregs->fsr = (sregs->fsr & ~0x1C000) | (1 << 14);
-	}
+      if (fcc == 0) {
+        if (opf == FCMPs) {
+          if (!((isnan(sregs->fs[rs1]) && !((sregs->fsi[rs1] >> 22) & 1)) ||
+            (isnan(sregs->fs[rs2]) && !((sregs->fsi[rs2] >> 22) & 1))))
+            clear_accex (); // nv exception only on signaling NaN
+        } else
+          fcmpexc = 0x10;
+      }
       break;
     case FCMPd:
     case FCMPEd:
@@ -1778,11 +1787,14 @@ fpexec (op3, rd, rs1, rs2, sregs)
       sregs->fsr &= ~(fcc << 10);
       sregs->ftime += T_FCMPd;
       sregs->frd = 32;		/* rd ignored */
-      if ((fcc == 0) && (opf == FCMPEd))
-	{
-	  sregs->fpstate = FP_EXC_PE;
-	  sregs->fsr = (sregs->fsr & ~FSR_TT) | FP_IEEE;
-	}
+      if (fcc == 0) {
+        if (opf == FCMPd) {
+          if (!((isnan(sregs->fd[rs1>>1]) && !((sregs->fsi[rs1] >> 19) & 1)) ||
+            (isnan(sregs->fd[rs2>>1]) && !((sregs->fsi[rs2] >> 19) & 1))))
+          clear_accex (); // nv exception only on signaling NaN
+        } else
+          fcmpexc = 0x10;
+      }
       break;
     case FDIVs:
       sregs->fs[rd] = sregs->fs[rs1] / sregs->fs[rs2];
@@ -1857,6 +1869,8 @@ fpexec (op3, rd, rs1, rs2, sregs)
       break;
     case FdTOi:
       sregs->fsi[rd] = (int) sregs->fd[rs2 >> 1];
+      if ((sregs->fsi[rd] == 0x80000000) && (sregs->fd[rs2 >> 1] > 0))
+        sregs->fsi[rd] = 0x7FFFFFFF; /* return max int on positive overflow */
       sregs->ftime += T_FdTOi;
       sregs->frs1 = 32;		/* rs1 ignored */
       break;
@@ -1877,6 +1891,8 @@ fpexec (op3, rd, rs1, rs2, sregs)
       break;
     case FsTOi:
       sregs->fsi[rd] = (int) sregs->fs[rs2];
+      if ((sregs->fsi[rd] == 0x80000000) && !(sregs->fsi[rs2] >> 31))
+        sregs->fsi[rd] = 0x7FFFFFFF; /* return max int on positive overflow */
       sregs->ftime += T_FsTOi;
       sregs->frs1 = 32;		/* rs1 ignored */
       break;
@@ -1902,7 +1918,7 @@ fpexec (op3, rd, rs1, rs2, sregs)
     }
 #endif
 
-  accex = sparc_get_accex ();
+  accex = sparc_get_accex () | fcmpexc;
 
   if (sregs->fpstate == FP_EXC_PE)
     {
