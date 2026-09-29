@@ -2540,7 +2540,7 @@ riscv_disas (char *st, uint32 pc, uint32 inst)
 		{
 		  sop2 = EXTRACT_RVC_ADDI16SP_IMM (inst);
 		  strcpy (opc, "addi");
-		  sprintf (param, "%s,%s,%d", rtbl[rs1], rtbl[rs1], sop2);
+		  sprintf (param, "sp,sp,%d", sop2);
 		}
 	      else
 		{		/* CLUI:  lui rd, nzuimm[17:12 */
