@@ -93,9 +93,7 @@ static void symprint ();
 static uint32 symtoaddr (char *s);
 
 static int
-batch (sregs, fname)
-     struct pstate *sregs;
-     char *fname;
+batch ( struct pstate *sregs, char *fname)
 {
   FILE *fp;
   char *lbuf = NULL;
@@ -123,8 +121,7 @@ batch (sregs, fname)
 }
 
 static uint64
-limcalc (freq)
-     float32 freq;
+limcalc (float32 freq)
 {
   uint64 unit, lim;
   double flim;
@@ -653,8 +650,7 @@ exec_cmd (const char *cmd)
 
 
 void
-reset_stat (sregs)
-     struct pstate *sregs;
+reset_stat (struct pstate *sregs)
 {
   ebase.tottime = 0.0;
   sregs->pwdtime = 0;
@@ -673,8 +669,7 @@ reset_stat (sregs)
 }
 
 void
-show_stat (sregs)
-     struct pstate *sregs;
+show_stat (struct pstate *sregs)
 {
   uint64 iinst, ninst, pwdtime;
   uint64 stime, atime;
@@ -770,8 +765,7 @@ show_stat (sregs)
 
 
 void
-init_bpt (sregs)
-     struct pstate *sregs;
+init_bpt (struct pstate *sregs)
 {
   int i;
 
@@ -846,8 +840,8 @@ int_handler (int sig)
 void
 init_signals ()
 {
-  typedef void (*PFI) (int);
-  static PFI int_tab[2];
+  typedef void (*sighandler_t)(int);
+  static sighandler_t int_tab[2];
 
   int_tab[0] = signal (SIGTERM, int_handler);
   int_tab[1] = signal (SIGINT, int_handler);
@@ -864,9 +858,7 @@ print_insn_sis (uint32 addr)
 }
 
 static void
-disp_mem (addr, len)
-     uint32 addr;
-     uint32 len;
+disp_mem (uint32 addr, uint32 len)
 {
 
   uint32 i;
@@ -901,9 +893,7 @@ disp_mem (addr, len)
 }
 
 uint32
-dis_mem (addr, len)
-     uint32 addr;
-     uint32 len;
+dis_mem (uint32 addr, uint32 len)
 {
   uint32 i, data;
 
@@ -932,10 +922,7 @@ dis_mem (addr, len)
 /* Add event to event queue */
 
 void
-event (cfunc, arg, delta)
-     void (*cfunc) (int32);
-     int32 arg;
-     uint64 delta;
+event (void (*cfunc) (int32), int32 arg, uint64 delta)
 {
   struct evcell *ev1, *evins;
 
@@ -971,9 +958,7 @@ event (cfunc, arg, delta)
 
 /* remove event from event queue */
 void
-remove_event (cfunc, arg)
-     void (*cfunc) (int32);
-     int32 arg;
+remove_event (void (*cfunc) (int32), int32 arg)
 {
   struct evcell *ev1, *evdel;
 
@@ -1017,8 +1002,7 @@ init_event ()
 /* Advance simulator time */
 
 void
-advance_time (endtime)
-     uint64 endtime;
+advance_time (uint64 endtime)
 {
 
   struct evcell *evrem;
@@ -1073,8 +1057,7 @@ rt_sync ()
 }
 
 int
-check_bpt (sregs)
-     struct pstate *sregs;
+check_bpt (struct pstate *sregs)
 {
   int32 i;
 
@@ -1155,10 +1138,7 @@ sys_halt ()
 /* simulate one core instruction-wise */
 
 static int
-run_sim_un (sregs, icount, dis)
-     struct pstate *sregs;
-     uint64 icount;
-     int dis;
+run_sim_un (struct pstate *sregs, uint64 icount, int dis)
 {
   int irq, mexc, deb;
   uint32 *inst;
@@ -1287,11 +1267,7 @@ sim_timeout (int32 arg)
 /* simulate one core time-wise */
 
 static void
-run_sim_core (sregs, ntime, deb, dis)
-     struct pstate *sregs;
-     uint64 ntime;
-     int deb;
-     int dis;
+run_sim_core (struct pstate *sregs, uint64 ntime, int deb, int dis)
 {
   int mexc, irq;
   mexc = irq = 0;
@@ -1405,9 +1381,7 @@ run_sim_core (sregs, ntime, deb, dis)
 /* time slice simulation of cpu cores in MP system */
 
 static int
-run_sim_mp (icount, dis)
-     uint64 icount;
-     int dis;
+run_sim_mp (uint64 icount, int dis)
 {
   uint64 ntime, etime;
   int deb, i, j;
@@ -1467,9 +1441,7 @@ run_sim_mp (icount, dis)
 }
 
 int
-run_sim (icount, dis)
-     uint64 icount;
-     int dis;
+run_sim (uint64 icount, int dis)
 {
   int res;
 
