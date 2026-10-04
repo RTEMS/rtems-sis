@@ -158,7 +158,7 @@ get_csr (uint32 address, struct pstate *sregs)
       return (sregs->mtval);
       break;
     case CSR_MISA:
-      return (0x40000100);
+      return (0x4000112D);  /* RV32 with IMACFD extensions */
       break;
     case CSR_TIME:
       return (sregs->simtime & 0xffffffff);
@@ -1381,7 +1381,7 @@ riscv_dispatch_instruction (struct pstate *sregs)
 		      sregs->bphit = 1;
 		    }
 		  else
-		    sregs->trap = TRAP_EBREAK;
+		    sregs->trap = ERROR_TRAP;
 		  break;
 		case 2:	/* xret */
 		  npc = sregs->epc;
@@ -2057,6 +2057,7 @@ riscv_execute_trap (struct pstate *sregs)
 	  sregs->err_mode = 1;
 	case TRAP_EBREAK:
 	  sregs->mtval = sregs->epc;
+	  sregs->err_mode = 1;
 	  break;
 	case TRAP_ILLEG:
 	  sregs->mtval = sregs->inst;
