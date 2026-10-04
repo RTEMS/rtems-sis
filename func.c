@@ -292,13 +292,17 @@ exec_cmd (const char *cmd)
 	    {
 	      len = VAL (cmd1);
 	    }
+	  if (ebase.simtime == 0)
+	    {
+	      reset_all ();
+	      reset_stat (sregs);
+	      ms->boot_init ();
+	    }
 	  for (i = 0; i < ncpu; i++)
 	    {
 	      sregs[i].pc = len & ~1;
 	      sregs[i].npc = sregs->pc + 4;
 	    }
-	  if (ebase.simtime == 0)
-	    ms->boot_init ();
 	  printf ("resuming at 0x%08x\n", sregs->pc);
 	  if ((cmd2 = strtok (NULL, " \t\n\r")) != NULL)
 	    {
@@ -514,6 +518,12 @@ exec_cmd (const char *cmd)
 	    {
 	      len = VAL (cmd1);
 	      ebase.tlimit = limcalc (ebase.freq);
+	    }
+	  if (ebase.simtime == 0)
+	    {
+	      reset_all ();
+	      reset_stat (sregs);
+	      ms->boot_init ();
 	    }
 	  sregs->pc = len & ~1;
 	  sregs->npc = sregs->pc + 4;
