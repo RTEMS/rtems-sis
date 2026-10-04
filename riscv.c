@@ -2197,10 +2197,10 @@ riscv_gdb_get_reg (char *buf)
 {
   int i;
 
-  for (i = 0; i < 65; i++)
+  for (i = 0; i < 33; i++)
     riscv_get_regi (&sregs[cpu], i, &buf[i * 4], 4);
 
-  return (65 * 4);
+  return (33 * 4);
 }
 
 static void
