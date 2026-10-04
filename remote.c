@@ -311,7 +311,7 @@ gdb_remote_exec (char *buf)
       i++;
       while (buf[i] && (buf[i] != '#'))
 	{
-	  if (cputype == CPU_RISCV)
+	  if (archtype == CPU_RISCV)
 	    {
 	      j = hex (buf[i++]);
 	      j <<= 4;
